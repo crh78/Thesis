@@ -1,0 +1,20 @@
+{
+  "name": "@thesis/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "chat": "node --env-file-if-exists=../../apps/imessage/.env src/cli.ts"
+  },
+  "dependencies": {
+    "openai": "7.50.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@thesis/executor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "asset-bank": "node src/asset-bank.ts",
+    "settler": "node src/settler.ts",
+    "marker": "node src/marker.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "@thesis/chain": "workspace:*",
+    "@thesis/take-builder": "workspace:*",
+    "@thesis/venues": "workspace:*",
+    "bn.js": "^5.2.1"
+  },
+  "exports": {
+    "./settler": "./src/settler/index.ts"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.2.0",
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  }
+}

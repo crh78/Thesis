@@ -1,0 +1,38 @@
+{
+  "name": "thesis",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "badges:render": "swift infra/badges/render.swift",
+    "badges:upload": "node infra/badges/upload.ts",
+    "fork:up": "node scripts/fork/up.ts",
+    "fork:fund": "node scripts/fork/fund.ts",
+    "fork:status": "node scripts/fork/status.ts",
+    "fork:scores-check": "node scripts/fork/scores-check.ts",
+    "fork:down": "node scripts/fork/down.ts",
+    "fork:smoke": "node scripts/fork/smoke.ts",
+    "fork:relay": "node infra/quicknode/fork-relay.ts",
+    "fork:blink": "node scripts/fork/blink.ts",
+    "fork:blink-size": "node scripts/fork/blink-size.ts",
+    "fork:settler": "pnpm --filter @thesis/executor settler",
+    "fork:settler-e2e": "node scripts/fork/settler-e2e.ts",
+    "fork:jupiter-e2e": "node scripts/fork/jupiter-e2e.ts",
+    "fork:api": "node scripts/fork/api.ts",
+    "fork:api-e2e": "node scripts/fork/api-e2e.ts",
+    "fork:creator-fees-e2e": "node scripts/fork/creator-fees-e2e.ts",
+    "fork:exit-e2e": "node scripts/fork/exit-e2e.ts",
+    "fork:ticket-e2e": "node scripts/fork/ticket-e2e.ts",
+    "fork:gemini-e2e": "node scripts/fork/gemini-e2e.ts",
+    "fork:phoenix-e2e": "node scripts/fork/phoenix-e2e.ts",
+    "fork:phoenix-api-e2e": "node scripts/fork/phoenix-api-e2e.ts",
+    "fork:friend": "node scripts/fork/friend.ts"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
+  },
+  "packageManager": "pnpm@11.22.0",
+  "workspaces": ["apps/*", "packages/*", "scripts/fork"]
+}

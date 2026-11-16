@@ -1,0 +1,24 @@
+{
+  "name": "@thesis/fork",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mainnet-fork dogfood environment (Surfpool): deploy, init, fund, status, Stream relay",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@solana/spl-token": "^0.4.13",
+    "@solana/web3.js": "^1.98.4",
+    "@thesis/chain": "workspace:*",
+    "@thesis/executor": "workspace:*",
+    "@thesis/venues": "workspace:*",
+    "bn.js": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.2.0",
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  }
+}
