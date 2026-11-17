@@ -1,0 +1,24 @@
+# The settler: signs prices, settles, mints badges. It reads open positions from chain_positions
+# (SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY) with a full scan every 10 minutes.
+#
+# Its key is a systemd credential: /etc/thesis/settler.json stays root-only (0600 root), and only
+# this service sees a copy, under $CREDENTIALS_DIRECTORY. On the fork, fork:up made the key in
+# /opt/thesis/.data/fork/settler.json: copy it there (infra/executor/README.md). On mainnet it's
+# the real settler key.
+[Unit]
+Description=Thesis: settler
+After=thesis-fork-up.service network-online.target
+Wants=thesis-fork-up.service network-online.target
+
+[Service]
+User=thesis
+WorkingDirectory=/opt/thesis
+EnvironmentFile=/etc/thesis/executor.env
+LoadCredential=settler.json:/etc/thesis/settler.json
+Environment=SETTLER_KEYPAIR=%d/settler.json
+ExecStart=/usr/bin/pnpm --filter @thesis/executor settler
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+# Deploys the program onto the fork and sets up its config and lookup table, once the fork is up
+# (`pnpm fork:up` finds Surfpool already running and leaves it alone). The program build comes
+# from /opt/thesis/anchor/target/deploy/thesis.so: copy it over, or let fork:up find it.
+[Unit]
+Description=Thesis: deploy the program onto the fork
+After=thesis-surfpool.service
+Requires=thesis-surfpool.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=thesis
+WorkingDirectory=/opt/thesis
+EnvironmentFile=/etc/thesis/executor.env
+# Surfpool needs a few seconds before it answers.
+ExecStartPre=/bin/sh -c 'for i in $(seq 60); do curl -sf -X POST -H content-type:application/json -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getVersion\"}" http://127.0.0.1:18899 >/dev/null && exit 0; sleep 2; done; exit 1'
+ExecStart=/usr/bin/pnpm fork:up
+
+[Install]
+WantedBy=multi-user.target

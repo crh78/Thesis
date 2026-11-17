@@ -1,0 +1,19 @@
+# The marker: live returns for open takes and on-chain positions, every 5 minutes, written through
+# the `marks` edge function (MARKS_TOKEN). It prices with the settler's rules but signs nothing,
+# so it needs no key. A take's return is its author's buy-in's live return once the settler has
+# signed the author's entry prices (apps/executor/src/marker.ts).
+[Unit]
+Description=Thesis: marker (live take and position returns)
+After=thesis-fork-up.service network-online.target
+Wants=thesis-fork-up.service network-online.target
+
+[Service]
+User=thesis
+WorkingDirectory=/opt/thesis
+EnvironmentFile=/etc/thesis/executor.env
+ExecStart=/usr/bin/pnpm --filter @thesis/executor marker
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

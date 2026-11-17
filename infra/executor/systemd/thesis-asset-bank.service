@@ -1,0 +1,18 @@
+# The asset-bank poller. Jupiter's free key allows about 60 requests a minute; 25 leaves room for
+# the settler and the fork API, which use the same key. Gemini goes through the Supabase proxy.
+[Unit]
+Description=Thesis: asset-bank poller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=thesis
+WorkingDirectory=/opt/thesis
+EnvironmentFile=/etc/thesis/executor.env
+Environment=ASSET_BANK_JUPITER_RPM=25
+ExecStart=/usr/bin/pnpm --filter @thesis/executor asset-bank
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

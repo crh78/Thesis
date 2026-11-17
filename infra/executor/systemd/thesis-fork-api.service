@@ -1,0 +1,19 @@
+# The app's fork API on 127.0.0.1:18901 and the fork Blink on 127.0.0.1:18902. Tailscale Funnel
+# publishes both over HTTPS (infra/executor/README.md, "Publishing"). FORK_BLINK_ORIGIN, the
+# Blink's public origin, comes from /etc/thesis/executor.env.
+[Unit]
+Description=Thesis: fork API
+After=thesis-fork-up.service
+Requires=thesis-fork-up.service
+
+[Service]
+User=thesis
+WorkingDirectory=/opt/thesis
+EnvironmentFile=/etc/thesis/executor.env
+Environment=FORK_HOST=127.0.0.1 FORK_API_PORT=18901 FORK_BLINK_PORT=18902
+ExecStart=/usr/bin/pnpm fork:api
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
