@@ -1,5 +1,6 @@
 // Making a take, the iOS composer's model: drafts, the take builder's legs, hand edits to the basket
 // (BasketMath.swift), and the topic and tags a take is posted with (TopicGuess).
+import type { TakeDraft } from "./data";
 
 export type Risk = "low" | "medium" | "high";
 export type Horizon = "2wk" | "1mo" | "3mo" | "6mo";
@@ -58,10 +59,12 @@ export type Draft = {
   /** You changed the picks: a new risk keeps them instead of rebuilding. */
   edited: boolean;
   source: Source | null;
+  /** Made by a chat bot (/d/<id>): posting it points the draft at the new take. */
+  draftId: string | null;
 };
 
 export const newDraft = (init: Partial<Draft> = {}): Draft => ({
-  claim: "", risk: "medium", horizon: "3mo", buyIn: 25, legs: null, summary: null, noExposure: null, seed: null, edited: false, source: null, ...init,
+  claim: "", risk: "medium", horizon: "3mo", buyIn: 25, legs: null, summary: null, noExposure: null, seed: null, edited: false, source: null, draftId: null, ...init,
 });
 
 export const predictionSide = (l: Leg) => (l.kind.startsWith("Prediction") ? (l.kind.endsWith("No") ? "no" : "yes") : undefined);
@@ -202,6 +205,17 @@ export function topicGuess(claim: string, legs: Leg[]): { topic: string; tags: s
   const words = new Set([claim, ...legs.map((l) => l.name)].join(" ").toLowerCase().split(/[^a-z-]+/).filter(Boolean));
   const matches = TOPIC_RULES.filter(([ws]) => ws.some((w) => words.has(w)));
   return { topic: matches[0]?.[1] ?? "topic-coin", tags: [...new Set(matches.map((m) => m[2]))].slice(0, 3) };
+}
+
+/** A chat bot's draft (/d/<id>) → the composer, open on the basket the bot built. */
+export function fromBotDraft(d: TakeDraft): Partial<Draft> {
+  const b = basketFrom({ verdict: "basket", summary: d.summary, legs: d.legs });
+  return {
+    claim: d.claim.slice(0, 140), risk: d.risk, horizon: d.horizon,
+    legs: normalized(b.legs), summary: b.summary,
+    source: d.source && /^https?:\/\//.test(d.source.url) ? { url: d.source.url, label: d.source.label, kind: d.source.kind } : null,
+    draftId: d.id,
+  };
 }
 
 /** A drafted take from an X call (or its notification): risk and horizon words → the draft's keys. */

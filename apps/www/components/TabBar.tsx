@@ -18,7 +18,8 @@ export default function TabBar() {
   const path = usePathname() ?? "/";
   const { phase } = useSession();
   const composer = useComposer();
-  if (path.startsWith("/t/") || path.startsWith("/c/")) return null;
+  // Chat bot drafts (/d/) have their own "Post it" dock too.
+  if (path.startsWith("/t/") || path.startsWith("/c/") || path.startsWith("/d/")) return null;
   // The tabs sit behind the welcome screen and onboarding until you're set up (public profiles keep it).
   const tabRoute = path === "/" || ["/scores", "/me", "/search", "/asset", "/saved", "/people", "/settings", "/x"].some((t) => path === t || path.startsWith(`${t}/`));
   if (phase.kind === "onboarding" || (tabRoute && phase.kind !== "ready")) return null;

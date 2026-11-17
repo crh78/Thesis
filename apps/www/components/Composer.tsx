@@ -41,7 +41,8 @@ type Step = "write" | "building" | "basket" | "posting";
 function Composer({ init, onClose }: { init: Open; onClose: () => void }) {
   const { token } = useSession();
   const [draft, setDraft] = useState<Draft>(() => newDraft(init));
-  const [step, setStep] = useState<Step>(init.autoBuild && init.claim ? "building" : "write");
+  // A basket that came built (a chat bot's draft) opens on the basket.
+  const [step, setStep] = useState<Step>(init.legs?.length && init.claim ? "basket" : init.autoBuild && init.claim ? "building" : "write");
   const [closing, setClosing] = useState(false);
 
   // Wake the take builder while you write, so Build doesn't wait on a cold start.
@@ -553,10 +554,12 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
 
   useEffect(() => {
     if (state.kind === "live") {
+      // A chat bot's draft now points at your take, so its link opens the live take.
+      if (draft.draftId) source("PUT", `drafts/${draft.draftId}`, { take_id: state.id }).catch(() => {});
       const id = window.setTimeout(() => { onClose(); router.push(`/t/${state.id}`); }, 900);
       return () => window.clearTimeout(id);
     }
-  }, [state, onClose, router]);
+  }, [state, onClose, router, draft.draftId, source]);
 
   async function discard() {
     setDiscarding(true);

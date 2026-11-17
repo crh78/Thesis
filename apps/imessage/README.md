@@ -1,6 +1,6 @@
 # @thesis/imessage
 
-iMessage surface. Inbound message → `@thesis/agent` → reply. Today the agent builds baskets and replies with a link that opens them in the app. To trade a take from a chat, share its link from the app: it unfurls in iMessage and opens the web app (`apps/www`), where anyone can trade or fade it. Trading by text (back and fade within spending limits) and outbound group updates ("Sarah just backed Jake's take") aren't built yet.
+iMessage surface. Inbound message → `@thesis/agent` → reply. When someone states a take, the agent builds its basket and replies with the picks and a link to a **draft take** on the web app (`/d/<id>`, with a link preview). A bot can't post a take as someone, so whoever taps the link signs in and posts it as theirs. Once it's live, the same link opens the take, where anyone in the chat can trade or fade it. To share a take that's already posted, share its link from the app. Trading by text (back and fade within spending limits) and outbound group updates ("Sarah just backed Jake's take") aren't built yet.
 
 - `src/providers/` — one adapter per iMessage API provider, so it can be swapped if one gets blocked: [Sendblue](https://docs.sendblue.com) (`sendblue.ts`, the default) and [BlueBubbles](https://bluebubbles.app) (`bluebubbles.ts`, free, works in group chats). `IMESSAGE_PROVIDER` picks one.
 - `src/types.ts` — the transport-neutral `Inbound` / `Handler` / `Provider` shapes.
