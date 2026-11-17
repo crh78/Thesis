@@ -25,7 +25,7 @@ type FetchFn = typeof fetch;
 
 /** One card, from a browse row or a single-card read. */
 export type CardRecord = {
-  /** Collector Crypt's card id (e.g. "2026033156C116510"). Stable for the card's life; the leg id is built from it. */
+  /** Collector Crypt's card id (e.g. "2026120156C116510"). Stable for the card's life; the leg id is built from it. */
   id: string;
   /** The card's NFT mint (asset) address. */
   nftAddress: string | null;
