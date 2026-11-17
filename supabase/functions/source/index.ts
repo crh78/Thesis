@@ -18,14 +18,22 @@
 //   DELETE /source/x/:handle       stop copying
 //   POST   /source/poll            header x-poll-secret: new posts from copied accounts → drafted
 //                                  takes → x_call notifications (pg_cron, every 15 minutes)
+//   POST   /source/drafts          header x-bot-secret: a chat bot's take { claim, risk, horizon,
+//                                  source?: { text, url, label }, origin: imessage|x, context?,
+//                                  origin_ref? } → the take builder's basket, saved as a draft:
+//                                  { verdict: "basket", id, summary, legs, existing } or
+//                                  { verdict: "no_clean_exposure", reason }. Its page is /d/<id> on
+//                                  the web; the same origin_ref returns the same draft.
+//   PUT    /source/drafts/:id      { take_id } you posted it: your live take → { posted, take_id }
+//                                  (posted false when someone else's live take got there first)
 //
 // Reading: X posts through X's public oEmbed, articles by fetching the page (_shared/source.ts);
 // copied accounts' timelines through Apify (_shared/x.ts). Drafting: one fast model call.
 // Kept out of functions/social so that function's deploys stay its own.
 //
-// Secrets: OPENAI_API_KEY, OPENAI_FAST_MODEL, PRIVY_* (+ SUPABASE_*). APIFY_TOKEN and X_POLL_SECRET
-// come from the function's secrets or, failing that, the Vault (apify_token, x_poll_secret, read
-// through source_secret()), where pg_cron reads the poll secret too.
+// Secrets: OPENAI_API_KEY, OPENAI_FAST_MODEL, PRIVY_* (+ SUPABASE_*). APIFY_TOKEN, X_POLL_SECRET
+// and BOT_SECRET come from the function's secrets or, failing that, the Vault (apify_token,
+// x_poll_secret, bot_secret, read through source_secret()), where pg_cron reads the poll secret too.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { privyDid } from "../_shared/privy.ts";
@@ -143,6 +151,108 @@ async function attach(profile: string, b: Record<string, unknown>) {
   return json(200, { attached: true });
 }
 
+// Draft takes from the chat bots ------------------------------------------------------------------
+
+const DRAFT_ID_RE = /^[A-Za-z0-9]{8}$/;
+const DRAFT_HORIZON: Record<string, string> = {
+  "2wk": "2wk", "2 weeks": "2wk", "1mo": "1mo", "1 month": "1mo", "3mo": "3mo", "3 months": "3mo", "6mo": "6mo", "6 months": "6mo",
+};
+
+function draftId(): string {
+  const abc = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return [...bytes].map((b) => abc[b % abc.length]).join("");
+}
+
+const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+
+const LONG_HORIZON: Record<string, string> = { "2wk": "2 weeks", "1mo": "1 month", "3mo": "3 months", "6mo": "6 months" };
+type BuiltLeg = { name: string; weight: number; side?: string | null; kind?: string; why?: string };
+const DRAFT_COLUMNS = "id, summary, legs";
+const drafted = (d: { id: string; summary: string | null; legs: unknown }, existing: boolean) =>
+  json(200, { verdict: "basket", id: d.id, summary: d.summary, legs: d.legs, existing });
+
+/**
+ * A bot's take → the take builder's basket, saved as a draft → { verdict: "basket", id, summary,
+ * legs } or { verdict: "no_clean_exposure", reason }. The builder runs here, with this project's
+ * SECURITIES_INDEX_SECRET, so the bots hold only the bot secret. The same origin_ref returns the
+ * same draft without building again.
+ */
+async function buildDraft(b: Record<string, unknown>) {
+  const claim = str(b.claim, 140).replace(/\s+/g, " ");
+  check(claim.length >= 5, "invalid_claim");
+  const risk = ["low", "medium", "high"].includes(String(b.risk)) ? String(b.risk) : "medium";
+  const horizon = DRAFT_HORIZON[String(b.horizon)] ?? "3mo";
+  const origin = b.origin === "x" ? "x" : b.origin === "imessage" ? "imessage" : null;
+  check(origin, "invalid_origin");
+  const src = (b.source ?? null) as Record<string, unknown> | null;
+  const sourceUrl = src && typeof src.url === "string" && /^https?:\/\/\S+$/.test(src.url) && src.url.length <= 500 ? src.url : null;
+  const sourceText = src ? str(src.text, 2000) : "";
+  const ref = str(b.origin_ref, 64) || null;
+
+  if (ref) {
+    const { data, error } = await db.from("take_drafts").select(DRAFT_COLUMNS).eq("origin", origin).eq("origin_ref", ref).maybeSingle();
+    dbCheck(error);
+    if (data) return drafted(data, true);
+  }
+
+  const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/take-builder`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-index-secret": Deno.env.get("SECURITIES_INDEX_SECRET") ?? "" },
+    body: JSON.stringify({
+      claim, risk, horizon: LONG_HORIZON[horizon],
+      ...(sourceText.length >= 3 ? { source: { text: sourceText, label: str(src!.label, 60) || null, kind: "post" } } : {}),
+    }),
+    signal: AbortSignal.timeout(25_000),
+  });
+  if (!r.ok) throw new Error(`take-builder ${r.status}`);
+  const built = await r.json() as { verdict: string; summary?: string; reason?: string | null; legs?: BuiltLeg[] };
+  const legs = (built.legs ?? []).filter((l) => l && typeof l.name === "string").slice(0, 10);
+  if (built.verdict !== "basket" || !legs.length) {
+    return json(200, { verdict: "no_clean_exposure", reason: built.reason || "Nothing you can buy tracks this closely enough yet." });
+  }
+
+  const row = {
+    claim, risk, horizon, legs, origin,
+    summary: str(built.summary, 400) || null,
+    context: str(b.context, 80) || null,
+    origin_ref: ref,
+    source_url: sourceUrl,
+    source_label: sourceUrl ? str(src!.label, 60) || "the post" : null,
+    source_kind: sourceUrl ? (src!.kind === "x" ? "x" : "link") : null,
+  };
+  for (let i = 0; i < 3; i++) {
+    const id = draftId();
+    const { error } = await db.from("take_drafts").insert({ id, ...row });
+    if (!error) return drafted({ id, summary: row.summary, legs }, false);
+    if (error.code !== "23505") dbCheck(error);
+    // A taken id (or a racing retry of the same ref): try again, or return the winner.
+    if (ref) {
+      const { data } = await db.from("take_drafts").select(DRAFT_COLUMNS).eq("origin", origin).eq("origin_ref", ref).maybeSingle();
+      if (data) return drafted(data, true);
+    }
+  }
+  throw new Error("draft id collisions");
+}
+
+/** You posted this draft: point it at your live take, unless someone's live take got there first. */
+async function draftPosted(profile: string, id: string, b: Record<string, unknown>) {
+  check(DRAFT_ID_RE.test(id), "invalid_draft_id");
+  const takeId = String(b.take_id ?? "");
+  check(UUID_RE.test(takeId), "invalid_take_id");
+  const { data: take, error } = await db.from("takes").select("id, status").eq("id", takeId).eq("author_id", profile).maybeSingle();
+  dbCheck(error);
+  if (!take) throw new HttpError(404, "not_found");
+  const { data: d, error: e } = await db.from("take_drafts").select("take_id, takes(status)").eq("id", id).maybeSingle();
+  dbCheck(e);
+  if (!d) throw new HttpError(404, "not_found");
+  const current = (Array.isArray(d.takes) ? d.takes[0] : d.takes) as { status: string } | null;
+  if (d.take_id && d.take_id !== takeId && current?.status === "live") return json(200, { posted: false, take_id: d.take_id });
+  const { error: u } = await db.from("take_drafts").update({ take_id: takeId, posted_at: new Date().toISOString() }).eq("id", id);
+  dbCheck(u);
+  return json(200, { posted: true, take_id: takeId });
+}
+
 // X accounts you copy --------------------------------------------------------------------------
 
 async function accounts(profile: string, only?: string) {
@@ -238,6 +348,12 @@ Deno.serve(async (req) => {
       if (!sameSecret(req.headers.get("x-poll-secret") ?? "", pollSecret)) return json(401, { error: "unauthorized" });
       return await poll();
     }
+    if (route === "POST drafts") {
+      const botSecret = await secret("BOT_SECRET", "bot_secret");
+      if (!botSecret) return json(503, { error: "not_configured" });
+      if (!sameSecret(req.headers.get("x-bot-secret") ?? "", botSecret)) return json(401, { error: "unauthorized" });
+      return await buildDraft(await body(req));
+    }
     switch (route) {
       case "POST ": {
         await me(req, false);
@@ -247,6 +363,7 @@ Deno.serve(async (req) => {
       case "GET x": return json(200, { accounts: await accounts(await me(req, false)) });
       case "PUT x/:id": return await copy(await me(req, true), id);
       case "DELETE x/:id": return await stopCopying(await me(req, true), id);
+      case "PUT drafts/:id": return await draftPosted(await me(req, true), id, await body(req));
       default: return json(404, { error: "no_such_route" });
     }
   } catch (e) {

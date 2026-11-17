@@ -5,8 +5,9 @@ import OpenAI from "openai";
 import { basketTool, buildBasket, warmBasket, HORIZONS, RISKS, type BasketArgs, type BasketConfig } from "./basket.ts";
 import { cleanReply } from "./style.ts";
 
-export type { BasketConfig } from "./basket.ts";
-export { basketLink } from "./basket.ts";
+export type { BasketConfig, BasketResult, DraftMeta } from "./basket.ts";
+export { basketConfigFromEnv, buildBasket, plainName, warmBasket } from "./basket.ts";
+export { cleanReply } from "./style.ts";
 
 export type Turn = {
   chatId: string;
@@ -42,7 +43,7 @@ const INSTRUCTIONS = [
   "Explain simply, like to a smart friend who doesn't invest: plain words, no jargon. If asked who you are or what you do, one sentence.",
   "Write like a friend texting: lowercase is fine, no markdown, no bullet symbols, no emoji walls.",
   "Never use em dashes or en dashes. Use commas, colons or periods instead.",
-  "Never mention tokens, chains, USDC, crypto plumbing or wallets. Don't claim anything was bought: the link opens the app to buy in.",
+  "Never mention tokens, chains, USDC, crypto plumbing or wallets. Don't claim anything was bought or posted: the link is a draft, and whoever opens it can post it as their take and buy in.",
   `In a group chat you see every message, prefixed with who sent it. Reply only if you're addressed (thesis, @thesis), asked something, or someone states a take worth a basket. Otherwise reply exactly ${SILENT}.`,
   "In a DM always reply.",
 ].join(" ");
@@ -69,7 +70,7 @@ export function createAgent(cfg: AgentConfig) {
     } as never) as Promise<OpenAI.Responses.Response>;
   }
 
-  async function runTool(call: FnCall, links: string[]): Promise<string> {
+  async function runTool(call: FnCall, links: string[], turn: Turn): Promise<string> {
     if (call.name !== "build_basket") return JSON.stringify({ error: `unknown tool ${call.name}` });
     let args: BasketArgs;
     try {
@@ -83,7 +84,8 @@ export function createAgent(cfg: AgentConfig) {
       return JSON.stringify({ error: "bad arguments" });
     }
     const t0 = Date.now();
-    const out = await buildBasket(cfg.basket, args).catch((e: Error) => ({ verdict: "error" as const, reason: e.message }));
+    const meta = { origin: "imessage" as const, context: turn.chatType === "group" ? "From a group chat" : "From iMessage" };
+    const out = await buildBasket(cfg.basket, args, meta).catch((e: Error) => ({ verdict: "error" as const, reason: e.message }));
     log("tool build_basket", { verdict: out.verdict, legs: out.verdict === "basket" ? out.legs.length : 0, ms: Date.now() - t0 });
     if (out.verdict === "basket") links.push(out.link);
     return JSON.stringify(out);
@@ -112,7 +114,7 @@ export function createAgent(cfg: AgentConfig) {
         const calls = res.output.filter((o): o is FnCall & typeof o => o.type === "function_call") as unknown as FnCall[];
         if (calls.length === 0) break;
         const outputs = await Promise.all(
-          calls.map(async (c) => ({ type: "function_call_output", call_id: c.call_id, output: await runTool(c, links) })),
+          calls.map(async (c) => ({ type: "function_call_output", call_id: c.call_id, output: await runTool(c, links, turn) })),
         );
         res = await create(outputs, res.id);
       }

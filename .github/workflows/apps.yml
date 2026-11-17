@@ -8,6 +8,7 @@ on:
     paths:
       - "apps/www/**"
       - "apps/imessage/**"
+      - "apps/x/**"
       - "packages/agent/**"
       - "supabase/functions/source/**"
       - "supabase/functions/_shared/source.ts"
@@ -43,7 +44,7 @@ jobs:
         run: pnpm --filter @thesis/www build
 
   imessage:
-    name: Typecheck and test apps/imessage
+    name: Typecheck and test apps/imessage and apps/x
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,10 +59,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm --filter @thesis/imessage typecheck && pnpm --filter @thesis/agent typecheck
+        run: pnpm --filter @thesis/imessage typecheck && pnpm --filter @thesis/agent typecheck && pnpm --filter @thesis/x typecheck
 
       - name: Test
-        run: pnpm --filter @thesis/imessage test
+        run: pnpm --filter @thesis/imessage test && pnpm --filter @thesis/x test
 
   source:
     name: Typecheck and test supabase/functions/source

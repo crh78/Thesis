@@ -1,5 +1,5 @@
 // Inbound iMessage → @thesis/agent → reply text (or null to stay quiet).
-import { createAgent, type Agent } from "@thesis/agent";
+import { basketConfigFromEnv, createAgent, type Agent } from "@thesis/agent";
 import type { Handler } from "./types.ts";
 import { log, mask } from "./log.ts";
 
@@ -10,17 +10,11 @@ function required(name: string): string {
 }
 
 export function createReply(): { handler: Handler; agent: Agent } {
-  const functions = `${required("SUPABASE_URL").replace(/\/$/, "")}/functions/v1`;
   const agent = createAgent({
     openaiApiKey: required("OPENAI_API_KEY"),
     model: process.env.OPENAI_AGENT_MODEL || "gpt-6-luna",
     effort: "low",
-    basket: {
-      takeBuilderUrl: `${functions}/take-builder`,
-      takeBuilderSecret: required("SECURITIES_INDEX_SECRET"),
-      openUrl: `${functions}/open`,
-      app: process.env.THESIS_APP === "prod" ? "prod" : "dev",
-    },
+    basket: basketConfigFromEnv(),
     log,
   });
 

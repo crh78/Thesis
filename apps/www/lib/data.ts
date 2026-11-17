@@ -119,6 +119,29 @@ export async function getTake(id: string): Promise<Take | null> {
   return t && t.status === "live" ? t : null;
 }
 
+/** A chat bot's draft take (/d/<id>): the take builder's basket, waiting for someone to post it. */
+export type TakeDraft = {
+  id: string;
+  claim: string;
+  risk: "low" | "medium" | "high";
+  horizon: "2wk" | "1mo" | "3mo" | "6mo";
+  summary: string | null;
+  /** The take builder's legs, as it returned them (lib/compose.ts basketFrom reads them). */
+  legs: import("./compose").Built["legs"];
+  origin: "imessage" | "x";
+  /** "From a group chat", "@jake asked on X". */
+  context: string | null;
+  created_at: string;
+  source: { url: string; label: string; kind: "link" | "x" } | null;
+  /** Its live take, once someone posted it. */
+  take_id: string | null;
+};
+
+export async function getDraft(id: string): Promise<TakeDraft | null> {
+  if (!/^[A-Za-z0-9]{8}$/.test(id)) return null;
+  return rpc<TakeDraft | null>("take_draft", { p_id: id }, 10).catch(() => null);
+}
+
 export async function getFeed(): Promise<Take[]> {
   return rpc<Take[]>("feed", { p_limit: 50 }, 30).catch(() => []);
 }

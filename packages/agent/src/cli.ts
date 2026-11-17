@@ -2,7 +2,7 @@
 //   pnpm --filter @thesis/agent chat "nuclear is the only way to power AI"
 //   pnpm --filter @thesis/agent chat --group "lol jake thinks gold is going to 5k"
 // Reads the same env as apps/imessage (.env there).
-import { createAgent } from "./index.ts";
+import { basketConfigFromEnv, createAgent } from "./index.ts";
 
 const env = (k: string) => {
   const v = process.env[k];
@@ -14,16 +14,10 @@ const group = args[0] === "--group";
 const text = (group ? args.slice(1) : args).join(" ");
 if (!text) throw new Error("usage: chat [--group] <message>");
 
-const functions = `${env("SUPABASE_URL").replace(/\/$/, "")}/functions/v1`;
 const agent = createAgent({
   openaiApiKey: env("OPENAI_API_KEY"),
   model: process.env.OPENAI_AGENT_MODEL || undefined,
-  basket: {
-    takeBuilderUrl: `${functions}/take-builder`,
-    takeBuilderSecret: env("SECURITIES_INDEX_SECRET"),
-    openUrl: `${functions}/open`,
-    app: process.env.THESIS_APP === "prod" ? "prod" : "dev",
-  },
+  basket: basketConfigFromEnv(),
   log: (e, f) => console.error(`· ${e}`, f ?? ""),
 });
 
