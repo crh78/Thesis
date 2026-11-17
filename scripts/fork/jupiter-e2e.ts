@@ -31,7 +31,7 @@ import {
 } from "@thesis/chain";
 import { AlpacaStocks, FileAuditLog, JupiterPrices, Settler, bankIndex } from "@thesis/executor/settler";
 import { loadBankState, underlyingId } from "@thesis/venues/bank";
-import { JL_USDC_MINT } from "@thesis/venues/jupiter";
+import { JL_USDC_MINT, jupiterLendShareValue } from "@thesis/venues/jupiter";
 import { envVar } from "../../packages/venues/registry/src/lib/env.ts";
 import { DATA_DIR, PATHS, addUsdc, connection, deployedElf, loadKeypair, main, requireSurfpool, syncClock, thesisLookupTable } from "./lib.ts";
 import { buyBasket, sendTrade, type BasketLeg, type Bought } from "./trade.ts";
@@ -133,6 +133,13 @@ async function e2e(): Promise<void> {
     sources: {
       stocks: new AlpacaStocks(required("ALPACA_API_KEY_ID"), required("ALPACA_API_SECRET_KEY")),
       tokens: new JupiterPrices(apiKey),
+      // The yield leg counts in the score: one vault share's value, as the settler service reads it.
+      lend: {
+        shareValue: async (mint: string) => {
+          const v = await jupiterLendShareValue(mint, { apiKey });
+          return v && { usdcPerShare: v.usdcPerShare, at: Math.floor(Date.now() / 1000), raw: v.raw };
+        },
+      },
     },
     rules: { minLiquidityUsd: 100_000, liveWindowSecs: 300 },
     audit: new FileAuditLog(join(DATA_DIR, "../settler/audit.jsonl")),
