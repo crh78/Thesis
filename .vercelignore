@@ -1,0 +1,11 @@
+# Vercel deploys only apps/www (project root directory), but uploads the workspace for pnpm.
+anchor/target
+anchor/.anchor
+.data
+.claude
+apps/ios
+docs
+spikes
+**/node_modules
+**/.next
+**/dist

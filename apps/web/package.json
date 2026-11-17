@@ -1,0 +1,15 @@
+{
+  "name": "@thesis/web",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@solana/web3.js": "^1.99.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "scripts": {
+    "build": "esbuild checkout.js --bundle --minify --outfile=dist/checkout.js"
+  }
+}

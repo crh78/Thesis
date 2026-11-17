@@ -1,0 +1,14 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "scripts/fork"
+
+# Optional native speedups pulled in by @solana/web3.js; the pure-JS fallbacks are fine.
+# "@reown/appkit" and keccak come with Privy's web SDK (apps/www) and work without their scripts too.
+allowBuilds:
+  "@reown/appkit": false
+  bigint-buffer: false
+  bufferutil: false
+  esbuild: false
+  keccak: false
+  utf-8-validate: false

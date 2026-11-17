@@ -1,0 +1,27 @@
+{
+  "name": "@thesis/venues",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./bank": "./bank/src/index.ts",
+    "./jupiter": "./jupiter/src/index.ts",
+    "./gemini": "./gemini/src/index.ts",
+    "./phoenix": "./phoenix/src/index.ts",
+    "./collector-crypt": "./collector-crypt/src/index.ts"
+  },
+  "scripts": {
+    "registry": "node registry/src/build.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test bank/test/*.test.ts jupiter/test/*.test.ts gemini/test/*.test.ts phoenix/test/*.test.ts collector-crypt/test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  },
+  "dependencies": {
+    "@ellipsis-labs/rise": "0.8.0",
+    "@solana/kit": "8.4.0",
+    "@solana/web3.js": "^1.98.4"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@thesis/take-builder",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "catalog": "node src/catalog.ts",
+    "index": "node src/index-catalog.ts",
+    "index-gemini": "node src/index-gemini.ts",
+    "test": "node --test test/*.test.ts"
+  },
+  "exports": {
+    "./gemini-index": "./src/gemini-index.ts",
+    "./liquidity-sync": "./src/liquidity-sync.ts"
+  }
+}
