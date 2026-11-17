@@ -7,7 +7,7 @@ import Providers from "./providers";
 import "./globals.css";
 
 // Link previews need absolute URLs. On Vercel the production URL is the project's custom domain
-// once one is added (yourthesis.xyz), else thesis-www.vercel.app.
+// (yourthesis.xyz), or the project's vercel.app URL before a domain is added.
 const SITE =
   process.env.NEXT_PUBLIC_SITE_URL ??
   (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "http://localhost:3100");

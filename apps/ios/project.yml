@@ -100,8 +100,8 @@ targets:
         # Config/Backend.local.xcconfig and Config/Privy.local.xcconfig, which
         # Config/Debug.xcconfig and Config/Release.xcconfig include. Don't set them
         # here: target settings would override the xcconfig files.
-        # Shared take links open the web app (apps/www); yourthesis.xyz once the domain is added.
-        WEB_URL: https://thesis-www.vercel.app
+        # Shared take links open the web app (apps/www).
+        WEB_URL: https://yourthesis.xyz
         # Sign in with Apple needs a paid Apple Developer Program team; the
         # current team is a personal one, so the capability can't be provisioned
         # and device builds would fail. To turn it on: join the program, set this
