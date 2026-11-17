@@ -1,0 +1,83 @@
+name: Web, iMessage and sources
+
+# The web app (apps/www, deployed by Vercel), the iMessage bot (apps/imessage, @thesis/agent) and
+# the source function (articles and X posts → takes, copying X accounts): typecheck, build the web
+# app, and test the bot's providers and the source parsing. Ubuntu only, so it's cheap.
+on:
+  pull_request:
+    paths:
+      - "apps/www/**"
+      - "apps/imessage/**"
+      - "packages/agent/**"
+      - "supabase/functions/source/**"
+      - "supabase/functions/_shared/source.ts"
+      - "supabase/functions/_shared/x.ts"
+      - "supabase/functions/_shared/openai.ts"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/apps.yml"
+
+concurrency:
+  group: apps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Typecheck and build apps/www
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter @thesis/www typecheck
+
+      - name: Build
+        run: pnpm --filter @thesis/www build
+
+  imessage:
+    name: Typecheck and test apps/imessage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter @thesis/imessage typecheck && pnpm --filter @thesis/agent typecheck
+
+      - name: Test
+        run: pnpm --filter @thesis/imessage test
+
+  source:
+    name: Typecheck and test supabase/functions/source
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supabase/functions/source
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Typecheck
+        run: deno check --config deno.json index.ts
+
+      - name: "Test (parsing only: no network, no model)"
+        run: deno test --config deno.json --allow-env .

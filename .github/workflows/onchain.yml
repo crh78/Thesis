@@ -1,0 +1,248 @@
+name: On-chain
+
+on:
+  pull_request:
+    paths:
+      - "anchor/**"
+      - "packages/chain/**"
+      - "packages/venues/**"
+      - "apps/executor/**"
+      - "packages/take-builder/**"
+      - "scripts/fork/**"
+      - "apps/web/**"
+      - "infra/quicknode/**"
+      - "supabase/functions/quicknode-stream/**"
+      - "supabase/functions/notify/**"
+      - "supabase/functions/gemini/**"
+      - "supabase/functions/_shared/hmac.ts"
+      - "supabase/functions/_shared/thesis-idl.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/onchain.yml"
+  push:
+    branches: [main]
+    paths:
+      - "anchor/**"
+      - "packages/chain/**"
+      - "packages/venues/**"
+      - "apps/executor/**"
+      - "packages/take-builder/**"
+      - "scripts/fork/**"
+      - "apps/web/**"
+      - "infra/quicknode/**"
+      - "supabase/functions/quicknode-stream/**"
+      - "supabase/functions/notify/**"
+      - "supabase/functions/gemini/**"
+      - "supabase/functions/_shared/hmac.ts"
+      - "supabase/functions/_shared/thesis-idl.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/onchain.yml"
+
+concurrency:
+  group: onchain-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOLANA_VERSION: "4.1.2"
+  ANCHOR_VERSION: "1.2.2"
+
+jobs:
+  program:
+    name: Build, lint and test the Anchor program
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: anchor
+    steps:
+      - uses: actions/checkout@v4
+
+      # The release build of three programs, their test binaries and the cached target/ fill the
+      # runner's disk (a run can run out of space in Test). The job never uses these
+      # preinstalled SDKs.
+      - name: Free disk space
+        working-directory: .
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install Rust toolchain (from rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Cache toolchains
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.cache/solana
+            ~/.avm
+            ~/.cargo/bin/avm
+          key: tools-${{ runner.os }}-solana-${{ env.SOLANA_VERSION }}-anchor-${{ env.ANCHOR_VERSION }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            anchor/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('anchor/Cargo.lock', 'anchor/rust-toolchain.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Install Solana CLI
+        run: |
+          if [ ! -x "$HOME/.local/share/solana/install/active_release/bin/solana" ]; then
+            sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+          fi
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install Anchor
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/avm" ]; then
+            cargo install --git https://github.com/solana-foundation/anchor --tag "v${ANCHOR_VERSION}" avm --locked
+          fi
+          avm install "${ANCHOR_VERSION}" || true
+          avm use "${ANCHOR_VERSION}"
+          anchor --version
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Build
+        run: anchor build
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+      - name: IDL and generated types are committed and up to date
+        run: |
+          stale=0
+          for f in idl/thesis.json types/thesis.ts types/thesis_errors.ts; do
+            diff -u "../packages/chain/idl/$(basename "$f")" "target/$f" || stale=1
+          done
+          if [ "$stale" = 1 ]; then
+            echo "::error::packages/chain/idl is stale. Run 'anchor build', then copy anchor/target/idl/thesis.json and anchor/target/types/*.ts into packages/chain/idl/."
+            exit 1
+          fi
+
+  client:
+    name: Typecheck and test packages/chain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter @thesis/chain typecheck
+
+      - name: Test
+        run: pnpm --filter @thesis/chain test
+
+  executor:
+    name: Typecheck and test apps/executor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter @thesis/executor typecheck
+
+      - name: Test
+        run: pnpm --filter @thesis/executor test
+
+      - name: Test packages/take-builder (the executor indexes Gemini contracts with it)
+        run: pnpm --filter @thesis/take-builder test
+
+  fork:
+    name: Typecheck and test scripts/fork
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter @thesis/fork typecheck
+
+      - name: Build browser checkout
+        run: pnpm --filter @thesis/web build
+
+      - name: Test (no fork needed)
+        run: pnpm --filter @thesis/fork test
+
+  venues:
+    name: Typecheck and test packages/venues
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter @thesis/venues typecheck
+
+      - name: Test
+        run: pnpm --filter @thesis/venues test
+
+  webhook:
+    name: Test supabase/functions/quicknode-stream
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supabase/functions/quicknode-stream
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Typecheck
+        run: deno check --config deno.json index.ts
+
+      - name: Test (decoding matches @thesis/chain, signature checks)
+        run: deno test --config deno.json --allow-read --allow-env --allow-net .
+
+      - name: Typecheck and test supabase/functions/gemini (proxy against a fake Gemini)
+        working-directory: supabase/functions/gemini
+        run: |
+          deno check --config deno.json index.ts
+          deno test --config deno.json .
+
+      - name: Typecheck and test supabase/functions/notify
+        working-directory: supabase/functions/notify
+        run: |
+          deno check --config deno.json index.ts
+          deno test --config deno.json --allow-env .
