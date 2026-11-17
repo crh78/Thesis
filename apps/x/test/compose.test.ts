@@ -14,7 +14,7 @@ test("safeClaim refuses short, long, linked and blocked claims", () => {
 });
 
 test("takeReply fits 280 with the link counted as 23", () => {
-  const link = "https://thesis-www.vercel.app/d/AbCdEfGh";
+  const link = "https://yourthesis.xyz/d/AbCdEfGh";
   const picks = [
     { name: "Constellation Energy", weight: 30 },
     { name: "Vistra", weight: 25 },

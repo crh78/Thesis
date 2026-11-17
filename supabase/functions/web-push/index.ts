@@ -26,7 +26,7 @@ const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
   auth: { persistSession: false },
 });
 webpush.setVapidDetails(
-  Deno.env.get("VAPID_SUBJECT") ?? "https://thesis-www.vercel.app",
+  Deno.env.get("VAPID_SUBJECT") ?? "https://yourthesis.xyz",
   Deno.env.get("VAPID_PUBLIC_KEY")!,
   Deno.env.get("VAPID_PRIVATE_KEY")!,
 );

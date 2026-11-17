@@ -15,7 +15,7 @@ export type BasketConfig = {
   draftsUrl: string;
   /** The Vault's bot_secret: the bots' key to save drafts. */
   botSecret: string;
-  /** The web app, where a draft's page lives: https://thesis-www.vercel.app */
+  /** The web app, where a draft's page lives: https://yourthesis.xyz */
   webUrl: string;
 };
 
@@ -114,6 +114,6 @@ export function basketConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Baske
     takeBuilderUrl: `${functions}/take-builder`,
     draftsUrl: `${functions}/source/drafts`,
     botSecret: need("THESIS_BOT_SECRET"),
-    webUrl: env.WEB_URL || "https://thesis-www.vercel.app",
+    webUrl: env.WEB_URL || "https://yourthesis.xyz",
   };
 }
