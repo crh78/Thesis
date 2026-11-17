@@ -1,0 +1,54 @@
+name: iOS
+
+# Builds the app and its UI tests for the simulator (build-for-testing), so an iOS change can't
+# break the build unnoticed. The UI tests themselves stay local: macOS minutes count 10x on a
+# private repo, and booting a simulator would multiply that. Only on PRs that touch apps/ios.
+on:
+  pull_request:
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/ios.yml"
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build for testing
+    runs-on: macos-26
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Newest Xcode on the runner
+        run: |
+          xcode="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Generate the project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: apps/ios/.spm
+          key: spm-${{ runner.os }}-${{ hashFiles('apps/ios/project.yml') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build the app and UI tests
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project Thesis.xcodeproj -scheme Thesis \
+            -destination 'generic/platform=iOS Simulator' \
+            -clonedSourcePackagesDirPath .spm \
+            -derivedDataPath .dd \
+            CODE_SIGNING_ALLOWED=NO \
+            | tail -50

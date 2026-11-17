@@ -1,0 +1,37 @@
+name: Supabase
+
+# The SQL tests in supabase/tests/ against a fresh local database with every migration applied,
+# so a migration mistake shows up on the PR. Only on PRs that touch supabase/
+on:
+  pull_request:
+    paths:
+      - "supabase/**"
+      - ".github/workflows/supabase.yml"
+
+concurrency:
+  group: supabase-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sql:
+    name: Migrations and SQL tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 2.x: 3.x rejects config.toml's [inbucket] section.
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.122.1
+
+      - name: Start the database (applies every migration)
+        run: supabase db start
+
+      - name: SQL tests (each rolls back)
+        run: |
+          set -euo pipefail
+          for f in supabase/tests/*.sql; do
+            echo "::group::$f"
+            psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -q -f "$f"
+            echo "::endgroup::"
+          done
