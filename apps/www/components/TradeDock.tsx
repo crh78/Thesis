@@ -1,0 +1,368 @@
+"use client";
+// Trade or fade a take from the browser, the way the iOS app does in fork mode: the fork API builds
+// the transactions, the user's Privy Solana wallet signs them (it never sends), and the API adds
+// the app's fee payer and sends them. Sign-in is the app's (X, Google or email), so the same person
+// gets the same wallet and Thesis profile as in the app; onboarding is drawn by SessionScreens.
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePrivy } from "@privy-io/react-auth";
+import { useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
+import { legName, pct, usd, type Position, type Receipt } from "@/lib/data";
+// The fork client adds the Privy token on money calls and handles "Sign in again".
+import { fork, markTraded } from "@/lib/fork";
+import { cardValue } from "@/lib/data";
+import { X_LOGIN } from "@/lib/flags";
+import { useSession } from "@/lib/session";
+import SignIn from "./SignIn";
+
+type Side = "back" | "fade";
+type Built = { buildId: string; transactions: string[]; feeUsd?: number };
+type Step = { kind: "closed" } | { kind: "signin" } | { kind: "trade"; side: Side } | { kind: "sell"; position: Position } | { kind: "done"; text: string };
+
+const CHIPS = [10, 20, 50, 100];
+
+const b64ToBytes = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const bytesToB64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
+
+export default function TradeDock({ takeId, author, receipt: initial }: { takeId: string; author: string; receipt: Receipt | null }) {
+  const { ready, authenticated, user } = usePrivy();
+  const { phase, snapshot, logout } = useSession();
+  const { wallets } = useWallets();
+  const { signTransaction } = useSignTransaction();
+
+  const [step, setStep] = useState<Step>({ kind: "closed" });
+  const [pending, setPending] = useState<Side | null>(null);
+  const [receipt, setReceipt] = useState<Receipt | null>(initial);
+  // The receipt as this wallet sees it (canFade is false on your own take): a fade waits for it.
+  const [viewerReceipt, setViewerReceipt] = useState(false);
+  const [cash, setCash] = useState<number | null>(null);
+  const [config, setConfig] = useState({ feeRate: 0.001, minStakeUsd: 10 });
+  const [amount, setAmount] = useState("20");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // The user's Privy (embedded) Solana wallet, the one the app also uses.
+  const address = useMemo(() => {
+    const linked = (user?.linkedAccounts ?? []) as Array<{ type: string; chainType?: string; walletClientType?: string; address?: string }>;
+    return linked.find((a) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy")?.address ?? null;
+  }, [user]);
+  const wallet = useMemo(() => wallets.find((w) => w.address === address) ?? null, [wallets, address]);
+
+  const refresh = useCallback(async () => {
+    if (!address) return;
+    const [w, r] = await Promise.all([
+      fork<{ usdc: number }>("GET", `/wallets/${address}`).catch(() => null),
+      fork<Receipt>("GET", `/takes/${takeId}?viewer=${address}`).catch(() => null),
+    ]);
+    if (w) setCash(w.usdc);
+    if (r) { setReceipt(r); setViewerReceipt(true); }
+  }, [address, takeId]);
+
+  useEffect(() => {
+    fork<{ feeRate: number; minStakeUsd: number }>("GET", "/config").then(setConfig).catch(() => {});
+  }, []);
+
+  // Once signed in and set up, load the wallet's cash and positions.
+  useEffect(() => {
+    if (phase.kind === "ready" && address) refresh().catch(() => {});
+  }, [phase.kind, address, refresh]);
+
+  // Signing in with X or Google leaves the page and comes back: remember which button was tapped.
+  const pendingKey = `thesis.pending.${takeId}`;
+  // The feed's Trade / Fade pills link here with `?side=back|fade`: open that sheet straight away.
+  useEffect(() => {
+    const fromLink = new URLSearchParams(window.location.search).get("side");
+    if (fromLink === "back" || fromLink === "fade") {
+      window.history.replaceState(null, "", window.location.pathname);
+      setPending(fromLink);
+      return;
+    }
+    try {
+      const saved = sessionStorage.getItem(pendingKey);
+      if (saved === "back" || saved === "fade") setPending(saved);
+    } catch { /* private mode */ }
+  }, [pendingKey]);
+
+  // Open whatever the user asked for once they're signed in and set up (onboarding comes first).
+  useEffect(() => {
+    if (!pending || phase.kind !== "ready" || !wallet) return;
+    // A fade from a link opens only once the receipt for this viewer is in (the server's copy has no viewer).
+    if (pending === "fade" && !viewerReceipt) return;
+    // Only a side this take allows right now (a link can ask for one it doesn't).
+    const allowed = pending === "back" ? (receipt?.canBack ?? true) : !!receipt?.canFade;
+    if (allowed) setStep({ kind: "trade", side: pending });
+    setPending(null);
+    try { sessionStorage.removeItem(pendingKey); } catch { /* private mode */ }
+  }, [pending, phase.kind, wallet, pendingKey, receipt, viewerReceipt]);
+
+  const start = (side: Side) => {
+    setError(null);
+    setAmount("20");
+    setPending(side);
+    if (!authenticated) {
+      try { sessionStorage.setItem(pendingKey, side); } catch { /* private mode */ }
+      setStep({ kind: "signin" });
+    }
+  };
+
+  async function signAndSubmit(built: Built): Promise<string[]> {
+    if (!wallet) throw new Error("Your wallet isn't ready yet. Try again in a moment.");
+    const signed: string[] = [];
+    for (const tx of built.transactions) {
+      const { signedTransaction } = await signTransaction({
+        transaction: b64ToBytes(tx),
+        wallet,
+        options: { uiOptions: { showWalletUIs: false } },
+      });
+      signed.push(bytesToB64(signedTransaction));
+    }
+    const sent = await fork<{ signatures: string[] }>("POST", "/submit", { buildId: built.buildId, transactions: signed });
+    return sent.signatures;
+  }
+
+  async function trade(side: Side) {
+    const usdAmount = Number(amount);
+    if (!(usdAmount >= config.minStakeUsd)) return setError(`The minimum is $${config.minStakeUsd}.`);
+    setError(null);
+    try {
+      setBusy(side === "back" ? "Trading…" : "Fading…");
+      const built = await fork<Built>("POST", `/takes/${takeId}/trades`, { owner: address, side, usd: usdAmount });
+      await signAndSubmit(built);
+      markTraded();
+      await refresh();
+      setStep({ kind: "done", text: `You ${side === "back" ? "traded" : "faded"} ${author}'s take with $${usdAmount}.` });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sell(position: Position) {
+    setError(null);
+    try {
+      setBusy("Selling…");
+      const built = await fork<Built>("POST", `/takes/${takeId}/positions/${position.address}/exit`, { owner: address });
+      await signAndSubmit(built);
+      markTraded();
+      await refresh();
+      setStep({ kind: "done", text: "Sold. The cash is back in your balance, and the position is scored at today's prices." });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function addCash(usdAmount: number) {
+    if (!address) return;
+    setError(null);
+    try {
+      setBusy("Adding cash…");
+      const r = await fork<{ usdc: number }>("POST", `/wallets/${address}/deposits`, { usd: usdAmount });
+      setCash(r.usdc);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const positions = (receipt?.viewerPositions ?? []).filter((p) => !p.exited);
+  // A take not on the fork yet (a demo take, or after a fork reset) is put on-chain by its first trade.
+  const canBack = receipt?.canBack ?? true;
+  const canFade = !!receipt?.canFade;
+  // The fork's own words when it can't trade this take at all (it says why, e.g. an earlier fork).
+  const missing = !canBack ? (receipt?.missing ?? null) : null;
+  const blockedLabel = missing ? "Can't be traded here" : receipt?.status === "settled" ? "This take has settled" : "Can't trade right now";
+
+  const ret = receipt?.returnBps != null ? receipt.returnBps / 100 : null;
+
+  return (
+    <>
+      {receipt?.onChain ? (
+        <div className="section">
+          <h2>On-chain receipt <span className="caps">{receipt.status}</span></h2>
+          <div className="stats">
+            <div><span className="caps">Traders</span><b>{receipt.backers ?? 0}</b></div>
+            <div><span className="caps">Faders</span><b>{receipt.faders ?? 0}</b></div>
+            <div><span className="caps">Money in</span><b>{usd((receipt.totalBackedUsd ?? 0) + (receipt.totalFadedUsd ?? 0)).replace(".00", "")}</b></div>
+            <div><span className="caps">Return</span><b className={(ret ?? 0) >= 0 ? "up" : "down"}>{pct(ret)}</b></div>
+          </div>
+        </div>
+      ) : null}
+
+      {authenticated && positions.length ? (
+        <div className="section">
+          <h2>Your positions</h2>
+          {positions.map((p) => (
+            <div className="row" key={p.address}>
+              <div>
+                <span className={p.side === "back" ? "up" : "down"}>{p.side === "back" ? "Traded" : "Faded"}</span> {usd(p.stakeUsd)}
+                <div className="note">{p.pendingNote ? legName(p.pendingNote) : `Score ${pct(p.returnBps == null ? null : p.returnBps / 100)}`}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div className="mono">{usd(p.valueUsd)}</div>
+                {p.canExit ? (
+                  <button className="pill small" style={{ marginTop: 6 }} onClick={() => setStep({ kind: "sell", position: p })}>Sell</button>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {authenticated ? (
+        <p className="small muted" style={{ marginTop: 20 }}>
+          Signed in{snapshot?.profile.handle ? ` as @${snapshot.profile.handle}` : ""}
+          {cash != null ? ` · cash ${usd(cash)}` : ""} ·{" "}
+          <button className="small muted" style={{ textDecoration: "underline" }} onClick={() => logout()}>Log out</button>
+        </p>
+      ) : null}
+
+      {missing ? <p className="small muted" style={{ marginTop: 20 }}>{missing}</p> : null}
+
+      <div className="dock">
+        <div className="dock-inner">
+          {canFade ? (
+            <button className="btn fade" disabled={!ready} onClick={() => start("fade")}>Fade</button>
+          ) : null}
+          <button className="btn back" disabled={!ready || !canBack} onClick={() => start("back")}>
+            {canBack ? "Trade this take" : blockedLabel}
+          </button>
+        </div>
+      </div>
+
+      {step.kind !== "closed" ? (
+        <div className="sheet-wrap" onClick={(e) => e.target === e.currentTarget && !busy && setStep({ kind: "closed" })}>
+          <div className="sheet">
+            <button className="x" aria-label="Close" disabled={!!busy} onClick={() => setStep({ kind: "closed" })}>×</button>
+            {step.kind === "signin" ? (
+              <>
+                <h3>Sign in to trade</h3>
+                <p className="muted small">{X_LOGIN ? "Your account works here and on X." : "One account for trading, posting and your scores."}</p>
+                <div style={{ marginTop: 16 }}><SignIn /></div>
+              </>
+            ) : null}
+            {step.kind === "trade" ? (
+              <TradeSheet
+                side={step.side}
+                author={author}
+                receipt={receipt}
+                amount={amount}
+                setAmount={setAmount}
+                cash={cash}
+                feeRate={config.feeRate}
+                busy={busy}
+                error={error}
+                onAddCash={addCash}
+                onConfirm={() => trade(step.side)}
+              />
+            ) : null}
+            {step.kind === "sell" ? (
+              <>
+                <h3>Sell position</h3>
+                <p className="muted">
+                  Sells the whole position for fork USDC, including money held for prediction legs. It&apos;s scored at today&apos;s
+                  prices and settles right away.
+                </p>
+                <div className="row"><span>Worth now</span><span className="mono">{usd(step.position.valueUsd)}</span></div>
+                {error ? <div className="err">{error}</div> : null}
+                <button className="btn light" style={{ width: "100%", marginTop: 16 }} disabled={!!busy} onClick={() => sell(step.position)}>
+                  {busy ?? "Confirm full sale"}
+                </button>
+              </>
+            ) : null}
+            {step.kind === "done" ? (
+              <div style={{ textAlign: "center" }}>
+                <div className="check">✓</div>
+                <h3>Done</h3>
+                <p className="muted">{step.text}</p>
+                {cash != null ? <p className="mono">Cash {usd(cash)}</p> : null}
+                <button className="btn ghost" style={{ width: "100%", marginTop: 12 }} onClick={() => setStep({ kind: "closed" })}>Back to the take</button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function TradeSheet(props: {
+  side: Side;
+  author: string;
+  receipt: Receipt | null;
+  amount: string;
+  setAmount: (s: string) => void;
+  cash: number | null;
+  feeRate: number;
+  busy: string | null;
+  error: string | null;
+  onAddCash: (usd: number) => void;
+  onConfirm: () => void;
+}) {
+  const { side, receipt, amount, cash, feeRate, busy } = props;
+  const n = Number(amount) || 0;
+  const fee = n * feeRate;
+  const legs = receipt?.legs ?? [];
+  // Fading leaves out legs that can't be shorted: card legs always (docs/cards-plan.md), shown as excluded.
+  const blockedFor = (l: Receipt["legs"][number]) =>
+    side === "back" ? (l.tradable ? null : l.blocked ?? "not tradable") : (l.fadeBlocked ?? (l.card ? "Cards can't be faded" : null));
+  const included = legs.filter((l) => !blockedFor(l));
+  const totalWeight = included.reduce((s, l) => s + l.weightBps, 0) || 1;
+  const short = cash != null && cash < n + fee;
+
+  return (
+    <>
+      <h3>{side === "back" ? `Trade ${props.author}'s take` : `Fade ${props.author}'s take`}</h3>
+      <p className="muted small" style={{ margin: 0 }}>
+        {side === "back" ? "You get the same basket at today's prices." : `You win if ${props.author} is wrong. Fades are public.`}
+      </p>
+      <div className="amount">
+        $<input inputMode="decimal" value={amount} onChange={(e) => props.setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Amount" />
+      </div>
+      <div className="chips">
+        {CHIPS.map((c) => (
+          <button key={c} className={`chip ${n === c ? "on" : ""} ${side}`} onClick={() => props.setAmount(String(c))}>${c}</button>
+        ))}
+      </div>
+      <div className="caps" style={{ marginBottom: 6 }}>{side === "back" ? "What you're buying" : "What you're betting"}</div>
+      {legs.map((l) => {
+        const blocked = blockedFor(l);
+        const pred = l.prediction;
+        const heldSide = pred ? (side === "back" ? pred.side : pred.side === "yes" ? "no" : "yes") : null;
+        const price = pred && heldSide ? pred.ask[heldSide] : null;
+        return (
+          <div className={`row ${blocked ? "out" : ""}`} key={l.index}>
+            <div>
+              <span className="name">{legName(l.name)}</span>
+              {blocked ? <div className="note">{l.card && side === "fade" ? "Cards can't be faded" : blocked}</div>
+                : heldSide ? <div className="note">{heldSide === "yes" ? "Yes" : "No"}{price != null ? ` · ${Math.round(price * 100)}¢` : ""}</div>
+                : l.card ? <div className="note">{cardValue(l.card.insuredValueUsd)}</div> : null}
+            </div>
+            <span className="mono">{blocked ? (side === "fade" ? "Excluded" : "Left out") : usd((n * l.weightBps) / totalWeight)}</span>
+          </div>
+        );
+      })}
+      <div className="row muted small"><span>Bought from your wallet · Thesis fee {(feeRate * 100).toFixed(2)}%</span><span className="mono">{usd(fee)}</span></div>
+      {props.error ? <div className="err">{props.error}</div> : null}
+      {short ? (
+        <button className="btn ghost" style={{ width: "100%", marginTop: 12 }} disabled={!!busy} onClick={() => props.onAddCash(Math.max(100, Math.ceil(n + fee)))}>
+          {busy === "Adding cash…" ? busy : `Add $${Math.max(100, Math.ceil(n + fee))} cash`}
+        </button>
+      ) : null}
+      <button
+        className={`btn ${side}`}
+        style={{ width: "100%", marginTop: 12, flex: "none" }}
+        disabled={!!busy || short || !included.length || n <= 0}
+        onClick={props.onConfirm}
+      >
+        {busy && busy !== "Adding cash…" ? busy : `${side === "back" ? "Trade" : "Fade"} for $${n || 0}`}
+      </button>
+      <p className="small muted" style={{ textAlign: "center" }}>
+        {cash != null ? `From your balance · ${usd(Math.max(0, cash - n - fee))} left` : "From your balance"}
+      </p>
+    </>
+  );
+}
+
