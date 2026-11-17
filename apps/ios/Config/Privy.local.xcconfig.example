@@ -1,0 +1,5 @@
+// Copy to Privy.local.xcconfig (gitignored) and fill in. Public client values: they ship inside
+// the app. Privy Dashboard → App settings (app ID) and → Clients (the iOS client's ID).
+// Use the same Privy app as the web app (apps/www), so one account reaches the same wallet.
+PRIVY_APP_ID = <privy-app-id>
+PRIVY_CLIENT_ID = <privy-client-id>

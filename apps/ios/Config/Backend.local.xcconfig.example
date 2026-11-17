@@ -1,0 +1,7 @@
+// Copy to Backend.local.xcconfig (gitignored) and fill in. Public client values: they ship inside
+// the app. Supabase Dashboard → Project Settings → API (project URL and publishable key).
+// Debug and Release read the same file, so both point at one backend.
+//
+// xcconfig treats "//" as a comment, so the URL's slashes are split with $().
+SUPABASE_URL = https:/$()/<project-ref>.supabase.co
+SUPABASE_PUBLISHABLE_KEY = <supabase-publishable-key>

@@ -1,0 +1,17 @@
+// Debug build settings.
+//
+// Backend values (Privy app/client ID, Supabase URL and publishable key): Backend.local.xcconfig
+// and Privy.local.xcconfig, gitignored; copy their .example files. Without them the app still
+// builds, and stops at launch naming the missing value.
+#include? "Backend.local.xcconfig"
+#include? "Privy.local.xcconfig"
+
+// Dev login (welcome screen → "Dev login"): a username/password that signs in to
+// the Privy test account. Values live in DevLogin.local.xcconfig, which is
+// gitignored; copy DevLogin.local.xcconfig.example to create it. Without the
+// file the Dev login link just doesn't appear.
+#include? "DevLogin.local.xcconfig"
+
+// Fork mode (trades, cash and receipts on the local mainnet fork): Fork.local.xcconfig, also
+// gitignored; copy Fork.local.xcconfig.example. Without it the app uses the normal backend.
+#include? "Fork.local.xcconfig"

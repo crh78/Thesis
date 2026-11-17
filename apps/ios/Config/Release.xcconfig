@@ -1,0 +1,12 @@
+// Release build settings.
+//
+// Backend values: the same gitignored Backend.local.xcconfig and Privy.local.xcconfig as Debug
+// (see Debug.xcconfig).
+#include? "Backend.local.xcconfig"
+#include? "Privy.local.xcconfig"
+
+// Dev login never ships: these stay empty.
+DEV_LOGIN_USERNAME =
+DEV_LOGIN_PASSWORD =
+DEV_LOGIN_EMAIL =
+DEV_LOGIN_CODE =
