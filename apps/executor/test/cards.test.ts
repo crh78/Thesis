@@ -5,7 +5,7 @@ import { priceLeg, type PriceRules, type Sources } from "../src/settler/pricing.
 
 const M = 1_800_000_000; // the moment
 const RULES: PriceRules = { minLiquidityUsd: 50_000, liveWindowSecs: 300, maxDelaySecs: 4 * 86_400 };
-const CARD = "2026033156C116510";
+const CARD = "2026120156C116510";
 const bankRef = (over: Partial<CardRef> = {}): CardRef => ({ cardId: CARD, name: "Dratini CGC 10", insuredValueUsd: 70, readAtSec: M + 600, ...over });
 
 function source(answer: Awaited<ReturnType<CardSource["card"]>> | Error, calls: string[] = []): CardSource {

@@ -7,7 +7,7 @@ import { Router, escrowShare } from "../api/routing.ts";
 
 // Card legs: a picked card (`card:<cardId>`) is Card kind, filled on paper at
 // its insured value, its share escrowed like a prediction leg's, never faded.
-const CARD = "2026033156C116510";
+const CARD = "2026120156C116510";
 const picks = [
   { name: "Charizard PSA 10", kind: "Card", weight: 20, fade_how: null, asset_id: `card:${CARD}` },
   { name: "Above 5%", kind: "Prediction · Yes", weight: 80, fade_how: null, asset_id: "gemini:NOPE" },

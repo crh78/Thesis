@@ -4,7 +4,7 @@ import { CC_API, type CardRecord, CollectorCryptClient, CollectorCryptError, car
 
 // Shapes recorded from api.collectorcrypt.com, trimmed.
 const browseRow = {
-  id: "2026033156C116510",
+  id: "2026120156C116510",
   itemName: "2023 #147 Dratini Master Ball Reverse Holo CGC 10 Pristine Pokemon Card 151 - sv2a - Japanese",
   category: "Pokemon",
   set: "Pokémon Card 151 - sv2a - Japanese",
@@ -32,7 +32,7 @@ const unlistedRow = { ...browseRow, id: "2026120111A000001", insuredValue: "30",
 
 test("parses a browse row: insured value, not the list price, is the card's value", () => {
   const c = parseCard(browseRow)!;
-  assert.equal(c.id, "2026033156C116510");
+  assert.equal(c.id, "2026120156C116510");
   assert.equal(c.insuredValueUsd, 70);
   assert.equal(c.listedPriceUsd, 150);
   assert.deepEqual([c.category, c.grade, c.gradingCompany, c.nftStandard, c.year], ["Pokemon", "PRISTINE 10", "CGC", "pnft", 2023]);
@@ -79,12 +79,12 @@ test("a card with no insured value, or no longer a live token, can't be priced",
 });
 
 test("card leg ids: stable sha256 under their own prefix, apart from Gemini's", () => {
-  const id = cardIdHex("2026033156C116510");
+  const id = cardIdHex("2026120156C116510");
   assert.match(id, /^[0-9a-f]{64}$/);
-  assert.equal(id, cardIdHex("2026033156C116510"));
-  assert.notEqual(id, cardIdHex("2026033156C116511"));
+  assert.equal(id, cardIdHex("2026120156C116510"));
+  assert.notEqual(id, cardIdHex("2026120156C116511"));
   // Pinned so a change to the prefix (which would orphan legs already on-chain) fails here.
-  assert.equal(id, "7080404935431854b61595875d668923d667ad52c2d740fb978e58870cd3ae5f");
+  assert.equal(id, "e24be77cb976fb5cab24eb602fb2c944b5046c72472580fec2dba68a432d2488");
   assert.throws(() => cardIdHex(" "), /empty/);
 });
 
@@ -108,9 +108,9 @@ function clock() {
 test("client: one card, a User-Agent on every request, the key only as a Bearer header", async () => {
   const calls: Call[] = [];
   const c = new CollectorCryptClient({ fetchFn: fakeFetch([{ status: 200, body: singleCard }, { status: 404, body: { message: "not found" } }], calls), apiKey: "ccsk_test", ...clock() });
-  const card = await c.card("2026033156C116510");
+  const card = await c.card("2026120156C116510");
   assert.equal(card?.insuredValueUsd, 70);
-  assert.equal(calls[0].url, `${CC_API}/cards/publicNft/2026033156C116510`);
+  assert.equal(calls[0].url, `${CC_API}/cards/publicNft/2026120156C116510`);
   assert.ok(calls[0].headers["user-agent"]);
   assert.equal(calls[0].headers.authorization, "Bearer ccsk_test");
   assert.equal(await c.card("missing"), null, "a 404 is an unknown card");
@@ -125,7 +125,7 @@ test("client: pages every card (listed or not) until the cursor runs out", async
   const c = new CollectorCryptClient({ fetchFn: fakeFetch(pages, calls), ...clock() });
   const seen: string[] = [];
   for await (const batch of c.allCards()) seen.push(...batch.map((x) => x.id));
-  assert.deepEqual(seen, ["2026033156C116510", "2026120111A000001", "C3"]);
+  assert.deepEqual(seen, ["2026120156C116510", "2026120111A000001", "C3"]);
   assert.equal(calls[0].url, `${CC_API}/marketplace?step=200`);
   assert.equal(calls[1].url, `${CC_API}/marketplace?step=200&cursor=abc%3D`);
   assert.ok(!calls[0].url.includes("listPriceMin"), "unlisted cards are included");
@@ -156,7 +156,7 @@ test("client: waits out a 429 (retryAfter in the body), retries a 5xx, then give
     fetchFn: fakeFetch([{ status: 429, body: { retryAfter: 7 } }, { status: 502, body: "bad gateway" }, { status: 200, body: singleCard }], calls),
     ...k,
   });
-  assert.equal((await c.card("a"))?.id, "2026033156C116510");
+  assert.equal((await c.card("a"))?.id, "2026120156C116510");
   assert.ok(k.waits.includes(7000), "waited the 429's retryAfter");
   assert.ok(k.waits.includes(2000), "backed off after the 502");
 

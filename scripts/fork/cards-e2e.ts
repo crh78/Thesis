@@ -7,17 +7,19 @@
 // the card out, then sells and checks that the escrow comes back. The take never reaches Supabase,
 // so it stays out of every feed and board.
 //
-//   CARDS_E2E_CARD   the Collector Crypt card id to use (default: a CGC 10 Dratini). Use one the
-//                    take builder picked, so the asset bank tracks it and the settler can price it.
+//   CARDS_E2E_CARD   the Collector Crypt card id to use. Default: a card the asset bank already tracks
+//                    (one a take builder basket picked), so the settler can price it.
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { forkApiServer } from "./api/server.ts";
 import type { AppTake } from "./api/service.ts";
 import { startForkService } from "./api.ts";
+import { loadBankState } from "@thesis/venues/bank";
 import { main, syncClock } from "./lib.ts";
 
-const CARD = process.env.CARDS_E2E_CARD ?? "2026033156C116510";
+const CARD = process.env.CARDS_E2E_CARD ?? Object.values((await loadBankState()).venues.cards?.picked ?? {}).find((c) => c.insuredValueUsd)?.cardId;
+if (!CARD) throw new Error("No card to trade: set CARDS_E2E_CARD, or build a take with a card so the asset bank tracks one.");
 const TAKE: AppTake = {
   id: randomUUID(),
   claim: "Cards e2e: graded Pokémon keep climbing",
