@@ -1,0 +1,782 @@
+[
+ {
+  "id": "001",
+  "cat": "company",
+  "claim": "Nvidia keeps crushing earnings",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "002",
+  "cat": "company",
+  "claim": "Micron is the cheapest AI stock",
+  "risk": "high",
+  "horizon": "1 month"
+ },
+ {
+  "id": "003",
+  "cat": "company",
+  "claim": "Palantir keeps winning government AI contracts",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "004",
+  "cat": "company",
+  "claim": "Tesla robotaxi launch disappoints",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "005",
+  "cat": "company",
+  "claim": "Apple's AI phone upgrade cycle is real",
+  "risk": "low",
+  "horizon": "6 months"
+ },
+ {
+  "id": "006",
+  "cat": "company",
+  "claim": "Eli Lilly's obesity drugs keep selling out",
+  "risk": "low",
+  "horizon": "6 months"
+ },
+ {
+  "id": "007",
+  "cat": "company",
+  "claim": "Robinhood keeps taking share from old brokers",
+  "risk": "high",
+  "horizon": "3 months"
+ },
+ {
+  "id": "008",
+  "cat": "company",
+  "claim": "Netflix subscriber growth stalls",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "009",
+  "cat": "company",
+  "claim": "SpaceX IPO hype lifts everything space",
+  "risk": "high",
+  "horizon": "3 months"
+ },
+ {
+  "id": "010",
+  "cat": "company",
+  "claim": "Chipotle sales slump continues",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "011",
+  "cat": "company",
+  "claim": "Coinbase wins from crypto regulation",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "012",
+  "cat": "company",
+  "claim": "Krispy Kreme makes a comeback",
+  "risk": "high",
+  "horizon": "1 month"
+ },
+ {
+  "id": "013",
+  "cat": "theme",
+  "claim": "AI power demand is underrated",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "014",
+  "cat": "theme",
+  "claim": "Memory chips are the real AI bottleneck",
+  "risk": "high",
+  "horizon": "1 month"
+ },
+ {
+  "id": "015",
+  "cat": "theme",
+  "claim": "Quantum computing stocks rip again",
+  "risk": "high",
+  "horizon": "1 month"
+ },
+ {
+  "id": "016",
+  "cat": "theme",
+  "claim": "GLP-1 drugs reshape food and healthcare",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "017",
+  "cat": "theme",
+  "claim": "Defense spending keeps rising worldwide",
+  "risk": "low",
+  "horizon": "6 months"
+ },
+ {
+  "id": "018",
+  "cat": "theme",
+  "claim": "The space economy is about to take off",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "019",
+  "cat": "theme",
+  "claim": "Bitcoin miners pivot to AI data centers",
+  "risk": "high",
+  "horizon": "3 months"
+ },
+ {
+  "id": "020",
+  "cat": "theme",
+  "claim": "Sports betting keeps growing",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "021",
+  "cat": "theme",
+  "claim": "Streaming wars have a clear winner",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "022",
+  "cat": "theme",
+  "claim": "Fast food is losing customers to GLP-1",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "023",
+  "cat": "theme",
+  "claim": "Copper is the new oil for electrification",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "024",
+  "cat": "theme",
+  "claim": "Robotics is the next AI trade",
+  "risk": "high",
+  "horizon": "6 months"
+ },
+ {
+  "id": "025",
+  "cat": "theme",
+  "claim": "Retail traders are back in force",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "026",
+  "cat": "theme",
+  "claim": "Cloud AI spending slows next year",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "027",
+  "cat": "theme",
+  "claim": "Video game stocks win the holiday season",
+  "risk": "medium",
+  "horizon": "2 weeks"
+ },
+ {
+  "id": "028",
+  "cat": "theme",
+  "claim": "Luxury spending holds up",
+  "risk": "low",
+  "horizon": "6 months"
+ },
+ {
+  "id": "029",
+  "cat": "macro",
+  "claim": "The Fed cuts in December",
+  "risk": "low",
+  "horizon": "1 month"
+ },
+ {
+  "id": "030",
+  "cat": "macro",
+  "claim": "Inflation comes in hot and the Fed holds",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "031",
+  "cat": "macro",
+  "claim": "A recession hits before year end",
+  "risk": "low",
+  "horizon": "3 months"
+ },
+ {
+  "id": "032",
+  "cat": "macro",
+  "claim": "The S&P 500 ends the year above 7000",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "033",
+  "cat": "macro",
+  "claim": "Gold keeps hitting new highs",
+  "risk": "low",
+  "horizon": "3 months"
+ },
+ {
+  "id": "034",
+  "cat": "macro",
+  "claim": "Oil spikes on Middle East tension",
+  "risk": "high",
+  "horizon": "2 weeks"
+ },
+ {
+  "id": "035",
+  "cat": "macro",
+  "claim": "Brazil is the best emerging market this year",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "036",
+  "cat": "macro",
+  "claim": "Real estate rebounds as rates fall",
+  "risk": "low",
+  "horizon": "6 months"
+ },
+ {
+  "id": "037",
+  "cat": "macro",
+  "claim": "Unemployment rises above 5%",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "038",
+  "cat": "macro",
+  "claim": "Silver outperforms gold",
+  "risk": "high",
+  "horizon": "1 month"
+ },
+ {
+  "id": "039",
+  "cat": "macro",
+  "claim": "Natural gas prices jump this winter",
+  "risk": "high",
+  "horizon": "1 month"
+ },
+ {
+  "id": "040",
+  "cat": "macro",
+  "claim": "The Nasdaq beats the S&P into year end",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "041",
+  "cat": "crypto",
+  "claim": "Bitcoin hits 150k",
+  "risk": "high",
+  "horizon": "3 months"
+ },
+ {
+  "id": "042",
+  "cat": "crypto",
+  "claim": "Solana outperforms Ethereum",
+  "risk": "high",
+  "horizon": "1 month"
+ },
+ {
+  "id": "043",
+  "cat": "crypto",
+  "claim": "Stablecoins go mainstream",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "044",
+  "cat": "crypto",
+  "claim": "Strategy keeps buying bitcoin and wins",
+  "risk": "high",
+  "horizon": "3 months"
+ },
+ {
+  "id": "045",
+  "cat": "crypto",
+  "claim": "Bitcoin is above 100k at the end of November",
+  "risk": "medium",
+  "horizon": "2 weeks"
+ },
+ {
+  "id": "046",
+  "cat": "crypto",
+  "claim": "Crypto market structure bill becomes law",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "047",
+  "cat": "crypto",
+  "claim": "XRP rallies into December",
+  "risk": "high",
+  "horizon": "2 weeks"
+ },
+ {
+  "id": "048",
+  "cat": "crypto",
+  "claim": "Crypto winter is coming",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "049",
+  "cat": "event",
+  "claim": "Gavin Newsom is the 2028 Democratic nominee",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "050",
+  "cat": "event",
+  "claim": "JD Vance wins the 2028 presidency",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "051",
+  "cat": "event",
+  "claim": "Gemini is the best AI model at the end of 2026",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "052",
+  "cat": "event",
+  "claim": "Tesla releases Optimus this year",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "053",
+  "cat": "event",
+  "claim": "Avengers Doomsday gets great reviews",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "054",
+  "cat": "event",
+  "claim": "Stripe announces an IPO",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "055",
+  "cat": "event",
+  "claim": "The US takes a stake in more companies",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "056",
+  "cat": "event",
+  "claim": "US GDP growth beats 2% this year",
+  "risk": "low",
+  "horizon": "3 months"
+ },
+ {
+  "id": "057",
+  "cat": "event",
+  "claim": "Copper is above 5 dollars on November 30",
+  "risk": "high",
+  "horizon": "2 weeks"
+ },
+ {
+  "id": "058",
+  "cat": "event",
+  "claim": "The US buys part of Greenland",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "059",
+  "cat": "event",
+  "claim": "GTA 6 wins Game of the Year",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "060",
+  "cat": "event",
+  "claim": "Dune Part Three is a critical hit",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "061",
+  "cat": "event",
+  "claim": "Unemployment stays low this year",
+  "risk": "low",
+  "horizon": "1 month"
+ },
+ {
+  "id": "062",
+  "cat": "event",
+  "claim": "Macron's party loses the French election",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "063",
+  "cat": "sports",
+  "claim": "The Packers beat the Vikings this week",
+  "risk": "medium",
+  "horizon": "2 weeks"
+ },
+ {
+  "id": "064",
+  "cat": "sports",
+  "claim": "Real Madrid wins the Champions League",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "065",
+  "cat": "sports",
+  "claim": "The Chiefs win the Super Bowl",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "066",
+  "cat": "sports",
+  "claim": "Arsenal wins the Premier League",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "067",
+  "cat": "sports",
+  "claim": "Ohio State wins the college football title",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "068",
+  "cat": "sports",
+  "claim": "The Lions win the NFC",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "069",
+  "cat": "sports",
+  "claim": "Josh Allen wins MVP",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "070",
+  "cat": "sports",
+  "claim": "Duke wins March Madness",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "071",
+  "cat": "sports",
+  "claim": "Scottie Scheffler wins the Austin Championship",
+  "risk": "high",
+  "horizon": "2 weeks"
+ },
+ {
+  "id": "072",
+  "cat": "sports",
+  "claim": "The Oilers win the Stanley Cup",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "073",
+  "cat": "copy",
+  "claim": "Chip stocks run into year end",
+  "risk": "medium",
+  "horizon": "3 months",
+  "source": {
+   "kind": "post",
+   "label": "@KobeissiLetter on X",
+   "text": "Semiconductors are breaking out. $MU $SNDK and $AMD look ready to lead into year end as memory pricing spikes."
+  }
+ },
+ {
+  "id": "074",
+  "cat": "copy",
+  "claim": "Copying Pershing Square's 13F",
+  "risk": "medium",
+  "horizon": "6 months",
+  "source": {
+   "kind": "holdings",
+   "label": "Pershing Square 13F (Q3)",
+   "text": "Top holdings: Alphabet 19%, Uber 18%, Brookfield 15%, Restaurant Brands 12%, Chipotle 10%, Hilton 9%, Amazon 8%"
+  }
+ },
+ {
+  "id": "075",
+  "cat": "copy",
+  "claim": "Copying Berkshire's biggest positions",
+  "risk": "low",
+  "horizon": "6 months",
+  "source": {
+   "kind": "holdings",
+   "label": "Berkshire Hathaway 13F",
+   "text": "Apple 22%, American Express 16%, Bank of America 11%, Coca-Cola 10%, Chevron 7%, Occidental 5%"
+  }
+ },
+ {
+  "id": "076",
+  "cat": "copy",
+  "claim": "Copying ARK's latest buys",
+  "risk": "high",
+  "horizon": "3 months",
+  "source": {
+   "kind": "holdings",
+   "label": "ARK Invest daily trades",
+   "text": "Bought: Tesla, Palantir, Robinhood, Coinbase, Roblox, Shopify"
+  }
+ },
+ {
+  "id": "077",
+  "cat": "copy",
+  "claim": "Copying Pelosi's latest trades",
+  "risk": "high",
+  "horizon": "3 months",
+  "source": {
+   "kind": "holdings",
+   "label": "Nancy Pelosi disclosures",
+   "text": "Bought NVDA calls, bought GOOGL calls, bought Tempus AI, sold Apple"
+  }
+ },
+ {
+  "id": "078",
+  "cat": "copy",
+  "claim": "Quantum is the next big thing",
+  "risk": "high",
+  "horizon": "1 month",
+  "source": {
+   "kind": "post",
+   "label": "@QuantumBull on X",
+   "text": "$IONQ and $QUBT are about to go parabolic. Quantum winter is over."
+  }
+ },
+ {
+  "id": "079",
+  "cat": "copy",
+  "claim": "Energy is the trade of the decade",
+  "risk": "medium",
+  "horizon": "6 months",
+  "source": {
+   "kind": "post",
+   "label": "@EnergyTrader on X",
+   "text": "Long $XLE, long $BE, long copper. AI needs power and nobody is ready."
+  }
+ },
+ {
+  "id": "080",
+  "cat": "copy",
+  "claim": "Gold and bitcoin both go up",
+  "risk": "medium",
+  "horizon": "3 months",
+  "source": {
+   "kind": "post",
+   "label": "@MacroAlf on X",
+   "text": "Debasement trade is back: gold and bitcoin both higher from here. $GLD $MSTR"
+  }
+ },
+ {
+  "id": "081",
+  "cat": "copy",
+  "claim": "Restaurants are in trouble",
+  "risk": "medium",
+  "horizon": "3 months",
+  "source": {
+   "kind": "post",
+   "label": "@ConsumerWatch on X",
+   "text": "Foot traffic at $CMG $MCD $WEN is falling fast. GLP-1 is eating fast food."
+  }
+ },
+ {
+  "id": "082",
+  "cat": "copy",
+  "claim": "Defense names keep winning contracts",
+  "risk": "low",
+  "horizon": "6 months",
+  "source": {
+   "kind": "article",
+   "label": "Reuters",
+   "text": "The Pentagon awarded Lockheed Martin and Boeing new contracts worth $12 billion as defense budgets climb across NATO."
+  }
+ },
+ {
+  "id": "083",
+  "cat": "copy",
+  "claim": "AI capex keeps exploding",
+  "risk": "medium",
+  "horizon": "6 months",
+  "source": {
+   "kind": "article",
+   "label": "Bloomberg",
+   "text": "Microsoft, Alphabet and Meta raised capital spending guidance again, citing demand for AI data centers; Nvidia and memory makers stand to benefit."
+  }
+ },
+ {
+  "id": "084",
+  "cat": "copy",
+  "claim": "Streaming is a two horse race",
+  "risk": "medium",
+  "horizon": "6 months",
+  "source": {
+   "kind": "article",
+   "label": "The Verge",
+   "text": "Netflix and YouTube now account for over half of US streaming time, while smaller services struggle to keep subscribers."
+  }
+ },
+ {
+  "id": "085",
+  "cat": "copy",
+  "claim": "The Fed is about to cut",
+  "risk": "low",
+  "horizon": "1 month",
+  "source": {
+   "kind": "article",
+   "label": "WSJ",
+   "text": "Fed officials signaled a December cut is likely after inflation cooled for a third straight month."
+  }
+ },
+ {
+  "id": "086",
+  "cat": "copy",
+  "claim": "Copying a top Polymarket trader",
+  "risk": "medium",
+  "horizon": "1 month",
+  "source": {
+   "kind": "holdings",
+   "label": "@PredictionPro trades",
+   "text": "Yes on Fed cut 25bps in December, yes on Real Madrid Champions League, no on recession this year"
+  }
+ },
+ {
+  "id": "087",
+  "cat": "copy",
+  "claim": "Copying a meme stock account",
+  "risk": "high",
+  "horizon": "2 weeks",
+  "source": {
+   "kind": "post",
+   "label": "@RoaringKitty on X",
+   "text": "$GME $AMC $BB. You know what time it is."
+  }
+ },
+ {
+  "id": "088",
+  "cat": "copy",
+  "claim": "Space stocks are the next leg",
+  "risk": "high",
+  "horizon": "3 months",
+  "source": {
+   "kind": "post",
+   "label": "@SpaceInvestor on X",
+   "text": "$RKLB and SpaceX exposure is the only space trade that matters right now."
+  }
+ },
+ {
+  "id": "089",
+  "cat": "edge",
+  "claim": "Happy Friday everyone",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "090",
+  "cat": "edge",
+  "claim": "I love my dog",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "091",
+  "cat": "edge",
+  "claim": "The market is overvalued",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "092",
+  "cat": "edge",
+  "claim": "Vistra keeps ripping on nuclear deals",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "093",
+  "cat": "edge",
+  "claim": "Something big is coming",
+  "risk": "high",
+  "horizon": "1 month"
+ },
+ {
+  "id": "094",
+  "cat": "edge",
+  "claim": "Buy the dip",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "095",
+  "cat": "edge",
+  "claim": "Interest rates stay higher for longer",
+  "risk": "low",
+  "horizon": "6 months"
+ },
+ {
+  "id": "096",
+  "cat": "edge",
+  "claim": "China stimulus lifts everything",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "097",
+  "cat": "edge",
+  "claim": "Uber beats Lyft",
+  "risk": "medium",
+  "horizon": "3 months"
+ },
+ {
+  "id": "098",
+  "cat": "edge",
+  "claim": "The housing market crashes",
+  "risk": "medium",
+  "horizon": "6 months"
+ },
+ {
+  "id": "099",
+  "cat": "edge",
+  "claim": "Everything goes up in December",
+  "risk": "medium",
+  "horizon": "1 month"
+ },
+ {
+  "id": "100",
+  "cat": "edge",
+  "claim": "AI is a bubble that pops next year",
+  "risk": "medium",
+  "horizon": "6 months"
+ }
+]
