@@ -1,0 +1,27 @@
+skip_local_validator = true
+
+[toolchain]
+anchor_version = "1.2.2"
+solana_version = "4.1.2"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+thesis = "HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe"
+# Test-only venue stand-in for LiteSVM (tests/common); never deployed.
+mock_venue = "6wyYbfk7tXFAejgwcnQNSk7k4qRxe7TpBYSGAcwKEftn"
+# Test-only Phoenix stand-in for LiteSVM, at Phoenix's own id (tests/common); never deployed.
+mock_phoenix = "EtrnLzgbS7nMMy5fbD42kXiUzGg8XQzJ972Xtk1cjWih"
+
+# Fill in at mainnet launch (docs/onchain-plan.md, step 12)
+[programs.mainnet]
+# thesis = "<PROGRAM_ID>"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test"
