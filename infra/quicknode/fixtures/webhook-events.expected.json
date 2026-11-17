@@ -1,0 +1,131 @@
+[
+  {
+    "signature": "yyzutUEmj8YVT5qkMSfb8k2EfAhjEFMDrsVngcv4EwX2zHYdKpSNDPrKG3qKdy1JZdZKi7ywiR7TNYj4E2iCTiq",
+    "ordinal": 0,
+    "slot": 380000000,
+    "block_time": 1800000000,
+    "name": "takeCreated",
+    "data": {
+      "take": "3fo9CmA9Cn6G3NJ9Co4FtkG8PjWNfcDEjuxZKb96jDpL",
+      "author": "BRfeVhakULdf41zG4hj2rLTV3Ych8ZY5gma3sPRLyhwi",
+      "claimHash": [
+        176,
+        250,
+        129,
+        202,
+        17,
+        200,
+        7,
+        115,
+        98,
+        174,
+        162,
+        75,
+        96,
+        56,
+        76,
+        69,
+        179,
+        183,
+        75,
+        32,
+        166,
+        193,
+        44,
+        44,
+        67,
+        152,
+        79,
+        248,
+        67,
+        66,
+        168,
+        121
+      ],
+      "risk": "medium",
+      "horizonEnd": "1800000000",
+      "legs": 2,
+      "stake": "10000000"
+    }
+  },
+  {
+    "signature": "yyzutUEmj8YVT5qkMSfb8k2EfAhjEFMDrsVngcv4EwX2zHYdKpSNDPrKG3qKdy1JZdZKi7ywiR7TNYj4E2iCTiq",
+    "ordinal": 1,
+    "slot": 380000000,
+    "block_time": 1800000000,
+    "name": "positionOpened",
+    "data": {
+      "take": "3fo9CmA9Cn6G3NJ9Co4FtkG8PjWNfcDEjuxZKb96jDpL",
+      "position": "EcGDjf4ryjhvCdBBrwchqkQVNuDKvJRBweC75Htf77TL",
+      "owner": "BRfeVhakULdf41zG4hj2rLTV3Ych8ZY5gma3sPRLyhwi",
+      "side": "back",
+      "stake": "10000000",
+      "legsMask": 3,
+      "fee": "0",
+      "creatorFee": "0",
+      "scored": true,
+      "escrowed": "0"
+    }
+  },
+  {
+    "signature": "5g4L86YTR6AsyAixrj6he9n5nkFkE7HMwoACxYn1RJGK7TDeBoz8Z3d1jeaJQbpGFMWJhNi3hwjfHwAK55JV9CTd",
+    "ordinal": 0,
+    "slot": 380000001,
+    "block_time": 1800000001,
+    "name": "positionOpened",
+    "data": {
+      "take": "3fo9CmA9Cn6G3NJ9Co4FtkG8PjWNfcDEjuxZKb96jDpL",
+      "position": "Fbyi5JTiXs775ELSVkUzxhqLBFCrUeHk9dcC7BQd47aZ",
+      "owner": "BB3Ss6kNAsHn64ynexWEX9HZbPoK44LJH37Gx6fAiQSE",
+      "side": "back",
+      "stake": "25000000",
+      "legsMask": 1,
+      "fee": "25000",
+      "creatorFee": "12500",
+      "scored": true,
+      "escrowed": "0"
+    }
+  },
+  {
+    "signature": "5j2Ck4GANbTuHDtTm5hJgNgS7L7pyAeX6kmXFBbeSinPTHtEXRRVkmvdguz4wsQVVBrMP6Fo7vn8tPmErwRefFkm",
+    "ordinal": 0,
+    "slot": 380000001,
+    "block_time": 1800000001,
+    "name": "takeSettled",
+    "data": {
+      "take": "3fo9CmA9Cn6G3NJ9Co4FtkG8PjWNfcDEjuxZKb96jDpL",
+      "author": "BRfeVhakULdf41zG4hj2rLTV3Ych8ZY5gma3sPRLyhwi",
+      "resultBps": "1250"
+    }
+  },
+  {
+    "signature": "5j2Ck4GANbTuHDtTm5hJgNgS7L7pyAeX6kmXFBbeSinPTHtEXRRVkmvdguz4wsQVVBrMP6Fo7vn8tPmErwRefFkm",
+    "ordinal": 1,
+    "slot": 380000001,
+    "block_time": 1800000001,
+    "name": "positionSettled",
+    "data": {
+      "take": "3fo9CmA9Cn6G3NJ9Co4FtkG8PjWNfcDEjuxZKb96jDpL",
+      "position": "Fbyi5JTiXs775ELSVkUzxhqLBFCrUeHk9dcC7BQd47aZ",
+      "owner": "BB3Ss6kNAsHn64ynexWEX9HZbPoK44LJH37Gx6fAiQSE",
+      "side": "back",
+      "returnBps": "1250",
+      "pnl": "3125000",
+      "scored": true,
+      "exited": false,
+      "escrowReturned": "0"
+    }
+  },
+  {
+    "signature": "5j2Ck4GANbTuHDtTm5hJgNgS7L7pyAeX6kmXFBbeSinPTHtEXRRVkmvdguz4wsQVVBrMP6Fo7vn8tPmErwRefFkm",
+    "ordinal": 2,
+    "slot": 380000001,
+    "block_time": 1800000001,
+    "name": "badgeMinted",
+    "data": {
+      "owner": "BRfeVhakULdf41zG4hj2rLTV3Ych8ZY5gma3sPRLyhwi",
+      "kind": "firstOver50",
+      "mint": "CRDzGkfnCKQQXxn7xyFW6awpSCNshULu4YyNtXsma99R"
+    }
+  }
+]

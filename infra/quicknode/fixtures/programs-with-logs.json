@@ -1,0 +1,278 @@
+{
+  "data": [
+    [
+      {
+        "signature": "3wTAo7ESm6rc6UqLkeypJz6YgF4XEgxrzWoGCXVLdbC2tEaAnU4pUSS31jEcw9sgGQ8oPDwmmknkaNztJ9sFLnvC",
+        "slot": 380000000,
+        "blockTime": 1800000000,
+        "programInvocations": [
+          {
+            "programId": "11111111111111111111111111111111",
+            "instruction": {
+              "index": 0,
+              "accounts": [],
+              "data": "3Bxs4h24hBtQy9rw",
+              "tokenBalances": []
+            }
+          }
+        ],
+        "logs": [
+          "Program 11111111111111111111111111111111 invoke [1]",
+          "Program 11111111111111111111111111111111 success"
+        ],
+        "success": true
+      },
+      {
+        "signature": "yyzutUEmj8YVT5qkMSfb8k2EfAhjEFMDrsVngcv4EwX2zHYdKpSNDPrKG3qKdy1JZdZKi7ywiR7TNYj4E2iCTiq",
+        "slot": 380000000,
+        "blockTime": 1800000000,
+        "programInvocations": [
+          {
+            "programId": "ComputeBudget111111111111111111111111111111",
+            "instruction": {
+              "index": 0,
+              "accounts": [],
+              "data": "3gJqkocMWaMm",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe",
+            "instruction": {
+              "index": 1,
+              "accounts": [],
+              "data": "2aTUJP3do4fbLjk9bRVnbrGruqD6CdqjD2GUo8Ppmby9KxehjkUasSSaycoNHzeccBKqr7bJ1YLrnjF8xTsvCqsYzu2CABtUjcs",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "instruction": {
+              "index": 1,
+              "accounts": [],
+              "data": "g7Yr5DnhKqDcX",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe",
+            "instruction": {
+              "index": 1,
+              "accounts": [],
+              "data": "8r5FjvJobSLo2Ma4tuavhkEXmcuNdqRzbKdqUCH34JnrXHiQepdY1yXEEGz7URHKYUxtiE7ARD5mwupJu1S9vpxi9PoVCd1J7s2M1PkAeeepqna6Vq8Avb44a2s8ZMu6kEb65UcZs5L6gntTmHXVkpx43ihGcMNhwKm5Die3ksE3t1kRv7",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe",
+            "instruction": {
+              "index": 1,
+              "accounts": [],
+              "data": "2SK2J3MxzG2ZtbzcxnRKHLEKAe9u3hcr1nicDKHc8ThW93MAEFyRqvrHPUmj9XHJRtnXvcxgofwHAk88qXe79M2wN2pCaCX75qvjkPLjKUhsjw98RDjyWUWLgmzGDnH9qfw32T77dyArNCTdV2u1eDvveffSpHrL6WL3UHxcnnarPgThR47mTv6i9AKMXRUDzWpr9S8LuAX",
+              "tokenBalances": []
+            }
+          }
+        ],
+        "logs": [
+          "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+          "Program ComputeBudget111111111111111111111111111111 success",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [1]",
+          "Program log: Instruction: CreateTake",
+          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]",
+          "Program log: Instruction: TransferChecked",
+          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 6200 of 200000 compute units",
+          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [2]",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 2700 of 200000 compute units",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [2]",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 2700 of 200000 compute units",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 41000 of 200000 compute units",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success"
+        ],
+        "success": true
+      },
+      {
+        "signature": "2HxsRXaSQZXpuibBb2Hq836s2cNUgz1YUYgPUybkbkHyuwe7aWhoZFu5GjrfdY2ksp5RmFMFUUoMXQZbJCfMq1U4",
+        "slot": 380000000,
+        "blockTime": 1800000000,
+        "programInvocations": [
+          {
+            "programId": "HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe",
+            "instruction": {
+              "index": 0,
+              "accounts": [],
+              "data": "779BGvMb6kus1jPM344xiAhDNGLEtjiLA3axP3S2kT1",
+              "tokenBalances": []
+            }
+          }
+        ],
+        "logs": [
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [1]",
+          "Program log: Instruction: Back",
+          "Program log: AnchorError occurred. Error Code: TakeClosed. Error Number: 6001.",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 9000 of 200000 compute units",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe failed: custom program error: 0x1771"
+        ],
+        "success": false
+      }
+    ],
+    [
+      {
+        "signature": "5g4L86YTR6AsyAixrj6he9n5nkFkE7HMwoACxYn1RJGK7TDeBoz8Z3d1jeaJQbpGFMWJhNi3hwjfHwAK55JV9CTd",
+        "slot": 380000001,
+        "blockTime": 1800000001,
+        "programInvocations": [
+          {
+            "programId": "SMPLecH534NA9acpos4G6x7uf3LWbCAwZQE9e8ZekMu",
+            "instruction": {
+              "index": 0,
+              "accounts": [],
+              "data": "5Kxq9bLv2tYb",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe",
+            "instruction": {
+              "index": 0,
+              "accounts": [],
+              "data": "779BGvMb6kus1jPM344xiAhDNGLEtjiLA3axP3S2kT1",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+            "instruction": {
+              "index": 0,
+              "accounts": [],
+              "data": "2Rh7LqY3pN",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "instruction": {
+              "index": 0,
+              "accounts": [],
+              "data": "3Dc8EpW7Kc",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe",
+            "instruction": {
+              "index": 0,
+              "accounts": [],
+              "data": "2SK2J3MxzG2ZtbzcxnRKHLEKAe9u3hcr1nicDKHc8ThW93MAEFyRqvrHPUmj9XHJRto7FdM2k4XYPVYB8YMamb8NVEyT6FE997N2piojUmBMok7WyqvZyJjQYBYdWfhALLKtCGwXTt5Juv17oiUXPTCRwigBZZsYMaW9raQBsZc1hkSF8kVyqvEcFqRZdGasDLMQ8Q2yxX9",
+              "tokenBalances": []
+            }
+          }
+        ],
+        "logs": [
+          "Program SMPLecH534NA9acpos4G6x7uf3LWbCAwZQE9e8ZekMu invoke [1]",
+          "Program log: Instruction: ExecuteTransaction",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [2]",
+          "Program log: Instruction: Back",
+          "Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 invoke [3]",
+          "Program log: Instruction: Route",
+          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [4]",
+          "Program log: Instruction: Transfer",
+          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4645 of 200000 compute units",
+          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+          "Program log: swap noise that the filter should drop",
+          "Program return: JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 AAAAAAAAAAA=",
+          "Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 consumed 60000 of 200000 compute units",
+          "Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 success",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [3]",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 2700 of 200000 compute units",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 90000 of 200000 compute units",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success",
+          "Program SMPLecH534NA9acpos4G6x7uf3LWbCAwZQE9e8ZekMu consumed 120000 of 200000 compute units",
+          "Program SMPLecH534NA9acpos4G6x7uf3LWbCAwZQE9e8ZekMu success"
+        ],
+        "success": true
+      },
+      {
+        "signature": "5j2Ck4GANbTuHDtTm5hJgNgS7L7pyAeX6kmXFBbeSinPTHtEXRRVkmvdguz4wsQVVBrMP6Fo7vn8tPmErwRefFkm",
+        "slot": 380000001,
+        "blockTime": 1800000001,
+        "programInvocations": [
+          {
+            "programId": "HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe",
+            "instruction": {
+              "index": 0,
+              "accounts": [],
+              "data": "KfKYWKxrz1",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe",
+            "instruction": {
+              "index": 1,
+              "accounts": [],
+              "data": "6d4ihPjkyKc",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe",
+            "instruction": {
+              "index": 2,
+              "accounts": [],
+              "data": "hdc9Bs3ggM6",
+              "tokenBalances": []
+            }
+          },
+          {
+            "programId": "11111111111111111111111111111111",
+            "instruction": {
+              "index": 1,
+              "accounts": [],
+              "data": "3Bxs4h24hBtQy9rw",
+              "tokenBalances": []
+            }
+          }
+        ],
+        "logs": [
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [1]",
+          "Program log: Instruction: SettleTake",
+          "Program data: MU/+dfOMJl4np53rkNkpV9n7XzZSHOkKFioFQayqQY1ZBKfPa5QYyZrmgaHW/ZlCGFo8vtddEorfKuLokxjFQ4U63vrwgax14gQAAAAAAAA=",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 20000 of 200000 compute units",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [1]",
+          "Program log: Instruction: SettlePosition",
+          "Program 11111111111111111111111111111111 invoke [2]",
+          "Program 11111111111111111111111111111111 success",
+          "Program data: S2RcvfV0/N0np53rkNkpV9n7XzZSHOkKFioFQayqQY1ZBKfPa5QYydj5fA/Cx0Kv4KH9efiel80+3peZYVsMlGCTgRLeSkMKlydxZq1JOmHk30PBz5KwfkW9aktitDj7nOXqNnpZ82sA4gQAAAAAAAAIry8AAAAAAAEAAAAAAAAAAAA=",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 30000 of 200000 compute units",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [1]",
+          "Program log: Instruction: MintBadge",
+          "Program data: NeNESHNOGQ6a5oGh1v2ZQhhaPL7XXRKK3yri6JMYxUOFOt768IGsdQGppS440cv9zZcf3xJFycM9fxn/PNlCHZFL1EHc+LJuMA==",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 50000 of 200000 compute units",
+          "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success"
+        ],
+        "success": true
+      }
+    ]
+  ],
+  "metadata": {
+    "batch_start_range": 380000000,
+    "batch_end_range": 380000001,
+    "blocks_reorged": null,
+    "data_size_bytes": 0,
+    "dataset": "programs_with_logs",
+    "end_range": -1,
+    "keep_distance_from_tip": 0,
+    "network": "solana-mainnet",
+    "reorgs": null,
+    "start_range": 380000000,
+    "stream_id": "00000000-0000-4000-8000-000000000000",
+    "stream_name": "thesis-mainnet",
+    "stream_region": "usa_east"
+  }
+}
