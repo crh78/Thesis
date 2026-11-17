@@ -1,0 +1,1659 @@
+{
+ "recordedAt": "2026-11-17T18:35:43.846Z",
+ "note": "Live Jupiter quotes (USDC in, maxAccounts=30) and bank entries; see record-fixtures.ts",
+ "underlyings": {
+  "equity:US:NVDA": {
+   "key": "equity:US:NVDA",
+   "idHex": "4ca6f3b31f7d24ced494f8f274344834a73d2c57974862ef4c4837d7dcd1bc53",
+   "cls": "equity",
+   "code": "NVDA",
+   "name": "NVIDIA",
+   "themes": [
+    "AI and compute"
+   ],
+   "mints": [
+    "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+    "NVDAVuiB7hwd3m5Wa1JuHNovPaPG6BH1QNztbKFxNjv",
+    "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo",
+    "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu"
+   ],
+   "perps": [],
+   "pythFeedId": "b1073854ed24cbc755dc527418f52b7d271f6cc967bbf8d8129112b18860a593",
+   "refPriceUsd": 153.74,
+   "refPriceSource": "jupiter stockData.price",
+   "refPriceAt": "2026-11-17T18:34:38.296Z"
+  },
+  "etf:US:SPY": {
+   "key": "etf:US:SPY",
+   "idHex": "ea7852bf38f664b021b86808353379da185b91971847d383e21e6a95ce92982f",
+   "cls": "etf",
+   "code": "SPY",
+   "name": "SP500",
+   "themes": [
+    "Index and macro"
+   ],
+   "mints": [
+    "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+    "SPYBo66VJPFjh1pXMb9Le53kDYWTK1zzYVDeVRWtsbi",
+    "k18WJUULWheRkSpSquYGdNNmtuE2Vbw1hpuUi92ondo",
+    "AVw2QGVkXJPRPRjLAceXVoLqU5DVtJ53mdgMXp14yGit"
+   ],
+   "perps": [],
+   "pythFeedId": "19e09bb805456ada3979a7d1cbb4b6d63babc3a0f8e8a9509f68afa5c4c11cd5",
+   "refPriceUsd": 731.48,
+   "refPriceSource": "jupiter stockData.price",
+   "refPriceAt": "2026-11-17T18:34:38.296Z"
+  },
+  "commodity:XAU": {
+   "key": "commodity:XAU",
+   "idHex": "6d16065c78baf0240070148c131ba57bcf8cd0c1d72b49fda56635d15fdd9a63",
+   "cls": "commodity",
+   "code": "XAU",
+   "name": "GOLD",
+   "themes": [
+    "Commodities"
+   ],
+   "mints": [
+    "5GgRAEmv8ZxF2PR5hY72Qs5x1bnQ6UK2RbTPoqJ3wSwW",
+    "AymATz4TCL9sWNEEV9Kvyz45CHVhDZ6kUgjTJPzLpU9P",
+    "GoLDppdjB1vDTPSGxyMJFqdnj134yH6Prg9eqsGDiw6A",
+    "dg1dmo6NZNagkwB6EAfUeaco6CFXFLRhb1KCrsqXTVz",
+    "9TPL8droGJ7jThsq4momaoz6uhTcvX2SeMqipoPmNa8R",
+    "5aLhp9VnUEKcsdtkfsf2DUgpJfomx7GmYVny24dHUZoB"
+   ],
+   "perps": [],
+   "pythFeedId": "765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2",
+   "refPriceUsd": 3850.693759925114,
+   "refPriceSource": "median of issuer prices",
+   "refPriceAt": "2026-11-17T18:34:38.296Z"
+  },
+  "private:OPENAI": {
+   "key": "private:OPENAI",
+   "idHex": "91ef5e3f86b656c5088e4615a7c0c315f09d2bd48bbe13a4e6ea21590afd0290",
+   "cls": "private",
+   "code": "OPENAI",
+   "name": "T-OpenAI",
+   "themes": [
+    "AI and compute"
+   ],
+   "mints": [
+    "PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF",
+    "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ"
+   ],
+   "perps": [],
+   "pythFeedId": "96d4bb23a3db78fdb72b3a03ce80ead686096f324319166534d9a27c0519c483",
+   "refPriceUsd": 1004.7262087750189,
+   "refPriceSource": "jupiter stockData.price",
+   "refPriceAt": "2026-11-17T18:34:38.296Z"
+  }
+ },
+ "tokens": {
+  "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh": {
+   "mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+   "symbol": "NVDAx",
+   "name": "NVIDIA xStock",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "issuerTag": "xstocks",
+   "category": "stock",
+   "underlying": "equity:US:NVDA",
+   "decimals": 8,
+   "program": "token-2022",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": true,
+   "scaledUi": {
+    "multiplier": 1.0009180758490996,
+    "newMultiplier": 1.001701196801074,
+    "newMultiplierEffectiveAt": 1794787200
+   },
+   "ratio": {
+    "comparable": true,
+    "underlyingPerUiToken": 1,
+    "unit": "share",
+    "basis": "xStocks: one UI token (raw amount x ScaledUiAmount multiplier) = one share-equivalent",
+    "sources": [
+     {
+      "url": "https://support.kraken.com/articles/xstocks-faq",
+      "note": "multiplier = ratio between an xStock and its underlying"
+     },
+     {
+      "url": "https://support.kraken.com/articles/corporate-actions-xstocks-kraken-app",
+      "note": "dividends raise the multiplier"
+     },
+     {
+      "url": "https://solana.com/docs/tokens/extensions/scaled-ui-amount",
+      "note": "UI amount = raw amount x multiplier"
+     }
+    ]
+   },
+   "usPersons": "no",
+   "jupiterPooledUsd": 2160157.344797575,
+   "holders": 216266,
+   "pythFeedId": "4244d07890e4610f46bbde67de8f43a4bf8b569eebe904f136b469f148503b7f",
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 153.85453161115555,
+    "underlyingUsd": 153.74,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": {
+    "at": "2026-11-17T18:15:52.290Z",
+    "maxAccounts": 30,
+    "quotes": [
+     {
+      "usd": 100,
+      "routed": true,
+      "outAmountRaw": "64986887",
+      "priceImpactPct": 0,
+      "hops": 1,
+      "venues": [
+       "Meteora DLMM"
+      ],
+      "error": null
+     },
+     {
+      "usd": 1000,
+      "routed": true,
+      "outAmountRaw": "649746515",
+      "priceImpactPct": 0.018709181139979197,
+      "hops": 1,
+      "venues": [
+       "Meteora DLMM"
+      ],
+      "error": null
+     }
+    ]
+   },
+   "liquidity": {
+    "class": "tradeable",
+    "reason": "$100 buy costs 0.00%",
+    "cost100Pct": 0,
+    "cost1000Pct": 0.018709181139979197,
+    "unitsPerUsd100": 0.006509744248427617,
+    "premium100Pct": -0.08074282860043303,
+    "ratioSuspect": false
+   }
+  },
+  "NVDAVuiB7hwd3m5Wa1JuHNovPaPG6BH1QNztbKFxNjv": {
+   "mint": "NVDAVuiB7hwd3m5Wa1JuHNovPaPG6BH1QNztbKFxNjv",
+   "symbol": "NVDA",
+   "name": "Nvidia - Backpack Securities",
+   "issuer": "Backpack Securities",
+   "issuerTag": "backpack",
+   "category": "stock",
+   "underlying": "equity:US:NVDA",
+   "decimals": 6,
+   "program": "token-2022",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": true,
+   "scaledUi": {
+    "multiplier": 1,
+    "newMultiplier": 1,
+    "newMultiplierEffectiveAt": 0
+   },
+   "ratio": {
+    "comparable": true,
+    "underlyingPerUiToken": 1,
+    "unit": "share",
+    "basis": "Backpack Securities: one UI token (raw amount x ScaledUiAmount multiplier) = one share-equivalent",
+    "sources": [
+     {
+      "url": "https://solanacompass.com/news/backpack-securities-launches-tokenized-us-equity-and-etf-trading-on-solana",
+      "note": "1:1 backed by shares"
+     }
+    ]
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 737953.6504628109,
+   "holders": 18102,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 153.75993075999978,
+    "underlyingUsd": 153.74,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": {
+    "at": "2026-11-17T18:33:50.673Z",
+    "maxAccounts": 30,
+    "quotes": [
+     {
+      "usd": 100,
+      "routed": true,
+      "outAmountRaw": "649072",
+      "priceImpactPct": 0.1827745826426841,
+      "hops": 1,
+      "venues": [
+       "Whirlpool"
+      ],
+      "error": null
+     },
+     {
+      "usd": 1000,
+      "routed": true,
+      "outAmountRaw": "6485527",
+      "priceImpactPct": 0.2626348834401821,
+      "hops": 1,
+      "venues": [
+       "Whirlpool"
+      ],
+      "error": null
+     }
+    ]
+   },
+   "liquidity": {
+    "class": "tradeable",
+    "reason": "$100 buy costs 0.21%",
+    "cost100Pct": 0.21211971532868468,
+    "cost1000Pct": 0.2923601549539745,
+    "unitsPerUsd100": 0.00649072,
+    "premium100Pct": 0.21211971532868468,
+    "ratioSuspect": false
+   }
+  },
+  "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo": {
+   "mint": "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo",
+   "symbol": "NVDAon",
+   "name": "NVIDIA (Ondo Tokenized)",
+   "issuer": "Ondo Global Markets",
+   "issuerTag": "ondo",
+   "category": "stock",
+   "underlying": "equity:US:NVDA",
+   "decimals": 9,
+   "program": "token-2022",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": false,
+   "scaledUi": {
+    "multiplier": 1.0017152487959897,
+    "newMultiplier": 1.0017152487959897,
+    "newMultiplierEffectiveAt": 1788998645
+   },
+   "ratio": {
+    "comparable": true,
+    "underlyingPerUiToken": 1,
+    "unit": "share",
+    "basis": "Ondo Global Markets: one UI token (raw amount x ScaledUiAmount multiplier) = one share-equivalent",
+    "sources": [
+     {
+      "url": "https://docs.ondo.finance/ondo-global-markets/corporate-actions",
+      "note": "dividends reinvested, shown in the Scaled UI balance on Solana"
+     },
+     {
+      "url": "https://solana.com/docs/tokens/extensions/scaled-ui-amount"
+     }
+    ]
+   },
+   "usPersons": "no",
+   "jupiterPooledUsd": 2522.6384346672703,
+   "holders": 2297,
+   "pythFeedId": "207ddea2a443d30b7e13a7c88a9e3f106765deb97049afc65a18cede50fffc82",
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 154.15051895475133,
+    "underlyingUsd": 153.74,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu": {
+   "mint": "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu",
+   "symbol": "NVDAr",
+   "name": "NVIDIA rStock",
+   "issuer": "Remora Markets (rStocks)",
+   "issuerTag": "remora",
+   "category": "stock",
+   "underlying": "equity:US:NVDA",
+   "decimals": 9,
+   "program": "token-2022",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": true,
+   "scaledUi": {
+    "multiplier": 1,
+    "newMultiplier": 1,
+    "newMultiplierEffectiveAt": 0
+   },
+   "ratio": {
+    "comparable": false,
+    "underlyingPerUiToken": null,
+    "reason": "Remora rStocks: issuer terms and multiplier semantics are unpublished",
+    "sources": []
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 83.2649561996023,
+   "holders": 211,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": null,
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W": {
+   "mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+   "symbol": "SPYx",
+   "name": "SP500 xStock",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "issuerTag": "xstocks",
+   "category": "stock",
+   "underlying": "etf:US:SPY",
+   "decimals": 8,
+   "program": "token-2022",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": true,
+   "scaledUi": {
+    "multiplier": 1.0057321559499792,
+    "newMultiplier": 1.007474126658766,
+    "newMultiplierEffectiveAt": 1793454300
+   },
+   "ratio": {
+    "comparable": true,
+    "underlyingPerUiToken": 1,
+    "unit": "share",
+    "basis": "xStocks: one UI token (raw amount x ScaledUiAmount multiplier) = one share-equivalent",
+    "sources": [
+     {
+      "url": "https://support.kraken.com/articles/xstocks-faq",
+      "note": "multiplier = ratio between an xStock and its underlying"
+     },
+     {
+      "url": "https://support.kraken.com/articles/corporate-actions-xstocks-kraken-app",
+      "note": "dividends raise the multiplier"
+     },
+     {
+      "url": "https://solana.com/docs/tokens/extensions/scaled-ui-amount",
+      "note": "UI amount = raw amount x multiplier"
+     }
+    ]
+   },
+   "usPersons": "no",
+   "jupiterPooledUsd": 2598030.515275971,
+   "holders": 84596,
+   "pythFeedId": "2817b78438c769357182c04346fddaad1178c82f4048828fe0997c3c64624e14",
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 733.0625901766563,
+    "underlyingUsd": 731.48,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": {
+    "at": "2026-11-17T18:15:49.351Z",
+    "maxAccounts": 30,
+    "quotes": [
+     {
+      "usd": 100,
+      "routed": true,
+      "outAmountRaw": "13576479",
+      "priceImpactPct": 0,
+      "hops": 2,
+      "venues": [
+       "BisonFi",
+       "Raydium CLMM"
+      ],
+      "error": null
+     },
+     {
+      "usd": 1000,
+      "routed": true,
+      "outAmountRaw": "135734213",
+      "priceImpactPct": 0.0202515736532815,
+      "hops": 1,
+      "venues": [
+       "Raydium CLMM"
+      ],
+      "error": null
+     }
+    ]
+   },
+   "liquidity": {
+    "class": "tradeable",
+    "reason": "$100 buy costs 0.00%",
+    "cost100Pct": 0,
+    "cost1000Pct": 0.0202515736532815,
+    "unitsPerUsd100": 0.0013677951323626076,
+    "premium100Pct": -0.051451855497852694,
+    "ratioSuspect": false
+   }
+  },
+  "SPYBo66VJPFjh1pXMb9Le53kDYWTK1zzYVDeVRWtsbi": {
+   "mint": "SPYBo66VJPFjh1pXMb9Le53kDYWTK1zzYVDeVRWtsbi",
+   "symbol": "SPY",
+   "name": "SPDR S&P 500 ETF Trust - Backpack Securities",
+   "issuer": "Backpack Securities",
+   "issuerTag": "backpack",
+   "category": "stock",
+   "underlying": "etf:US:SPY",
+   "decimals": 6,
+   "program": "token-2022",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": true,
+   "scaledUi": {
+    "multiplier": 1,
+    "newMultiplier": 1,
+    "newMultiplierEffectiveAt": 0
+   },
+   "ratio": {
+    "comparable": true,
+    "underlyingPerUiToken": 1,
+    "unit": "share",
+    "basis": "Backpack Securities: one UI token (raw amount x ScaledUiAmount multiplier) = one share-equivalent",
+    "sources": [
+     {
+      "url": "https://solanacompass.com/news/backpack-securities-launches-tokenized-us-equity-and-etf-trading-on-solana",
+      "note": "1:1 backed by shares"
+     }
+    ]
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 11026.556724038734,
+   "holders": 1171,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 729.1709343388776,
+    "underlyingUsd": 731.48,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "k18WJUULWheRkSpSquYGdNNmtuE2Vbw1hpuUi92ondo": {
+   "mint": "k18WJUULWheRkSpSquYGdNNmtuE2Vbw1hpuUi92ondo",
+   "symbol": "SPYon",
+   "name": "SPDR S&P 500 ETF (Ondo Tokenized)",
+   "issuer": "Ondo Global Markets",
+   "issuerTag": "ondo",
+   "category": "stock",
+   "underlying": "etf:US:SPY",
+   "decimals": 9,
+   "program": "token-2022",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": false,
+   "scaledUi": {
+    "multiplier": 1.0094730727840426,
+    "newMultiplier": 1.0094730727840426,
+    "newMultiplierEffectiveAt": 1792155555
+   },
+   "ratio": {
+    "comparable": true,
+    "underlyingPerUiToken": 1,
+    "unit": "share",
+    "basis": "Ondo Global Markets: one UI token (raw amount x ScaledUiAmount multiplier) = one share-equivalent",
+    "sources": [
+     {
+      "url": "https://docs.ondo.finance/ondo-global-markets/corporate-actions",
+      "note": "dividends reinvested, shown in the Scaled UI balance on Solana"
+     },
+     {
+      "url": "https://solana.com/docs/tokens/extensions/scaled-ui-amount"
+     }
+    ]
+   },
+   "usPersons": "no",
+   "jupiterPooledUsd": 56.05217733163747,
+   "holders": 2102,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": null,
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "AVw2QGVkXJPRPRjLAceXVoLqU5DVtJ53mdgMXp14yGit": {
+   "mint": "AVw2QGVkXJPRPRjLAceXVoLqU5DVtJ53mdgMXp14yGit",
+   "symbol": "SPYr",
+   "name": "SP500 rStock",
+   "issuer": "Remora Markets (rStocks)",
+   "issuerTag": "remora",
+   "category": "stock",
+   "underlying": "etf:US:SPY",
+   "decimals": 9,
+   "program": "token-2022",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": true,
+   "scaledUi": {
+    "multiplier": 1,
+    "newMultiplier": 1,
+    "newMultiplierEffectiveAt": 0
+   },
+   "ratio": {
+    "comparable": false,
+    "underlyingPerUiToken": null,
+    "reason": "Remora rStocks: issuer terms and multiplier semantics are unpublished",
+    "sources": []
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 264.67970841819346,
+   "holders": 117,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": null,
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "5GgRAEmv8ZxF2PR5hY72Qs5x1bnQ6UK2RbTPoqJ3wSwW": {
+   "mint": "5GgRAEmv8ZxF2PR5hY72Qs5x1bnQ6UK2RbTPoqJ3wSwW",
+   "symbol": "PAXG",
+   "name": "PAX Gold",
+   "issuer": "Paxos (PAX Gold)",
+   "issuerTag": null,
+   "category": "commodity",
+   "underlying": "commodity:XAU",
+   "decimals": 6,
+   "program": "token-2022",
+   "transferFeeBps": 0,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": true,
+   "scaledUi": null,
+   "ratio": {
+    "comparable": true,
+    "underlyingPerUiToken": 1,
+    "unit": "troy oz",
+    "basis": "Paxos (PAX Gold): 1 token = troy oz",
+    "sources": [
+     {
+      "url": "https://www.paxos.com/pax-gold",
+      "note": "one fine troy ounce per PAXG"
+     }
+    ]
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 1827.4450935184964,
+   "holders": 1052,
+   "pythFeedId": "273717b49430906f4b0c230e99aa1007f83758e3199edbc887c0d06c3e332494",
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 3854.4400592959205,
+    "underlyingUsd": null,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "AymATz4TCL9sWNEEV9Kvyz45CHVhDZ6kUgjTJPzLpU9P": {
+   "mint": "AymATz4TCL9sWNEEV9Kvyz45CHVhDZ6kUgjTJPzLpU9P",
+   "symbol": "XAUt0",
+   "name": "Tether Gold",
+   "issuer": "Tether (XAUt0, omnichain XAUT)",
+   "issuerTag": null,
+   "category": "commodity",
+   "underlying": "commodity:XAU",
+   "decimals": 6,
+   "program": "spl-token",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": false,
+   "scaledUi": null,
+   "ratio": {
+    "comparable": true,
+    "underlyingPerUiToken": 1,
+    "unit": "troy oz",
+    "basis": "Tether (XAUt0, omnichain XAUT): 1 token = troy oz",
+    "sources": [
+     {
+      "url": "https://gold.tether.to/",
+      "note": "one troy fine ounce per XAUT; XAUt0 is its omnichain form"
+     }
+    ]
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 143642.00195687928,
+   "holders": 6913,
+   "pythFeedId": "44465e17d2e9d390e70c999d5a11fda4f092847fcd2e3e5aa089d96c98a30e67",
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 3847.3286721985637,
+    "underlyingUsd": null,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "GoLDppdjB1vDTPSGxyMJFqdnj134yH6Prg9eqsGDiw6A": {
+   "mint": "GoLDppdjB1vDTPSGxyMJFqdnj134yH6Prg9eqsGDiw6A",
+   "symbol": "GOLD",
+   "name": "GOLD",
+   "issuer": "unverified (token named GOLD, Jupiter tag commodities)",
+   "issuerTag": null,
+   "category": "commodity",
+   "underlying": "commodity:XAU",
+   "decimals": 6,
+   "program": "spl-token",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": false,
+   "scaledUi": null,
+   "ratio": {
+    "comparable": false,
+    "underlyingPerUiToken": null,
+    "reason": "unverified (token named GOLD, Jupiter tag commodities): no published units per token",
+    "sources": []
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 81663.5475655039,
+   "holders": 12486,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 3885.249307643208,
+    "underlyingUsd": null,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "dg1dmo6NZNagkwB6EAfUeaco6CFXFLRhb1KCrsqXTVz": {
+   "mint": "dg1dmo6NZNagkwB6EAfUeaco6CFXFLRhb1KCrsqXTVz",
+   "symbol": "DGLD",
+   "name": "Digital Gold",
+   "issuer": "unverified (Digital Gold)",
+   "issuerTag": null,
+   "category": "commodity",
+   "underlying": "commodity:XAU",
+   "decimals": 9,
+   "program": "token-2022",
+   "transferFeeBps": 0,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": true,
+   "scaledUi": null,
+   "ratio": {
+    "comparable": false,
+    "underlyingPerUiToken": null,
+    "reason": "unverified (Digital Gold): no published units per token",
+    "sources": []
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 55.01223292363364,
+   "holders": 82,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": null,
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "9TPL8droGJ7jThsq4momaoz6uhTcvX2SeMqipoPmNa8R": {
+   "mint": "9TPL8droGJ7jThsq4momaoz6uhTcvX2SeMqipoPmNa8R",
+   "symbol": "VNXAU",
+   "name": "VNX Gold",
+   "issuer": "VNX (VNX Gold)",
+   "issuerTag": null,
+   "category": "commodity",
+   "underlying": "commodity:XAU",
+   "decimals": 9,
+   "program": "spl-token",
+   "transferFeeBps": null,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": false,
+   "scaledUi": null,
+   "ratio": {
+    "comparable": true,
+    "underlyingPerUiToken": 0.03215074656862798,
+    "unit": "gram",
+    "basis": "VNX (VNX Gold): 1 token = gram",
+    "sources": [
+     {
+      "url": "https://vnx.li/vnx-gold/",
+      "note": "1 VNXAU = 1 gram of LBMA gold"
+     }
+    ]
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 54161.791546436594,
+   "holders": 1688,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 123.08642764032587,
+    "underlyingUsd": null,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "5aLhp9VnUEKcsdtkfsf2DUgpJfomx7GmYVny24dHUZoB": {
+   "mint": "5aLhp9VnUEKcsdtkfsf2DUgpJfomx7GmYVny24dHUZoB",
+   "symbol": "XAUM",
+   "name": "Matrixdock Gold",
+   "issuer": "Matrixdock (XAUm)",
+   "issuerTag": null,
+   "category": "commodity",
+   "underlying": "commodity:XAU",
+   "decimals": 9,
+   "program": "token-2022",
+   "transferFeeBps": 0,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": true,
+   "scaledUi": null,
+   "ratio": {
+    "comparable": true,
+    "underlyingPerUiToken": 1,
+    "unit": "troy oz",
+    "basis": "Matrixdock (XAUm): 1 token = troy oz",
+    "sources": [
+     {
+      "url": "https://www.matrixdock.com/xaum",
+      "note": "each token represents 1 troy oz"
+     }
+    ]
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 44407.96064116131,
+   "holders": 319,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 3854.058847651665,
+    "underlyingUsd": null,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": null,
+   "liquidity": {
+    "class": "unprobed",
+    "reason": "not probed yet",
+    "cost100Pct": null,
+    "cost1000Pct": null,
+    "unitsPerUsd100": null,
+    "premium100Pct": null,
+    "ratioSuspect": false
+   }
+  },
+  "PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF": {
+   "mint": "PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF",
+   "symbol": "OPENAI",
+   "name": "OpenAI PreStocks",
+   "issuer": "PreStocks (SPV exposure to private companies)",
+   "issuerTag": "prestocks",
+   "category": "pre-ipo",
+   "underlying": "private:OPENAI",
+   "decimals": 9,
+   "program": "token-2022",
+   "transferFeeBps": 100,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": true,
+   "scaledUi": {
+    "multiplier": 1,
+    "newMultiplier": 1.4861347,
+    "newMultiplierEffectiveAt": 1784305800
+   },
+   "ratio": {
+    "comparable": false,
+    "underlyingPerUiToken": null,
+    "reason": "PreStocks are SPV units; shares per token are not published",
+    "sources": []
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 716991.6857021217,
+   "holders": 81301,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 1153.0522981249926,
+    "underlyingUsd": 1004.7262087750189,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": {
+    "at": "2026-11-17T18:33:57.347Z",
+    "maxAccounts": 30,
+    "quotes": [
+     {
+      "usd": 100,
+      "routed": true,
+      "outAmountRaw": "56884078",
+      "priceImpactPct": 2.3678976188507717,
+      "hops": 2,
+      "venues": [
+       "Whirlpool",
+       "Meteora DLMM"
+      ],
+      "error": null
+     },
+     {
+      "usd": 1000,
+      "routed": true,
+      "outAmountRaw": "567514967",
+      "priceImpactPct": 2.5954514706584053,
+      "hops": 1,
+      "venues": [
+       "Raydium CLMM"
+      ],
+      "error": null
+     }
+    ]
+   },
+   "liquidity": {
+    "class": "thin",
+    "reason": "$100 buy costs 3.63%",
+    "cost100Pct": 3.6255626721556578,
+    "cost1000Pct": 3.8676498876687893,
+    "unitsPerUsd100": null,
+    "premium100Pct": 3.6255626721556578,
+    "ratioSuspect": false
+   }
+  },
+  "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ": {
+   "mint": "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ",
+   "symbol": "tOpenAI",
+   "name": "T-OpenAI",
+   "issuer": "Tessera (pre-IPO exposure)",
+   "issuerTag": "tessera",
+   "category": "pre-ipo",
+   "underlying": "private:OPENAI",
+   "decimals": 9,
+   "program": "token-2022",
+   "transferFeeBps": 20,
+   "paused": false,
+   "defaultFrozen": false,
+   "permanentDelegate": false,
+   "scaledUi": null,
+   "ratio": {
+    "comparable": false,
+    "underlyingPerUiToken": null,
+    "reason": "Tessera pre-IPO units; shares per token are not published",
+    "sources": []
+   },
+   "usPersons": "unverified",
+   "jupiterPooledUsd": 708392.2714990842,
+   "holders": 14922,
+   "pythFeedId": null,
+   "discoveredAt": "2026-11-17T18:15:23.712Z",
+   "seenAt": "2026-11-17T18:15:23.712Z",
+   "mintReadAt": "2026-11-17T18:15:23.712Z",
+   "price": {
+    "usd": 1199.4061729718583,
+    "underlyingUsd": 1004.7262087750189,
+    "at": "2026-11-17T18:33:34.662Z"
+   },
+   "probe": {
+    "at": "2026-11-17T18:34:00.290Z",
+    "maxAccounts": 30,
+    "quotes": [
+     {
+      "usd": 100,
+      "routed": true,
+      "outAmountRaw": "83079690",
+      "priceImpactPct": 0.31480006246417114,
+      "hops": 1,
+      "venues": [
+       "Meteora DLMM"
+      ],
+      "error": null
+     },
+     {
+      "usd": 1000,
+      "routed": true,
+      "outAmountRaw": "824744169",
+      "priceImpactPct": 1.0410518093148409,
+      "hops": 1,
+      "venues": [
+       "Meteora DLMM"
+      ],
+      "error": null
+     }
+    ]
+   },
+   "liquidity": {
+    "class": "tradeable",
+    "reason": "$100 buy costs 0.56%",
+    "cost100Pct": 0.5560746417556217,
+    "cost1000Pct": 1.29404757093734,
+    "unitsPerUsd100": null,
+    "premium100Pct": 0.5560746417556217,
+    "ratioSuspect": false
+   }
+  }
+ },
+ "quotes": {
+  "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "64792314",
+     "otherAmountThreshold": "64144391",
+     "priceImpactPct": "0",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Meteora DLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636073
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "647438260",
+     "otherAmountThreshold": "640963878",
+     "priceImpactPct": "0.000658663861099238087035419",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636080
+    },
+    "error": null
+   }
+  },
+  "NVDAVuiB7hwd3m5Wa1JuHNovPaPG6BH1QNztbKFxNjv": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "648366",
+     "otherAmountThreshold": "641883",
+     "priceImpactPct": "0.0013914338591902512087326159",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Whirlpool"
+       },
+       "percent": 100
+      },
+      {
+       "swapInfo": {
+        "label": "Whirlpool"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636087
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "6479760",
+     "otherAmountThreshold": "6414963",
+     "priceImpactPct": "0.0019921090037766666007004153",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636094
+    },
+    "error": null
+   }
+  },
+  "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "392233859",
+     "otherAmountThreshold": "388311521",
+     "priceImpactPct": "0.394104313740697434750508856",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Manifest"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636102
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "2355125136",
+     "otherAmountThreshold": "2331573885",
+     "priceImpactPct": "0.6361965883972160380860040172",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Manifest"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636108
+    },
+    "error": null
+   }
+  },
+  "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu": {
+   "100": {
+    "quote": null,
+    "error": "TOKEN_NOT_TRADABLE"
+   },
+   "1000": {
+    "quote": null,
+    "error": "TOKEN_NOT_TRADABLE"
+   }
+  },
+  "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "13536978",
+     "otherAmountThreshold": "13401609",
+     "priceImpactPct": "0.0001609933606596746256847547",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Byreal"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636130
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "135365755",
+     "otherAmountThreshold": "134012098",
+     "priceImpactPct": "0.0002628071161094555306464426",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636139
+    },
+    "error": null
+   }
+  },
+  "SPYBo66VJPFjh1pXMb9Le53kDYWTK1zzYVDeVRWtsbi": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "136512",
+     "otherAmountThreshold": "135147",
+     "priceImpactPct": "0.0042183691037358835081099533",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "ZeroFi"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636149
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "1365046",
+     "otherAmountThreshold": "1351396",
+     "priceImpactPct": "0.0042723481243980403475236311",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "ZeroFi"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636159
+    },
+    "error": null
+   }
+  },
+  "k18WJUULWheRkSpSquYGdNNmtuE2Vbw1hpuUi92ondo": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "36503562",
+     "otherAmountThreshold": "36138527",
+     "priceImpactPct": "0.7295321122187446216435989927",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Manifest"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636169
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "38535166",
+     "otherAmountThreshold": "38149815",
+     "priceImpactPct": "0.9714479234839601469759123233",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Manifest"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636172
+    },
+    "error": null
+   }
+  },
+  "AVw2QGVkXJPRPRjLAceXVoLqU5DVtJ53mdgMXp14yGit": {
+   "100": {
+    "quote": null,
+    "error": "TOKEN_NOT_TRADABLE"
+   },
+   "1000": {
+    "quote": null,
+    "error": "TOKEN_NOT_TRADABLE"
+   }
+  },
+  "5GgRAEmv8ZxF2PR5hY72Qs5x1bnQ6UK2RbTPoqJ3wSwW": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "25933",
+     "otherAmountThreshold": "25674",
+     "priceImpactPct": "0.000055747542432286372113274",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Whirlpool"
+       },
+       "percent": 100
+      },
+      {
+       "swapInfo": {
+        "label": "Whirlpool"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636194
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "259265",
+     "otherAmountThreshold": "256673",
+     "priceImpactPct": "0.0003063794647310636110976285",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "ZeroFi"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636204
+    },
+    "error": null
+   }
+  },
+  "AymATz4TCL9sWNEEV9Kvyz45CHVhDZ6kUgjTJPzLpU9P": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "25979",
+     "otherAmountThreshold": "25720",
+     "priceImpactPct": "0.0001302000902920126803800593",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Manifest"
+       },
+       "percent": 100
+      },
+      {
+       "swapInfo": {
+        "label": "Byreal"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636214
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "259513",
+     "otherAmountThreshold": "256918",
+     "priceImpactPct": "0.0011963070789173990019764822",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Whirlpool"
+       },
+       "percent": 100
+      },
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636219
+    },
+    "error": null
+   }
+  },
+  "GoLDppdjB1vDTPSGxyMJFqdnj134yH6Prg9eqsGDiw6A": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "25620",
+     "otherAmountThreshold": "25364",
+     "priceImpactPct": "0.0042283691046429922570831854",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Manifest"
+       },
+       "percent": 100
+      },
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636235
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "255907",
+     "otherAmountThreshold": "253348",
+     "priceImpactPct": "0.0053671711649565738467345305",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Archer"
+       },
+       "percent": 100
+      },
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636240
+    },
+    "error": null
+   }
+  },
+  "dg1dmo6NZNagkwB6EAfUeaco6CFXFLRhb1KCrsqXTVz": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "25828592",
+     "otherAmountThreshold": "25570307",
+     "priceImpactPct": "0.0004036679656334384027043371",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Hadron"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636248
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "258280370",
+     "otherAmountThreshold": "255697567",
+     "priceImpactPct": "0.0004251471064351930411951422",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Hadron"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636258
+    },
+    "error": null
+   }
+  },
+  "9TPL8droGJ7jThsq4momaoz6uhTcvX2SeMqipoPmNa8R": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "809553170",
+     "otherAmountThreshold": "801457639",
+     "priceImpactPct": "0.0031787741223508359635257411",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636263
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "8085937707",
+     "otherAmountThreshold": "8005078330",
+     "priceImpactPct": "0.0043601042953055765318594783",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636267
+    },
+    "error": null
+   }
+  },
+  "5aLhp9VnUEKcsdtkfsf2DUgpJfomx7GmYVny24dHUZoB": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "25813051",
+     "otherAmountThreshold": "25554921",
+     "priceImpactPct": "0.0047792709272246152671507476",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636272
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "256944331",
+     "otherAmountThreshold": "254374888",
+     "priceImpactPct": "0.0093525773883276272012573605",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636279
+    },
+    "error": null
+   }
+  },
+  "PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "56987312",
+     "otherAmountThreshold": "56417439",
+     "priceImpactPct": "0.0215102566666781819544041156",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "BisonFi"
+       },
+       "percent": 100
+      },
+      {
+       "swapInfo": {
+        "label": "Meteora DLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636286
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "567543092",
+     "otherAmountThreshold": "561867662",
+     "priceImpactPct": "0.0255109866882651856878968336",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Raydium CLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636293
+    },
+    "error": null
+   }
+  },
+  "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ": {
+   "100": {
+    "quote": {
+     "inAmount": "100000000",
+     "outAmount": "82895739",
+     "otherAmountThreshold": "82066782",
+     "priceImpactPct": "0.0042147419986260446825755624",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Meteora DLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636299
+    },
+    "error": null
+   },
+   "1000": {
+    "quote": {
+     "inAmount": "1000000000",
+     "outAmount": "824441298",
+     "otherAmountThreshold": "816196886",
+     "priceImpactPct": "0.0096396985665118088816466124",
+     "slippageBps": 100,
+     "routePlan": [
+      {
+       "swapInfo": {
+        "label": "Meteora DLMM"
+       },
+       "percent": 100
+      }
+     ],
+     "contextSlot": 470636306
+    },
+    "error": null
+   }
+  }
+ }
+}
