@@ -1,0 +1,18 @@
+:root { color-scheme: dark; font: 16px/1.5 system-ui, sans-serif; background: #111213; color: #f1eee7; }
+body { margin: 0; }
+main { box-sizing: border-box; max-width: 44rem; margin: auto; padding: 3rem 1.25rem; }
+h1 { font: 500 clamp(2.25rem, 6vw, 3.5rem)/1.06 Georgia, serif; margin: 1rem 0; overflow-wrap: anywhere; }
+h2 { margin: 0 0 .75rem; font-size: 1.2rem; }
+.eyebrow { color: #b1e8c4; font-size: .82rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.muted { color: #babbb8; }
+section { background: #1b1d1e; border: 1px solid #383b3a; padding: 1.25rem; border-radius: 1rem; margin: 1.25rem 0; }
+form { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+label { display: grid; gap: .3rem; }
+button, input { font: inherit; border-radius: .55rem; padding: .55rem .85rem; }
+input { width: 8rem; background: #111213; color: inherit; border: 1px solid #666; }
+button { border: 1px solid transparent; background: #b1e8c4; color: #11291c; font-weight: 700; cursor: pointer; }
+button:disabled { cursor: default; opacity: .65; }
+#reset { background: transparent; border-color: #666; color: inherit; }
+#review, #confirmed-signature { overflow-wrap: anywhere; }
+#checkout-status { margin-bottom: 0; min-height: 1.5em; }
+a { color: #b1e8c4; }
