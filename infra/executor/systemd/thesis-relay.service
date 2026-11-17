@@ -1,0 +1,19 @@
+# Stands in for the QuickNode Stream on the fork: delivers Thesis transactions to the Supabase
+# webhook (THESIS_WEBHOOK_URL / _TOKEN / _AUTH in the env file). Not needed on mainnet, where the
+# Stream does this.
+[Unit]
+Description=Thesis: fork Stream relay
+After=thesis-fork-up.service
+Requires=thesis-fork-up.service
+
+[Service]
+User=thesis
+WorkingDirectory=/opt/thesis
+EnvironmentFile=/etc/thesis/executor.env
+Environment=FORK_RPC_URL=http://127.0.0.1:18899 FORK_WS_URL=ws://127.0.0.1:18900
+ExecStart=/usr/bin/pnpm fork:relay
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

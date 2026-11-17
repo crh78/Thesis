@@ -1,0 +1,18 @@
+# Mainnet: fetches the settler key from OCI Vault into /run/thesis/settler.json (tmpfs, root
+# only) at boot. Used only with the drop-in thesis-settler-vault.conf, which points the settler's
+# credential here instead of /etc/thesis/settler.json. infra/executor/README.md has the setup.
+[Unit]
+Description=Thesis: settler key from OCI Vault
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+RuntimeDirectory=thesis
+RuntimeDirectoryMode=0700
+EnvironmentFile=/etc/thesis/executor.env
+ExecStart=/opt/thesis/infra/executor/settler-key-from-vault.sh /run/thesis/settler.json
+
+[Install]
+WantedBy=multi-user.target
