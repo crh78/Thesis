@@ -1,0 +1,7 @@
+// Copy to DevLogin.local.xcconfig (gitignored) and fill in.
+// EMAIL and CODE: Privy Dashboard → User management → Authentication → Advanced
+// → Enable test accounts. Re-enabling there issues new credentials.
+DEV_LOGIN_USERNAME = dev
+DEV_LOGIN_PASSWORD =
+DEV_LOGIN_EMAIL =
+DEV_LOGIN_CODE =

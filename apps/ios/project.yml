@@ -1,0 +1,196 @@
+name: Thesis
+options:
+  bundleIdPrefix: xyz.yourthesis
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+packages:
+  Libraries.dev:
+    url: https://github.com/Jakubantalik/Libraries.dev
+    branch: main
+  Privy:
+    url: https://github.com/privy-io/privy-ios
+    exactVersion: 2.18.0
+
+targets:
+  Thesis:
+    type: application
+    platform: iOS
+    configFiles:
+      Debug: Config/Debug.xcconfig
+      Release: Config/Release.xcconfig
+    sources:
+      - path: Thesis
+    dependencies:
+      - package: Libraries.dev
+        product: BorderBeamKit
+      - package: Libraries.dev
+        product: ThinkingOrbsKit
+      - package: Privy
+        product: Privy
+      # "Thesis" in the iOS share sheet (articles and X posts → a take).
+      - target: ThesisShare
+    info:
+      path: Thesis/Info.plist
+      properties:
+        CFBundleDisplayName: "$(APP_DISPLAY_NAME)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        ITSAppUsesNonExemptEncryption: false
+        # Background App Refresh checks the inbox and raises new notifications locally
+        # (no APNs: the team is a personal one). See Thesis/App/LocalNotifier.swift.
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers:
+          - xyz.yourthesis.app.inbox-refresh
+        ThesisApplePayEnabled: "$(APPLE_PAY_ENABLED)"
+        # Dark launch screen (Palette.bg), so launch doesn't flash white.
+        UILaunchStoryboardName: LaunchScreen
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIAppFonts:
+          - Geist-Regular.ttf
+          - Geist-Medium.ttf
+          - Geist-SemiBold.ttf
+          - Geist-Bold.ttf
+          - GeistMono-Regular.ttf
+          - GeistMono-Medium.ttf
+          - GeistMono-SemiBold.ttf
+          - GeistSerif-Regular.ttf
+          - GeistPixel-Square.ttf
+        # Read by AppConfig.swift. Values come from the build settings below and Config/*.xcconfig.
+        PrivyAppID: "$(PRIVY_APP_ID)"
+        PrivyClientID: "$(PRIVY_CLIENT_ID)"
+        SupabaseURL: "$(SUPABASE_URL)"
+        SupabasePublishableKey: "$(SUPABASE_PUBLISHABLE_KEY)"
+        AppURLScheme: "$(APP_URL_SCHEME)"
+        WebURL: "$(WEB_URL)"
+        AppleSignInEnabled: "$(APPLE_SIGN_IN_ENABLED)"
+        # Debug-only dev login (empty in Release; see Config/Debug.xcconfig).
+        DevLoginUsername: "$(DEV_LOGIN_USERNAME)"
+        DevLoginPassword: "$(DEV_LOGIN_PASSWORD)"
+        DevLoginEmail: "$(DEV_LOGIN_EMAIL)"
+        DevLoginCode: "$(DEV_LOGIN_CODE)"
+        # Fork mode (empty unless Config/Fork.local.xcconfig sets it; see Config/Debug.xcconfig).
+        ForkAPIURL: "$(FORK_API_URL)"
+        # Google / Apple sign-in redirect back to the app through this scheme.
+        # Must also be listed under Allowed URL schemes in the Privy dashboard.
+        CFBundleURLTypes:
+          - CFBundleURLName: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+            CFBundleURLSchemes:
+              - "$(APP_URL_SCHEME)"
+    settings:
+      base:
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: VK7K9F45N4
+        ENABLE_PREVIEWS: YES
+        # The real Apple Pay sheet needs a merchant ID + the in-app payments
+        # entitlement (paid Apple Developer Program). Turn on once both exist;
+        # until then Add cash simulates the payment.
+        APPLE_PAY_ENABLED: NO
+        # Backend (PRIVY_APP_ID, PRIVY_CLIENT_ID, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY):
+        # public client values (they ship inside the app), set in the gitignored
+        # Config/Backend.local.xcconfig and Config/Privy.local.xcconfig, which
+        # Config/Debug.xcconfig and Config/Release.xcconfig include. Don't set them
+        # here: target settings would override the xcconfig files.
+        # Shared take links open the web app (apps/www); yourthesis.xyz once the domain is added.
+        WEB_URL: https://thesis-www.vercel.app
+        # Sign in with Apple needs a paid Apple Developer Program team; the
+        # current team is a personal one, so the capability can't be provisioned
+        # and device builds would fail. To turn it on: join the program, set this
+        # to YES, and add to the Thesis target:
+        #   entitlements:
+        #     path: Thesis/Thesis.entitlements
+        #     properties:
+        #       com.apple.developer.applesignin: [Default]
+        APPLE_SIGN_IN_ENABLED: "NO"
+      # Dev and prod install side by side on one phone.
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: xyz.yourthesis.app.dev
+          APP_DISPLAY_NAME: Thesis Dev
+          APP_URL_SCHEME: yourthesis-dev
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: xyz.yourthesis.app
+          APP_DISPLAY_NAME: Thesis
+          APP_URL_SCHEME: yourthesis
+
+  # Share extension: share an article or X post from any app → Thesis opens on a take drafted
+  # from it (ThesisShare/ShareViewController.swift). Opens the app through its URL scheme.
+  ThesisShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ThesisShare
+        excludes:
+          - "*.js"
+      - path: ThesisShare/Preprocess.js
+        buildPhase: resources
+    info:
+      path: ThesisShare/Info.plist
+      properties:
+        CFBundleDisplayName: "$(APP_DISPLAY_NAME)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        AppURLScheme: "$(APP_URL_SCHEME)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShareViewController"
+          NSExtensionAttributes:
+            # Safari runs this first, so the page's own title and text come along.
+            NSExtensionJavaScriptPreprocessingFile: Preprocess
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsWebPageWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+    settings:
+      base:
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: VK7K9F45N4
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: xyz.yourthesis.app.dev.share
+          APP_DISPLAY_NAME: Thesis Dev
+          APP_URL_SCHEME: yourthesis-dev
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: xyz.yourthesis.app.share
+          APP_DISPLAY_NAME: Thesis
+          APP_URL_SCHEME: yourthesis
+
+  ThesisUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ThesisUITests
+    dependencies:
+      - target: Thesis
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: xyz.yourthesis.app.dev.uitests
+        DEVELOPMENT_TEAM: VK7K9F45N4
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+        TEST_TARGET_NAME: Thesis
+
+schemes:
+  Thesis:
+    build:
+      targets:
+        Thesis: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ThesisUITests
