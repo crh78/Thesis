@@ -1,0 +1,7245 @@
+{
+ "rows": [
+  {
+   "id": "jup:AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj",
+   "kind": "yield",
+   "symbol": "syrupUSDC",
+   "name": "Syrup USDC",
+   "underlying": null,
+   "issuer": "Maple (syrupUSDC)",
+   "venue": "Jupiter",
+   "mint": "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.05467839160044896,
+    "buyCost1000Pct": 0.05469401830414666,
+    "volume24hUsd": 4697155.030196187,
+    "pyth": "Crypto.SYRUPUSDC/USD"
+   }
+  },
+  {
+   "id": "jup:3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7",
+   "kind": "yield",
+   "symbol": "PRIME",
+   "name": "",
+   "underlying": null,
+   "issuer": "unverified (PRIME, Jupiter tag yb)",
+   "venue": "Jupiter",
+   "mint": "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.03899020665650843,
+    "buyCost1000Pct": 0.03921845614309749,
+    "volume24hUsd": 1488379.5400357198,
+    "pyth": "Crypto.PRIME/USD"
+   }
+  },
+  {
+   "id": "jup:59obFNBzyTBGowrkif5uK7ojS58vsuWz3ZCvg6tfZAGw",
+   "kind": "yield",
+   "symbol": "PST",
+   "name": "PayFi Strategy Token USDC",
+   "underlying": null,
+   "issuer": "Huma (PayFi Strategy Token)",
+   "venue": "Jupiter",
+   "mint": "59obFNBzyTBGowrkif5uK7ojS58vsuWz3ZCvg6tfZAGw",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.03407231833505442,
+    "buyCost1000Pct": 0.034107644035108464,
+    "volume24hUsd": 382402.2042913939,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb",
+   "kind": "stock",
+   "symbol": "SPCX",
+   "name": "SpaceX - Backpack Securities",
+   "underlying": "SPCX",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb",
+   "themes": [
+    "Space and defense"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0,
+    "buyCost1000Pct": 0,
+    "volume24hUsd": 31972373.01308462,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+   "kind": "stock",
+   "symbol": "TTWO",
+   "name": "Take-Two Interactive Software - Backpack Securities",
+   "underlying": "TTWO",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.20215363045649193,
+    "buyCost1000Pct": 0.2174202430264116,
+    "volume24hUsd": 63195169.2420533,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+   "kind": "stock",
+   "symbol": "SPYx",
+   "name": "SP500 xStock",
+   "underlying": "SPY",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+   "themes": [
+    "Index and macro"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.011946130133078103,
+    "buyCost1000Pct": 0.0293625492052918,
+    "volume24hUsd": 4471412.531510599,
+    "pyth": "Crypto.SPYX/USD"
+   }
+  },
+  {
+   "id": "jup:Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+   "kind": "stock",
+   "symbol": "NVDAx",
+   "name": "NVIDIA xStock",
+   "underlying": "NVDA",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.08572322458054726,
+    "buyCost1000Pct": 0.10364442365571325,
+    "volume24hUsd": 19663199.63397161,
+    "pyth": "Crypto.NVDAX/USD"
+   }
+  },
+  {
+   "id": "jup:A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
+   "kind": "yield",
+   "symbol": "USDY",
+   "name": "Ondo US Dollar Yield",
+   "underlying": null,
+   "issuer": "Ondo Finance (USDY, tokenized notes on T-bills)",
+   "venue": "Jupiter",
+   "mint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.35077362048703264,
+    "buyCost1000Pct": 0.35109916430273724,
+    "volume24hUsd": 106072.46051837344,
+    "pyth": "Crypto.USDY/USD"
+   }
+  },
+  {
+   "id": "jup:XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+   "kind": "stock",
+   "symbol": "TSLAx",
+   "name": "Tesla xStock",
+   "underlying": "TSLA",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.0956238717241643,
+    "buyCost1000Pct": 0.06485461619979724,
+    "volume24hUsd": 2640369.5471268767,
+    "pyth": "Crypto.TSLAX/USD"
+   }
+  },
+  {
+   "id": "jup:5Y8NV33Vv7WbnLfq3zBcKSdYPrk7g2KoiQoe7M2tcxp5",
+   "kind": "yield",
+   "symbol": "ONyc",
+   "name": "OnRe Tokenized Reinsurance",
+   "underlying": null,
+   "issuer": "OnRe (tokenized reinsurance)",
+   "venue": "Jupiter",
+   "mint": "5Y8NV33Vv7WbnLfq3zBcKSdYPrk7g2KoiQoe7M2tcxp5",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.04340652631491526,
+    "buyCost1000Pct": 0.050773275395266104,
+    "volume24hUsd": 14300900.265693966,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:QQQvDYxG7g11Rr4rnaJqDddmP9ocH74YhE3mDaG37R9",
+   "kind": "etf",
+   "symbol": "QQQ",
+   "name": "Invesco QQQ Trust - Backpack Securities",
+   "underlying": "QQQ",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "QQQvDYxG7g11Rr4rnaJqDddmP9ocH74YhE3mDaG37R9",
+   "themes": [
+    "Index and macro"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.1774477835614574,
+    "buyCost1000Pct": 0.19528782595292782,
+    "volume24hUsd": 257574.51823552442,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:3ThdFZQKM6kRyVGLG48kaPg5TRMhYMKY1iCRa9xop1WC",
+   "kind": "yield",
+   "symbol": "eUSX",
+   "name": "eUSX",
+   "underlying": null,
+   "issuer": "unverified (eUSX)",
+   "venue": "Jupiter",
+   "mint": "3ThdFZQKM6kRyVGLG48kaPg5TRMhYMKY1iCRa9xop1WC",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.00020301125649435647,
+    "buyCost1000Pct": 0.0013826854749710016,
+    "volume24hUsd": 14777.164722611793,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1",
+   "kind": "stock",
+   "symbol": "CRCLx",
+   "name": "Circle xStock",
+   "underlying": "CRCL",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.11389598841786697,
+    "buyCost1000Pct": 0.12369766144236793,
+    "volume24hUsd": 3254266.486377893,
+    "pyth": "Crypto.CRCLX/USD"
+   }
+  },
+  {
+   "id": "jup:XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ",
+   "kind": "stock",
+   "symbol": "MSTRx",
+   "name": "MicroStrategy xStock",
+   "underlying": "MSTR",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.4891663971255857,
+    "buyCost1000Pct": 0.49028494351186336,
+    "volume24hUsd": 1327144.927310592,
+    "pyth": "Crypto.MSTRX/USD"
+   }
+  },
+  {
+   "id": "jup:oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ",
+   "kind": "pre-ipo",
+   "symbol": "tOpenAI",
+   "name": "T-OpenAI",
+   "underlying": "OPENAI",
+   "issuer": "Tessera (pre-IPO exposure)",
+   "venue": "Jupiter",
+   "mint": "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "tessera",
+    "buyCost100Pct": 0.4360840417479526,
+    "buyCost1000Pct": 0.4360840417479637,
+    "volume24hUsd": 114774.01489554305,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+   "kind": "stock",
+   "symbol": "AAPLx",
+   "name": "Apple xStock",
+   "underlying": "AAPL",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.06818874293584853,
+    "buyCost1000Pct": 0.1454716580210791,
+    "volume24hUsd": 617942.784057863,
+    "pyth": "Crypto.AAPLX/USD"
+   }
+  },
+  {
+   "id": "jup:MSFThX899B1DddH5jkyMpdArWXzP85VXLYDrbGGcRJM",
+   "kind": "stock",
+   "symbol": "MSFT",
+   "name": "Microsoft - Backpack Securities",
+   "underlying": "MSFT",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "MSFThX899B1DddH5jkyMpdArWXzP85VXLYDrbGGcRJM",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.11558265895078579,
+    "buyCost1000Pct": 0.19996316317114626,
+    "volume24hUsd": 53942.45164977254,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+   "kind": "stock",
+   "symbol": "METAx",
+   "name": "Meta xStock",
+   "underlying": "META",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.14685566773003092,
+    "buyCost1000Pct": 0.16147121404556408,
+    "volume24hUsd": 1579180.1312297708,
+    "pyth": "Crypto.METAX/USD"
+   }
+  },
+  {
+   "id": "jup:Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re",
+   "kind": "stock",
+   "symbol": "GLDx",
+   "name": "Gold xStock",
+   "underlying": "GLD",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re",
+   "themes": [
+    "Commodities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.08056521928467412,
+    "buyCost1000Pct": 0.056235286724315436,
+    "volume24hUsd": 2002199.0219932697,
+    "pyth": "Crypto.GLDX/USD"
+   }
+  },
+  {
+   "id": "jup:XsqE9cRRpzxcGKDXj1BJ7Xmg4GRhZoyY1KpmGSxAWT2",
+   "kind": "stock",
+   "symbol": "MCDx",
+   "name": "McDonald's xStock",
+   "underlying": "MCD",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsqE9cRRpzxcGKDXj1BJ7Xmg4GRhZoyY1KpmGSxAWT2",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.06773723997093306,
+    "buyCost1000Pct": 0.3055597935476384,
+    "volume24hUsd": 376926.24637117167,
+    "pyth": "Crypto.MCDX/USD"
+   }
+  },
+  {
+   "id": "jup:Xsf9mBktVB9BSU5kf4nHxPq5hCBJ2j2ui3ecFGxPRGc",
+   "kind": "stock",
+   "symbol": "GMEx",
+   "name": "Gamestop xStock",
+   "underlying": "GME",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xsf9mBktVB9BSU5kf4nHxPq5hCBJ2j2ui3ecFGxPRGc",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.11626683794666581,
+    "buyCost1000Pct": 0.34128364853661664,
+    "volume24hUsd": 392387.42109106935,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",
+   "kind": "stock",
+   "symbol": "GOOGLx",
+   "name": "Alphabet xStock",
+   "underlying": "GOOGL",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.004257567673252866,
+    "buyCost1000Pct": 0.0442817262781281,
+    "volume24hUsd": 2379206.316011184,
+    "pyth": "Crypto.GOOGLX/USD"
+   }
+  },
+  {
+   "id": "jup:DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+   "kind": "stock",
+   "symbol": "DJT",
+   "name": "Trump Media & Technology Group Corp. Common Stock - Backpack Securities",
+   "underlying": "DJT",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.18322493959307407,
+    "buyCost1000Pct": 0.28406055532436136,
+    "volume24hUsd": 1559560.553475883,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:AMZNw7cwU9L9c7ewZXxTws2PwQYxBGm2Rxg3FLDBJz9B",
+   "kind": "stock",
+   "symbol": "AMZN",
+   "name": "Amazon - Backpack Securities",
+   "underlying": "AMZN",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "AMZNw7cwU9L9c7ewZXxTws2PwQYxBGm2Rxg3FLDBJz9B",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.1581852415291785,
+    "buyCost1000Pct": 0.12610858061596425,
+    "volume24hUsd": 165382.38125405344,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu",
+   "kind": "stock",
+   "symbol": "COINx",
+   "name": "Coinbase xStock",
+   "underlying": "COIN",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.24626982414912568,
+    "buyCost1000Pct": 0.34412976201839696,
+    "volume24hUsd": 1393002.3322211015,
+    "pyth": "Crypto.COINX/USD"
+   }
+  },
+  {
+   "id": "jup:AMD8XwJXgQ9WV45Wyj9yFLejxzf2J6VM1PJY8bJEjeES",
+   "kind": "stock",
+   "symbol": "AMD",
+   "name": "Advanced Micro Devices - Backpack Securities",
+   "underlying": "AMD",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "AMD8XwJXgQ9WV45Wyj9yFLejxzf2J6VM1PJY8bJEjeES",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.3649344433569679,
+    "buyCost1000Pct": 0.43778899538486904,
+    "volume24hUsd": 1225393.1701528456,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:AMC1qwR9KhiyrQBRPrxnfo4JfMeMZqEBvt5tgTytNNoc",
+   "kind": "stock",
+   "symbol": "AMC",
+   "name": "AMC Entertainment - Backpack Securities",
+   "underlying": "AMC",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "AMC1qwR9KhiyrQBRPrxnfo4JfMeMZqEBvt5tgTytNNoc",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.9995340465600133,
+    "buyCost1000Pct": 1.2001529235926234,
+    "volume24hUsd": 405744.4050076798,
+    "pyth": "Crypto.AMC/USD"
+   }
+  },
+  {
+   "id": "jup:SQQQAa3gUxgnqcEsdjPA4RQNQBgB97TnG2hJhk2WaGE",
+   "kind": "stock",
+   "symbol": "SQQQ",
+   "name": "ProShares UltraPro Short QQQ - Backpack Securities",
+   "underlying": "SQQQ",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "SQQQAa3gUxgnqcEsdjPA4RQNQBgB97TnG2hJhk2WaGE",
+   "themes": [
+    "Index and macro"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.5176011462343604,
+    "buyCost1000Pct": 0.655744357702332,
+    "volume24hUsd": 534394.7404627407,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsgSaSvNSqLTtFuyWPBhK9196Xb9Bbdyjj4fH3cPJGo",
+   "kind": "stock",
+   "symbol": "AVGOx",
+   "name": "Broadcom xStock",
+   "underlying": "AVGO",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsgSaSvNSqLTtFuyWPBhK9196Xb9Bbdyjj4fH3cPJGo",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.09125532222070581,
+    "buyCost1000Pct": 0.015255238760488878,
+    "volume24hUsd": 4919367.656771011,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:DKNGQFNGQmoBdXSRGKJ8tTu7uPDasw5JDcfMmWniNfow",
+   "kind": "stock",
+   "symbol": "DKNG",
+   "name": "DraftKings - Backpack Securities",
+   "underlying": "DKNG",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "DKNGQFNGQmoBdXSRGKJ8tTu7uPDasw5JDcfMmWniNfow",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.36633537094775664,
+    "buyCost1000Pct": 1.0308166157018743,
+    "volume24hUsd": 99680.77832249204,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsoBhf2ufR8fTyNSjqfU71DYGaE6Z3SUGAidpzriAA4",
+   "kind": "stock",
+   "symbol": "PLTRx",
+   "name": "Palantir xStock",
+   "underlying": "PLTR",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsoBhf2ufR8fTyNSjqfU71DYGaE6Z3SUGAidpzriAA4",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.5590939630996883,
+    "buyCost1000Pct": 0.5866052376618636,
+    "volume24hUsd": 123641.8383226267,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xs78JED6PFZxWc2wCEPspZW9kL3Se5J7L5TChKgsidH",
+   "kind": "stock",
+   "symbol": "STRCx",
+   "name": "Strategy PP Variable xStock",
+   "underlying": "STRC",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xs78JED6PFZxWc2wCEPspZW9kL3Se5J7L5TChKgsidH",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.14250040654029128,
+    "buyCost1000Pct": 0.14607099962139491,
+    "volume24hUsd": 243775.76934434962,
+    "pyth": "Crypto.STRCX/USD"
+   }
+  },
+  {
+   "id": "jup:5GgRAEmv8ZxF2PR5hY72Qs5x1bnQ6UK2RbTPoqJ3wSwW",
+   "kind": "commodity",
+   "symbol": "PAXG",
+   "name": "PAX Gold",
+   "underlying": "XAU",
+   "issuer": "Paxos (PAX Gold)",
+   "venue": "Jupiter",
+   "mint": "5GgRAEmv8ZxF2PR5hY72Qs5x1bnQ6UK2RbTPoqJ3wSwW",
+   "themes": [
+    "Commodities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.10202426104291007,
+    "buyCost1000Pct": 0.1224462031634288,
+    "volume24hUsd": 766217.5109033172,
+    "pyth": "Crypto.PAXG/USD"
+   }
+  },
+  {
+   "id": "jup:NKEda5nHhNGgjrE9nDdMvaEmkmJ96qqxzBVZEcKmjSg",
+   "kind": "stock",
+   "symbol": "NKE",
+   "name": "Nike - Backpack Securities",
+   "underlying": "NKE",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "NKEda5nHhNGgjrE9nDdMvaEmkmJ96qqxzBVZEcKmjSg",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.40024704520981524,
+    "buyCost1000Pct": 0.7449369686273152,
+    "volume24hUsd": 265704.7594475722,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:RACEyWiM2ztEZcJx2AHXU2eWjhxU57x3vXn92b39dLD",
+   "kind": "stock",
+   "symbol": "RACE",
+   "name": "Ferrari - Backpack Securities",
+   "underlying": "RACE",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "RACEyWiM2ztEZcJx2AHXU2eWjhxU57x3vXn92b39dLD",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.0458217774026215,
+    "buyCost1000Pct": 0.21266931950641998,
+    "volume24hUsd": 36976.082330986836,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:MUxEsUKSMACyw5fZf68wxf5FLnZVhtU9CwH8uNNGay1",
+   "kind": "stock",
+   "symbol": "MU",
+   "name": "Micron Technology - Backpack Securities",
+   "underlying": "MU",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "MUxEsUKSMACyw5fZf68wxf5FLnZVhtU9CwH8uNNGay1",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.6841981042781109,
+    "buyCost1000Pct": 0.7394989879890512,
+    "volume24hUsd": 445580.4146242988,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:HiMSSzzwkZkrXJ4PGVJRdtfLaANeAztjjcgk5Dxe7Lwx",
+   "kind": "stock",
+   "symbol": "HIMS",
+   "name": "Hims & Hers Health - Backpack Securities",
+   "underlying": "HIMS",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "HiMSSzzwkZkrXJ4PGVJRdtfLaANeAztjjcgk5Dxe7Lwx",
+   "themes": [
+    "Healthcare"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.3301982206025067,
+    "buyCost1000Pct": 1.0847538097596865,
+    "volume24hUsd": 66106.45556436619,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:SKHYhSjuRWHgikq8eRKbtBbpABgJSkd7ytQV14i9EQ3",
+   "kind": "stock",
+   "symbol": "SKHY",
+   "name": "SK Hynix - Backpack Securities",
+   "underlying": "SKHY",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "SKHYhSjuRWHgikq8eRKbtBbpABgJSkd7ytQV14i9EQ3",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.35810867077249453,
+    "buyCost1000Pct": 0.3622565465062455,
+    "volume24hUsd": 3886223.5816331888,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:CZEB3WNZuF2Yz1z2H81RcCk8T7fsw82KB33zqamASVsg",
+   "kind": "stock",
+   "symbol": "COST",
+   "name": "Costco Wholesale - Backpack Securities",
+   "underlying": "COST",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "CZEB3WNZuF2Yz1z2H81RcCk8T7fsw82KB33zqamASVsg",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.43889563015966576,
+    "buyCost1000Pct": 0.9270471193674378,
+    "volume24hUsd": 1974877.5814064527,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:TKLSidmLVt3cqGaaodG8tyRzoANfQwoh67AccjmubeZ",
+   "kind": "pre-ipo",
+   "symbol": "tKalshi",
+   "name": "T-Kalshi",
+   "underlying": "KALSHI",
+   "issuer": "Tessera (pre-IPO exposure)",
+   "venue": "Jupiter",
+   "mint": "TKLSidmLVt3cqGaaodG8tyRzoANfQwoh67AccjmubeZ",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "tessera",
+    "buyCost100Pct": 0.4343854101999443,
+    "buyCost1000Pct": 0.5574840289697012,
+    "volume24hUsd": 222566.60752555268,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsaBXg8dU5cPM6ehmVctMkVqoiRG2ZjMo1cyBJ3AykQ",
+   "kind": "stock",
+   "symbol": "KOx",
+   "name": "Coca-Cola xStock",
+   "underlying": "KO",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsaBXg8dU5cPM6ehmVctMkVqoiRG2ZjMo1cyBJ3AykQ",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.4865934695170604,
+    "buyCost1000Pct": 1.4622627504951913,
+    "volume24hUsd": 102020.1836483081,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:GRNDYDpqwpCm6jVxpbh4xT5AM4r3p391qYsKTHqgaET2",
+   "kind": "stock",
+   "symbol": "GRND",
+   "name": "Grindr - Backpack Securities",
+   "underlying": "GRND",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "GRNDYDpqwpCm6jVxpbh4xT5AM4r3p391qYsKTHqgaET2",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.1264204775892952,
+    "buyCost1000Pct": 0.5121342777558491,
+    "volume24hUsd": 44865.943544678885,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:BoTx8y9ynfdxf5ZjWtCoBVkff52qKA82ysaLU8ZM6d8T",
+   "kind": "stock",
+   "symbol": "BOT",
+   "name": "RoboStrategy - Backpack Securities",
+   "underlying": "BOT",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "BoTx8y9ynfdxf5ZjWtCoBVkff52qKA82ysaLU8ZM6d8T",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.5241374580744068,
+    "buyCost1000Pct": 0.5465810769628966,
+    "volume24hUsd": 441502.01872244023,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:LLYuwZ33keFihgwoxXsBawy31AiRFLFSva32TYq5TvD",
+   "kind": "stock",
+   "symbol": "LLY",
+   "name": "Eli Lilly and Company - Backpack Securities",
+   "underlying": "LLY",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "LLYuwZ33keFihgwoxXsBawy31AiRFLFSva32TYq5TvD",
+   "themes": [
+    "Healthcare"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.46877007072581023,
+    "buyCost1000Pct": 0.4680634437934761,
+    "volume24hUsd": 53392.59145073441,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:RBLXDGRD64AtRamHMFVcjqne3Ar7NLWtFtYNtsrf1cE",
+   "kind": "stock",
+   "symbol": "RBLX",
+   "name": "Roblox - Backpack Securities",
+   "underlying": "RBLX",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "RBLXDGRD64AtRamHMFVcjqne3Ar7NLWtFtYNtsrf1cE",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.6194298048584517,
+    "buyCost1000Pct": 0.844215888990894,
+    "volume24hUsd": 116631.19868675547,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:USNv3NkKA27Dh4nsHJDPhW4VoEcTQmjoZyJt2dqdwFu",
+   "kind": "stock",
+   "symbol": "USO",
+   "name": "United States Oil Fund, LP - Backpack Securities",
+   "underlying": "USO",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "USNv3NkKA27Dh4nsHJDPhW4VoEcTQmjoZyJt2dqdwFu",
+   "themes": [
+    "Energy and power",
+    "Commodities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.7256175242425278,
+    "buyCost1000Pct": 2.077152195185328,
+    "volume24hUsd": 13566.795526608066,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:URARfsinxCRw4JpvQhuT4CxavdZXZEMjv9ZwWmWpwag",
+   "kind": "etf",
+   "symbol": "URA",
+   "name": "Global X Uranium ETF - Backpack Securities",
+   "underlying": "URA",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "URARfsinxCRw4JpvQhuT4CxavdZXZEMjv9ZwWmWpwag",
+   "themes": [
+    "Energy and power"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.5466830004613565,
+    "buyCost1000Pct": 1.4012658273902523,
+    "volume24hUsd": 9103.459762849303,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg",
+   "kind": "stock",
+   "symbol": "HOODx",
+   "name": "Robinhood xStock",
+   "underlying": "HOOD",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.000316954006429615,
+    "buyCost1000Pct": 0,
+    "volume24hUsd": 399206.7930180985,
+    "pyth": "Crypto.HOODX/USD"
+   }
+  },
+  {
+   "id": "jup:RDDTGbhHwVXfyCvQMXzzowKjf5qrYBZAnehoXW83ooh",
+   "kind": "stock",
+   "symbol": "RDDT",
+   "name": "Reddit - Backpack Securities",
+   "underlying": "RDDT",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "RDDTGbhHwVXfyCvQMXzzowKjf5qrYBZAnehoXW83ooh",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.786693982044584,
+    "buyCost1000Pct": 2.3008068677188964,
+    "volume24hUsd": 22772.73580417796,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:SNAPcESrvnH8yUdgeMF6xm1hym9b6hW6s8YeqeHdZFz",
+   "kind": "stock",
+   "symbol": "SNAP",
+   "name": "Snap - Backpack Securities",
+   "underlying": "SNAP",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "SNAPcESrvnH8yUdgeMF6xm1hym9b6hW6s8YeqeHdZFz",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.5625453363226396,
+    "buyCost1000Pct": 0.8636673522382066,
+    "volume24hUsd": 129389.3200794331,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:BABANGA4JE7Kkam4nTrALAwAVgsNJUuFJnnkF7S16BZp",
+   "kind": "stock",
+   "symbol": "BABA",
+   "name": "Alibaba Group Holding - Backpack Securities",
+   "underlying": "BABA",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "BABANGA4JE7Kkam4nTrALAwAVgsNJUuFJnnkF7S16BZp",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.40239684806405346,
+    "buyCost1000Pct": 0.6494558860814964,
+    "volume24hUsd": 92040.68508758166,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xs6B6zawENwAbWVi7w92rjazLuAr5Az59qgWKcNb45x",
+   "kind": "stock",
+   "symbol": "BRK.Bx",
+   "name": "Berkshire Hathaway xStock",
+   "underlying": "BRK.B",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xs6B6zawENwAbWVi7w92rjazLuAr5Az59qgWKcNb45x",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.2853925224623466,
+    "buyCost1000Pct": 0.5231511429642621,
+    "volume24hUsd": 15290.694468801343,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:LMT3i1BHgixFqPUgcyteJhnEz2dpy9i3cYy4pi9BoeV",
+   "kind": "stock",
+   "symbol": "LMT",
+   "name": "Lockheed Martin - Backpack Securities",
+   "underlying": "LMT",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "LMT3i1BHgixFqPUgcyteJhnEz2dpy9i3cYy4pi9BoeV",
+   "themes": [
+    "Space and defense"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.7342247690243965,
+    "buyCost1000Pct": 1.0362191658056248,
+    "volume24hUsd": 182081.01584308583,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:SNDKbwMUQvZhnLnxLduradgLHG5KrPuKwpnrkkGRhfH",
+   "kind": "stock",
+   "symbol": "SNDK",
+   "name": "Sandisk - Backpack Securities",
+   "underlying": "SNDK",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "SNDKbwMUQvZhnLnxLduradgLHG5KrPuKwpnrkkGRhfH",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.712299461399557,
+    "buyCost1000Pct": 0.7071817010311232,
+    "volume24hUsd": 358375.4674949615,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:PUSAG1stksTcAoK9MjinEHUwAYRJsbovywYCk37m6hy",
+   "kind": "stock",
+   "symbol": "PUSA",
+   "name": "Powerus Corporation - Backpack Securities",
+   "underlying": "PUSA",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "PUSAG1stksTcAoK9MjinEHUwAYRJsbovywYCk37m6hy",
+   "themes": [
+    "Energy and power"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.7585427785330556,
+    "buyCost1000Pct": 1.2089218970995352,
+    "volume24hUsd": 24717.575534077234,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:oPNWKYTYJyEs2RbpjUXfCTxrNtiTjTcz3ipvUvBBAH2",
+   "kind": "stock",
+   "symbol": "OPNW",
+   "name": "OpenWorld - Backpack Securities",
+   "underlying": "OPNW",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "oPNWKYTYJyEs2RbpjUXfCTxrNtiTjTcz3ipvUvBBAH2",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.1335591652196988,
+    "buyCost1000Pct": 0.13355826114518354,
+    "volume24hUsd": 10694855.171705961,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XshPgPdXFRWB8tP1j82rebb2Q9rPgGX37RuqzohmArM",
+   "kind": "stock",
+   "symbol": "INTCx",
+   "name": "Intel xStock",
+   "underlying": "INTC",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XshPgPdXFRWB8tP1j82rebb2Q9rPgGX37RuqzohmArM",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.3882865249977864,
+    "buyCost1000Pct": 0.43859476610842013,
+    "volume24hUsd": 259828.28627835689,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:DRAMjSWR7HRfJKjRkvQWYL2bcaejaVhuxEcjf4pAY4Cw",
+   "kind": "etf",
+   "symbol": "DRAM",
+   "name": "Roundhill Memory ETF - Backpack Securities",
+   "underlying": "DRAM",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "DRAMjSWR7HRfJKjRkvQWYL2bcaejaVhuxEcjf4pAY4Cw",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.08421412801224992,
+    "buyCost1000Pct": 0.05368513267828279,
+    "volume24hUsd": 71646.52661213481,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:LULUmT9VMttkfAJE236LXJcYJ2tTP7nunrSWR5G1BdS",
+   "kind": "stock",
+   "symbol": "LULU",
+   "name": "lululemon athletica inc. - Backpack Securities",
+   "underlying": "LULU",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "LULUmT9VMttkfAJE236LXJcYJ2tTP7nunrSWR5G1BdS",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.2358529881753335,
+    "buyCost1000Pct": 0.8555174082536254,
+    "volume24hUsd": 22544.081415960223,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:UVXY4ojmAMTaPwUmrRmcuxWHjMHCbz3BxX2RBMzjYKx",
+   "kind": "etf",
+   "symbol": "UVXY",
+   "name": "ProShares Ultra VIX Short-Term Futures ETF - Backpack Securities",
+   "underlying": "UVXY",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "UVXY4ojmAMTaPwUmrRmcuxWHjMHCbz3BxX2RBMzjYKx",
+   "themes": [
+    "Index and macro"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.07956880583036563,
+    "buyCost1000Pct": 0.4728689906039252,
+    "volume24hUsd": 90146.77761431507,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:BMKdM4yUxX12moFqVk195k7coMbaybd4RUKCUdm7D1Sk",
+   "kind": "stock",
+   "symbol": "IBM",
+   "name": "International Business Machines - Backpack Securities",
+   "underlying": "IBM",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "BMKdM4yUxX12moFqVk195k7coMbaybd4RUKCUdm7D1Sk",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.5165376043700598,
+    "buyCost1000Pct": 0.7785862629548279,
+    "volume24hUsd": 45421.052525015984,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:TSM2Hiuf7Z9REcwZFQvsBEekBYCYziWBABfFnj6V6gQ",
+   "kind": "stock",
+   "symbol": "TSM",
+   "name": "Taiwan Semiconductor Manufacturing Company - Backpack Securities",
+   "underlying": "TSM",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "TSM2Hiuf7Z9REcwZFQvsBEekBYCYziWBABfFnj6V6gQ",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.17170110806532524,
+    "buyCost1000Pct": 0.5900086281034667,
+    "volume24hUsd": 8807.344913341973,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:DELL2aRKQz7DMq5DrKLtkn47ZCnbxXPZXrSGbkmd13wy",
+   "kind": "stock",
+   "symbol": "DELL",
+   "name": "Dell Technologies - Backpack Securities",
+   "underlying": "DELL",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "DELL2aRKQz7DMq5DrKLtkn47ZCnbxXPZXrSGbkmd13wy",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.2511942801101008,
+    "buyCost1000Pct": 1.3376886329842685,
+    "volume24hUsd": 63289.05515897271,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:SH55hfaipFAbwT42nQYhRoM5o5t61QpkmJ6p62vXB3m",
+   "kind": "stock",
+   "symbol": "SHOP",
+   "name": "Shopify - Backpack Securities",
+   "underlying": "SHOP",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "SH55hfaipFAbwT42nQYhRoM5o5t61QpkmJ6p62vXB3m",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.13526442078003464,
+    "buyCost1000Pct": 0.5164132900575602,
+    "volume24hUsd": 15938.930382072718,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsjQP3iMAaQ3kQScQKthQpx9ALRbjKAjQtHg6TFomoc",
+   "kind": "stock",
+   "symbol": "TQQQx",
+   "name": "TQQQ xStock",
+   "underlying": "TQQQ",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsjQP3iMAaQ3kQScQKthQpx9ALRbjKAjQtHg6TFomoc",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.4995831466389822,
+    "buyCost1000Pct": 4.47583414891648,
+    "volume24hUsd": 4038.873964144256,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:BULL151gUXcFV5wXEUqu9Am2L7Qt4bTJRLRuAUjkcspC",
+   "kind": "stock",
+   "symbol": "BULL",
+   "name": "Webull Corporation - Backpack Securities",
+   "underlying": "BULL",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "BULL151gUXcFV5wXEUqu9Am2L7Qt4bTJRLRuAUjkcspC",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.8673375179641729,
+    "buyCost1000Pct": 2.9589117264643416,
+    "volume24hUsd": 3309.8862668261004,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:ARMbSB1MBRQrY6PNMao1HdQ431VafC6JRJCsGZ2Yv3iJ",
+   "kind": "stock",
+   "symbol": "ARM",
+   "name": "Arm Holdings - Backpack Securities",
+   "underlying": "ARM",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "ARMbSB1MBRQrY6PNMao1HdQ431VafC6JRJCsGZ2Yv3iJ",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.46497407356865805,
+    "buyCost1000Pct": 1.2720314865789062,
+    "volume24hUsd": 9630.984877178493,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:SCHHJ3jRdSjeFEVAaLrnYdx3Brphn92Ys7z1qkiCtPX",
+   "kind": "etf",
+   "symbol": "SCHH",
+   "name": "Schwab U.S. REIT ETF - Backpack Securities",
+   "underlying": "SCHH",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "SCHHJ3jRdSjeFEVAaLrnYdx3Brphn92Ys7z1qkiCtPX",
+   "themes": [
+    "Index and macro"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.5646634197335243,
+    "buyCost1000Pct": 1.1321359398044906,
+    "volume24hUsd": 64785.613721441216,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xs2yquAgsHByNzx68WJC55WHjHBvG9JsMB7CWjTLyPy",
+   "kind": "stock",
+   "symbol": "DFDVx",
+   "name": "DFDV xStock",
+   "underlying": "DFDV",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xs2yquAgsHByNzx68WJC55WHjHBvG9JsMB7CWjTLyPy",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.5709530737472379,
+    "buyCost1000Pct": 1.8225561311526972,
+    "volume24hUsd": 17825.106602350254,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:UPSqUeMHcWbkdg784XuBUEF9DtySSnW9ur5LAVdcuB9",
+   "kind": "stock",
+   "symbol": "UPS",
+   "name": "United Parcel Service - Backpack Securities",
+   "underlying": "UPS",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "UPSqUeMHcWbkdg784XuBUEF9DtySSnW9ur5LAVdcuB9",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.592248474394963,
+    "buyCost1000Pct": 1.0746493231700405,
+    "volume24hUsd": 1216.7132277669893,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:PFER6ENqP8r8NF3CqVt4mFowxsin3V5MLidBNQFCC3x",
+   "kind": "stock",
+   "symbol": "PFE",
+   "name": "Pfizer - Backpack Securities",
+   "underlying": "PFE",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "PFER6ENqP8r8NF3CqVt4mFowxsin3V5MLidBNQFCC3x",
+   "themes": [
+    "Healthcare"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.1402156562471224,
+    "buyCost1000Pct": 0.6198826855449036,
+    "volume24hUsd": 4118.626460815483,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:BArimz1PcKZr8PcPh3tcZ2dg4S7FJLk3cw6R5F8GsHKg",
+   "kind": "stock",
+   "symbol": "BA",
+   "name": "The Boeing Company - Backpack Securities",
+   "underlying": "BA",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "BArimz1PcKZr8PcPh3tcZ2dg4S7FJLk3cw6R5F8GsHKg",
+   "themes": [
+    "Space and defense"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.7160297121807789,
+    "buyCost1000Pct": 2.123149716816738,
+    "volume24hUsd": 162091.86941108847,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:DNUTsCvKbKwu2RM72cUuW3TD9YpzArzACcqYQssjPLSk",
+   "kind": "stock",
+   "symbol": "DNUT",
+   "name": "Krispy Kreme, Inc. Common Stock - Backpack Securities",
+   "underlying": "DNUT",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "DNUTsCvKbKwu2RM72cUuW3TD9YpzArzACcqYQssjPLSk",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.5537320979151272,
+    "buyCost1000Pct": 1.5898818493838673,
+    "volume24hUsd": 5402.242441608532,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:NBiSF3UaVUFtRzHwAfxyHsBCAZWGEKnMpewAE4oh7BG",
+   "kind": "stock",
+   "symbol": "NBIS",
+   "name": "Nebius Group N.V. - Backpack Securities",
+   "underlying": "NBIS",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "NBiSF3UaVUFtRzHwAfxyHsBCAZWGEKnMpewAE4oh7BG",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.9877371001481006,
+    "buyCost1000Pct": 2.2631918611002,
+    "volume24hUsd": 44500.342571749425,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:EWZzCki1igp2y73UyUM4RCG4QUVMQAtnrQUVNaDHzDxJ",
+   "kind": "etf",
+   "symbol": "EWZ",
+   "name": "iShares MSCI Brazil ETF - Backpack Securities",
+   "underlying": "EWZ",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "EWZzCki1igp2y73UyUM4RCG4QUVMQAtnrQUVNaDHzDxJ",
+   "themes": [
+    "Index and macro"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.07885145276356198,
+    "buyCost1000Pct": 0.39882270605203773,
+    "volume24hUsd": 615.152791615783,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:CMGi497VQA9RiHVWpQi5B847vN8RLaEwcMhB5kEUhkAQ",
+   "kind": "stock",
+   "symbol": "CMG",
+   "name": "Chipotle Mexican Grill - Backpack Securities",
+   "underlying": "CMG",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "CMGi497VQA9RiHVWpQi5B847vN8RLaEwcMhB5kEUhkAQ",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.3003159506205111,
+    "buyCost1000Pct": 0.641459380620979,
+    "volume24hUsd": 1334.643154401628,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v",
+   "kind": "pre-ipo",
+   "symbol": "tSpaceX",
+   "name": "T-SpaceX",
+   "underlying": "SPACEX",
+   "issuer": "Tessera (pre-IPO exposure)",
+   "venue": "Jupiter",
+   "mint": "TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v",
+   "themes": [
+    "Space and defense"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "tessera",
+    "buyCost100Pct": 0.7997594148840825,
+    "buyCost1000Pct": 0.7997591965684059,
+    "volume24hUsd": 487141.6356802798,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:RUMsPfFZFnN1ZmGANwP7FNMJMjKH4m9RiMePrtVtLe7",
+   "kind": "stock",
+   "symbol": "RUM",
+   "name": "RUM Group Inc. - Backpack Securities",
+   "underlying": "RUM",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "RUMsPfFZFnN1ZmGANwP7FNMJMjKH4m9RiMePrtVtLe7",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.24999673352380514,
+    "buyCost1000Pct": 0.6516832118176441,
+    "volume24hUsd": 15273.692798040485,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:FLWSojG1gB5VStYR3Sb4nQFRt43UBYkqih1j2CpVLqgd",
+   "kind": "stock",
+   "symbol": "FLWS",
+   "name": "1-800-FLOWERS.COM - Backpack Securities",
+   "underlying": "FLWS",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "FLWSojG1gB5VStYR3Sb4nQFRt43UBYkqih1j2CpVLqgd",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 0.11552097414760931,
+    "buyCost1000Pct": 0.8228171293004571,
+    "volume24hUsd": 9509.309365925397,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsaHND8sHyfMfsWPj6kSdd5VwvCayZvjYgKmmcNL5qh",
+   "kind": "stock",
+   "symbol": "XOMx",
+   "name": "Exxon Mobil xStock",
+   "underlying": "XOM",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsaHND8sHyfMfsWPj6kSdd5VwvCayZvjYgKmmcNL5qh",
+   "themes": [
+    "Energy and power"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.8132900442013202,
+    "buyCost1000Pct": 2.590814503359351,
+    "volume24hUsd": 1212.9404516655254,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xsv99frTRUeornyvCfvhnDesQDWuvns1M852Pez91vF",
+   "kind": "stock",
+   "symbol": "PEPx",
+   "name": "PepsiCo xStock",
+   "underlying": "PEP",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xsv99frTRUeornyvCfvhnDesQDWuvns1M852Pez91vF",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.615279293007509,
+    "buyCost1000Pct": 1.2838605939751169,
+    "volume24hUsd": 2909.050231605958,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xsg8azkTEAmBz4Qbs8iYYhgRkLKSqNo85vcJL68aLMH",
+   "kind": "stock",
+   "symbol": "CHADx",
+   "name": "DeFi Development Corp. Variable Rate Series C Perpetual Preferred xStock",
+   "underlying": "CHAD",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xsg8azkTEAmBz4Qbs8iYYhgRkLKSqNo85vcJL68aLMH",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.20755184685593564,
+    "buyCost1000Pct": 0.3728018528837196,
+    "volume24hUsd": 6379.566919687785,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:star9agSpjiFe3M49B3RniVU4CMBBEK3Qnaqn3RGiFM",
+   "kind": "yield",
+   "symbol": "USD*",
+   "name": "USD Star",
+   "underlying": null,
+   "issuer": "unverified (USD Star)",
+   "venue": "Jupiter",
+   "mint": "star9agSpjiFe3M49B3RniVU4CMBBEK3Qnaqn3RGiFM",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.04015054077036728,
+    "buyCost1000Pct": 0.040150318318554756,
+    "volume24hUsd": 38731.23807200501,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:HnnGv3HrSqjRpgdFmx7vQGjntNEoex1SU4e9Lxcxuihz",
+   "kind": "yield",
+   "symbol": "eHYUSD",
+   "name": "Earn Hylo USD",
+   "underlying": null,
+   "issuer": "unverified (Earn Hylo USD)",
+   "venue": "Jupiter",
+   "mint": "HnnGv3HrSqjRpgdFmx7vQGjntNEoex1SU4e9Lxcxuihz",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.027395382329742368,
+    "buyCost1000Pct": 0.027640917733851023,
+    "volume24hUsd": 238411.65016660467,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsrBCwaH8c46xiqXBChzobgufRKxQxAWUWbndgBNzFn",
+   "kind": "stock",
+   "symbol": "BMNRx",
+   "name": "Bitmine xStock",
+   "underlying": "BMNR",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsrBCwaH8c46xiqXBChzobgufRKxQxAWUWbndgBNzFn",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.5781025748596735,
+    "buyCost1000Pct": 9.050295674258258,
+    "volume24hUsd": 1526.1914056148207,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih",
+   "kind": "yield",
+   "symbol": "wYLDS",
+   "name": "",
+   "underlying": null,
+   "issuer": "unverified (wYLDS)",
+   "venue": "Jupiter",
+   "mint": "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.252732493173502,
+    "buyCost1000Pct": null,
+    "volume24hUsd": 11.376820172719071,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Eh6XEPhSwoLv5wFApukmnaVSHQ6sAnoD9BmgmwQoN2sN",
+   "kind": "yield",
+   "symbol": "sUSDe",
+   "name": "Staked USDe",
+   "underlying": null,
+   "issuer": "unverified (Staked USDe)",
+   "venue": "Jupiter",
+   "mint": "Eh6XEPhSwoLv5wFApukmnaVSHQ6sAnoD9BmgmwQoN2sN",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": null,
+    "buyCost100Pct": 0.16533892331362932,
+    "buyCost1000Pct": 1.1368368247850813,
+    "volume24hUsd": 96.0362607131699,
+    "pyth": "Crypto.SUSDE/USD"
+   }
+  },
+  {
+   "id": "jup:Xsba6tUnSjDae2VcopDB6FGGDaxRrewFCDa5hKn5vT3",
+   "kind": "stock",
+   "symbol": "PMx",
+   "name": "Philip Morris xStock",
+   "underlying": "PM",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xsba6tUnSjDae2VcopDB6FGGDaxRrewFCDa5hKn5vT3",
+   "themes": [],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 0.045449421416488,
+    "buyCost1000Pct": 63.49282066661894,
+    "volume24hUsd": 1.9992288686347741,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw",
+   "kind": "pre-ipo",
+   "symbol": "ANTHROPIC",
+   "name": "Anthropic PreStocks",
+   "underlying": "ANTHROPIC",
+   "issuer": "PreStocks (SPV exposure to private companies)",
+   "venue": "Jupiter",
+   "mint": "Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "prestocks",
+    "buyCost100Pct": 1.9455280482353001,
+    "buyCost1000Pct": 2.0128220120361853,
+    "volume24hUsd": 3481142.589732497,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:PresTj4Yc2bAR197Er7wz4UUKSfqt6FryBEdAriBoQB",
+   "kind": "pre-ipo",
+   "symbol": "ANDURIL",
+   "name": "Anduril PreStocks",
+   "underlying": "ANDURIL",
+   "issuer": "PreStocks (SPV exposure to private companies)",
+   "venue": "Jupiter",
+   "mint": "PresTj4Yc2bAR197Er7wz4UUKSfqt6FryBEdAriBoQB",
+   "themes": [
+    "Space and defense"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "prestocks",
+    "buyCost100Pct": 2.034146862426466,
+    "buyCost1000Pct": 2.034146776589373,
+    "volume24hUsd": 7829.876923062762,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:PrekqLJvJ3qVdXmBGDiexvwUTF4rLFDa6HWS4HJbw9S",
+   "kind": "pre-ipo",
+   "symbol": "NEURALINK",
+   "name": "Neuralink PreStocks",
+   "underlying": "NEURALINK",
+   "issuer": "PreStocks (SPV exposure to private companies)",
+   "venue": "Jupiter",
+   "mint": "PrekqLJvJ3qVdXmBGDiexvwUTF4rLFDa6HWS4HJbw9S",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "prestocks",
+    "buyCost100Pct": 3.5250142344358184,
+    "buyCost1000Pct": 3.6074107921930545,
+    "volume24hUsd": 100706.56423621697,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Pre8AREmFPtoJFT8mQSXQLh56cwJmM7CFDRuoGBZiUP",
+   "kind": "pre-ipo",
+   "symbol": "POLYMARKET",
+   "name": "Polymarket PreStocks",
+   "underlying": "POLYMARKET",
+   "issuer": "PreStocks (SPV exposure to private companies)",
+   "venue": "Jupiter",
+   "mint": "Pre8AREmFPtoJFT8mQSXQLh56cwJmM7CFDRuoGBZiUP",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "prestocks",
+    "buyCost100Pct": 3.491144620908501,
+    "buyCost1000Pct": 3.6254694499854603,
+    "volume24hUsd": 4889108.070571866,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:MRNAzXzhNcaEXJPibHEn8cd4vyekCDiivTyEwswLUCT",
+   "kind": "stock",
+   "symbol": "MRNA",
+   "name": "Moderna - Backpack Securities",
+   "underlying": "MRNA",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "MRNAzXzhNcaEXJPibHEn8cd4vyekCDiivTyEwswLUCT",
+   "themes": [
+    "Healthcare"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.2602385752235157,
+    "buyCost1000Pct": 2.5767960550644897,
+    "volume24hUsd": 20255.334723622676,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:NFLX7qV57zuVxCoHy3s1jiGZyALraLNwttbxdvmYJLJ",
+   "kind": "stock",
+   "symbol": "NFLX",
+   "name": "Netflix - Backpack Securities",
+   "underlying": "NFLX",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "NFLX7qV57zuVxCoHy3s1jiGZyALraLNwttbxdvmYJLJ",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 2.0458654644075147,
+    "buyCost1000Pct": 2.2447952039398977,
+    "volume24hUsd": 36371.575697640976,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:CYPHuMmCL1GxJWa2tsPhLKykC7GrHJTCHwbXD4g5uawK",
+   "kind": "stock",
+   "symbol": "CYPH",
+   "name": "Cypherpunk Technologies - Backpack Securities",
+   "underlying": "CYPH",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "CYPHuMmCL1GxJWa2tsPhLKykC7GrHJTCHwbXD4g5uawK",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.617148521716938,
+    "buyCost1000Pct": 1.9014577247276065,
+    "volume24hUsd": 270077.2776667021,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:WENAZ2WyPbmgvUcKfQ8hyMDfBQP9bZ65hsZ5KTFrRGZ",
+   "kind": "stock",
+   "symbol": "WEN",
+   "name": "The Wendy's Company - Backpack Securities",
+   "underlying": "WEN",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "WENAZ2WyPbmgvUcKfQ8hyMDfBQP9bZ65hsZ5KTFrRGZ",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.1346734617692236,
+    "buyCost1000Pct": 1.3746674372090784,
+    "volume24hUsd": 17002.204750384215,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:BLKKYfF41c6xRPrtX1rdYbxLE1xxEdZUnxQsB5hcZ8Nf",
+   "kind": "stock",
+   "symbol": "BLK",
+   "name": "BlackRock - Backpack Securities",
+   "underlying": "BLK",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "BLKKYfF41c6xRPrtX1rdYbxLE1xxEdZUnxQsB5hcZ8Nf",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.2342252490639694,
+    "buyCost1000Pct": 1.5259624778102276,
+    "volume24hUsd": 6694.034031502073,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:CzLTZppPdZtTjyq3WGpHLstoc3GLhu7zH5Zg6xUa6Gv5",
+   "kind": "etf",
+   "symbol": "COPX",
+   "name": "Global X Copper Miners ETF - Backpack Securities",
+   "underlying": "COPX",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "CzLTZppPdZtTjyq3WGpHLstoc3GLhu7zH5Zg6xUa6Gv5",
+   "themes": [
+    "Commodities"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.4538477585289655,
+    "buyCost1000Pct": 1.92177179347779,
+    "volume24hUsd": 8229.873998032415,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:RKLBnAXGqv31iZomqsuAWkQm1aqC7JwwvbCfzGdqAhz",
+   "kind": "stock",
+   "symbol": "RKLB",
+   "name": "Rocket Lab - Backpack Securities",
+   "underlying": "RKLB",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "RKLBnAXGqv31iZomqsuAWkQm1aqC7JwwvbCfzGdqAhz",
+   "themes": [
+    "Space and defense"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.168859163898285,
+    "buyCost1000Pct": 2.7156734105037232,
+    "volume24hUsd": 81394.60126606279,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+   "kind": "stock",
+   "symbol": "MGM",
+   "name": "MGM Resorts International - Backpack Securities",
+   "underlying": "MGM",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 2.061035330317107,
+    "buyCost1000Pct": 2.3722446298657163,
+    "volume24hUsd": 2428.5836737972586,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:EWY4owSJYMpwN33qGDu5gGxpkQkpMJu8ZUsQJaNZG5dv",
+   "kind": "etf",
+   "symbol": "EWY",
+   "name": "iShares MSCI South Korea ETF - Backpack Securities",
+   "underlying": "EWY",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "EWY4owSJYMpwN33qGDu5gGxpkQkpMJu8ZUsQJaNZG5dv",
+   "themes": [
+    "Index and macro"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.641731627130761,
+    "buyCost1000Pct": 2.1434567480095863,
+    "volume24hUsd": 38259.414736234554,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:SPHRp8cZaSQBTp1KMNP4V1X821SXhXWt4Q2yLdyHzju",
+   "kind": "stock",
+   "symbol": "SPHR",
+   "name": "Sphere Entertainment Co. - Backpack Securities",
+   "underlying": "SPHR",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "SPHRp8cZaSQBTp1KMNP4V1X821SXhXWt4Q2yLdyHzju",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.1298685839020828,
+    "buyCost1000Pct": 1.4702194047457762,
+    "volume24hUsd": 4455.77076512038,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:LUV9GB51PNZNRyzzyYK3rtqFfvDvWtRiXZ34wVq2HrX",
+   "kind": "stock",
+   "symbol": "LUV",
+   "name": "Southwest Airlines Co. - Backpack Securities",
+   "underlying": "LUV",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "LUV9GB51PNZNRyzzyYK3rtqFfvDvWtRiXZ34wVq2HrX",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 2.051918583506118,
+    "buyCost1000Pct": 2.2635143526983814,
+    "volume24hUsd": 5025.239053679312,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:NQ5hSuXQZrbnrwcDVk2qN73njjd3E3v3badYHnj5thF",
+   "kind": "stock",
+   "symbol": "IONQ",
+   "name": "IonQ - Backpack Securities",
+   "underlying": "IONQ",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "NQ5hSuXQZrbnrwcDVk2qN73njjd3E3v3badYHnj5thF",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.3553467967731914,
+    "buyCost1000Pct": 2.812578458255993,
+    "volume24hUsd": 11925.263703714201,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:PTNzAfFAB4LvoUQEUUGrFMyUoRLExMYjH6CcfyQfsVP",
+   "kind": "stock",
+   "symbol": "PTN",
+   "name": "Palatin Technologies, Inc. - Backpack Securities",
+   "underlying": "PTN",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "PTNzAfFAB4LvoUQEUUGrFMyUoRLExMYjH6CcfyQfsVP",
+   "themes": [
+    "Healthcare"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.2661471398715207,
+    "buyCost1000Pct": 1.6988042201211973,
+    "volume24hUsd": 31928.395500953862,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:BEBVfXZ8uCxRBuunEbW9wcq9r7W9ySNo14oJBJkDgpZx",
+   "kind": "stock",
+   "symbol": "BE",
+   "name": "Bloom Energy - Backpack Securities",
+   "underlying": "BE",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "BEBVfXZ8uCxRBuunEbW9wcq9r7W9ySNo14oJBJkDgpZx",
+   "themes": [
+    "Energy and power"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.658358121044956,
+    "buyCost1000Pct": 2.22222609565651,
+    "volume24hUsd": 30818.05307487503,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:MRVLSjkR2ceUBukujaD3xCyHP1H3B2SzpsNTZF546jo",
+   "kind": "stock",
+   "symbol": "MRVL",
+   "name": "Marvell Technology - Backpack Securities",
+   "underlying": "MRVL",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "MRVLSjkR2ceUBukujaD3xCyHP1H3B2SzpsNTZF546jo",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.62240592960534,
+    "buyCost1000Pct": 1.8904848987471814,
+    "volume24hUsd": 72033.89478625203,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:CRWVJeR2yEZuDUKYfGuKCHvLz8ywn4LGvovHfy5WiFmi",
+   "kind": "stock",
+   "symbol": "CRWV",
+   "name": "CoreWeave - Backpack Securities",
+   "underlying": "CRWV",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "CRWVJeR2yEZuDUKYfGuKCHvLz8ywn4LGvovHfy5WiFmi",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.3239212171912496,
+    "buyCost1000Pct": 2.784814779392141,
+    "volume24hUsd": 22669.692951477788,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:QUBTAD8C9bMU9LvmMNgKPhrmBGbHvxpu6vfWQtThxxw",
+   "kind": "stock",
+   "symbol": "QUBT",
+   "name": "Quantum Computing - Backpack Securities",
+   "underlying": "QUBT",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "QUBTAD8C9bMU9LvmMNgKPhrmBGbHvxpu6vfWQtThxxw",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 2.024101920841459,
+    "buyCost1000Pct": 3.0668646440949243,
+    "volume24hUsd": 8763.715572765592,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:PreZad18qfPtbxNpMtMuAuX2zVpvkEU8DnJx56faCWd",
+   "kind": "pre-ipo",
+   "symbol": "FIGUREAI",
+   "name": "Figure AI PreStocks",
+   "underlying": "FIGUREAI",
+   "issuer": "PreStocks (SPV exposure to private companies)",
+   "venue": "Jupiter",
+   "mint": "PreZad18qfPtbxNpMtMuAuX2zVpvkEU8DnJx56faCWd",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "prestocks",
+    "buyCost100Pct": 3.5381357730119736,
+    "buyCost1000Pct": 3.727830155006128,
+    "volume24hUsd": 3346.069276233065,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:ABNB56TteaTZG1S3DY2W8VMncQmHMvNCGaZgAba49CLP",
+   "kind": "stock",
+   "symbol": "ABNB",
+   "name": "Airbnb - Backpack Securities",
+   "underlying": "ABNB",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "ABNB56TteaTZG1S3DY2W8VMncQmHMvNCGaZgAba49CLP",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 2.000215635362268,
+    "buyCost1000Pct": 2.2114737895088665,
+    "volume24hUsd": 3665.157642117402,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:N7Q5fYX7YRnDQksfdBKnoUb3awm92n7QNAD35X3Rq1X",
+   "kind": "stock",
+   "symbol": "NOK",
+   "name": "Nokia Oyj - Backpack Securities",
+   "underlying": "NOK",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "N7Q5fYX7YRnDQksfdBKnoUb3awm92n7QNAD35X3Rq1X",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 2.0636065955850436,
+    "buyCost1000Pct": 2.419974574423045,
+    "volume24hUsd": 23301.25494408844,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:RENzhrJQgmAnfcLhU1U5XwAMc6TC15UA6jCbPBaasnj",
+   "kind": "stock",
+   "symbol": "IREN",
+   "name": "IREN - Backpack Securities",
+   "underlying": "IREN",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "RENzhrJQgmAnfcLhU1U5XwAMc6TC15UA6jCbPBaasnj",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.7549554943846468,
+    "buyCost1000Pct": 2.9389358869759796,
+    "volume24hUsd": 17896.222771636763,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:iy11ytbSGcUnrjE6Lfv78TFqxKyUESfku1FugS9ondo",
+   "kind": "etf",
+   "symbol": "SLVon",
+   "name": "iShares Silver Trust (Ondo Tokenized)",
+   "underlying": "SLV",
+   "issuer": "Ondo Global Markets",
+   "venue": "Jupiter",
+   "mint": "iy11ytbSGcUnrjE6Lfv78TFqxKyUESfku1FugS9ondo",
+   "themes": [
+    "Commodities"
+   ],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "ondo",
+    "buyCost100Pct": 1.3111135269172736,
+    "buyCost1000Pct": 13.194473763196601,
+    "volume24hUsd": 1462.0388590822213,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:JNJg1znKdF712Phe7L7z52AATAvEjEytBdN2w8Lnh1Y",
+   "kind": "stock",
+   "symbol": "JNJ",
+   "name": "Johnson & Johnson - Backpack Securities",
+   "underlying": "JNJ",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "JNJg1znKdF712Phe7L7z52AATAvEjEytBdN2w8Lnh1Y",
+   "themes": [
+    "Healthcare"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.1974531037671516,
+    "buyCost1000Pct": 1.5453126854508403,
+    "volume24hUsd": 3086.1842152951476,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:CHWYHz2zfKajomqPV9it26n7vu7AgZZfqGHXCWtGWuJg",
+   "kind": "stock",
+   "symbol": "CHWY",
+   "name": "Chewy - Backpack Securities",
+   "underlying": "CHWY",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "CHWYHz2zfKajomqPV9it26n7vu7AgZZfqGHXCWtGWuJg",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.0268341412324022,
+    "buyCost1000Pct": 1.3081059258899796,
+    "volume24hUsd": 8684.520788138057,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:RUKx7nBgm94pwRPbVm99xYVdcTDTUyGs8Cw3VSYQXHf",
+   "kind": "stock",
+   "symbol": "RIOT",
+   "name": "Riot Platforms - Backpack Securities",
+   "underlying": "RIOT",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "RUKx7nBgm94pwRPbVm99xYVdcTDTUyGs8Cw3VSYQXHf",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 2.033819248522717,
+    "buyCost1000Pct": 2.6914778075394885,
+    "volume24hUsd": 10994.908744287797,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:BBosJLw8ZzoATiEyywiifx7AgmrD2Cm3XjFWbhbRhChy",
+   "kind": "stock",
+   "symbol": "BB",
+   "name": "BlackBerry - Backpack Securities",
+   "underlying": "BB",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "BBosJLw8ZzoATiEyywiifx7AgmrD2Cm3XjFWbhbRhChy",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.9347966973876973,
+    "buyCost1000Pct": 2.150971235200927,
+    "volume24hUsd": 16777.988325322593,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:WULFeyfrj1VJKD9HhRTcW8R4g5HefUA11HDEdBv2WxD",
+   "kind": "stock",
+   "symbol": "WULF",
+   "name": "TeraWulf - Backpack Securities",
+   "underlying": "WULF",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "WULFeyfrj1VJKD9HhRTcW8R4g5HefUA11HDEdBv2WxD",
+   "themes": [
+    "AI and compute",
+    "Crypto-adjacent"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.8922524574755275,
+    "buyCost1000Pct": 2.2105272222010526,
+    "volume24hUsd": 28932.65498373199,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Pre9atBqkocK1QngFy7Q7zvyQictEFpXdLi6bZ2qnYy",
+   "kind": "pre-ipo",
+   "symbol": "OURA",
+   "name": "Oura PreStocks",
+   "underlying": "OURA",
+   "issuer": "PreStocks (SPV exposure to private companies)",
+   "venue": "Jupiter",
+   "mint": "Pre9atBqkocK1QngFy7Q7zvyQictEFpXdLi6bZ2qnYy",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "prestocks",
+    "buyCost100Pct": 3.555563692823526,
+    "buyCost1000Pct": 3.953566856532197,
+    "volume24hUsd": 84.21481631341946,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:BRVaZKg6J9iF2BEsdpsxJ9NyvN9PPxPZuoQUX2v8qqkk",
+   "kind": "stock",
+   "symbol": "BROS",
+   "name": "Dutch Bros - Backpack Securities",
+   "underlying": "BROS",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "BRVaZKg6J9iF2BEsdpsxJ9NyvN9PPxPZuoQUX2v8qqkk",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.7272443902648038,
+    "buyCost1000Pct": 2.1871891019931144,
+    "volume24hUsd": 5376.388252435681,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:MNSTy46haEN7sEaeXAWBXG6zHaRikCvqf3krAEDzxr2",
+   "kind": "stock",
+   "symbol": "MNST",
+   "name": "Monster Beverage - Backpack Securities",
+   "underlying": "MNST",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "MNSTy46haEN7sEaeXAWBXG6zHaRikCvqf3krAEDzxr2",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.074639288903544,
+    "buyCost1000Pct": 1.2530394345502935,
+    "volume24hUsd": 20130.266810088873,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:HTZsLG4zqaNvWMwXSLHH3GG5KyJpKwpBRsKVdMG6hvzP",
+   "kind": "stock",
+   "symbol": "HTZ",
+   "name": "Hertz Global Holdings, Inc Common Stock - Backpack Securities",
+   "underlying": "HTZ",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "HTZsLG4zqaNvWMwXSLHH3GG5KyJpKwpBRsKVdMG6hvzP",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.179224107678123,
+    "buyCost1000Pct": 1.5819086771251323,
+    "volume24hUsd": 16746.346424688218,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:FWDtiB5fXHdVAewPqvHPL2dh4aBC1C6GacQbePoQXKjz",
+   "kind": "stock",
+   "symbol": "FWDI",
+   "name": "Forward Industries, Inc. - Backpack Securities",
+   "underlying": "FWDI",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "FWDtiB5fXHdVAewPqvHPL2dh4aBC1C6GacQbePoQXKjz",
+   "themes": [
+    "Crypto-adjacent"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.7007498000129462,
+    "buyCost1000Pct": 2.628842917297114,
+    "volume24hUsd": 11560.392823480215,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsfCC9VL4DamVGNgdJpfLXB3sBVa158Gbx8sh7NzmTk",
+   "kind": "stock",
+   "symbol": "VIDAx",
+   "name": "Vida Global xStock",
+   "underlying": "VIDA",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsfCC9VL4DamVGNgdJpfLXB3sBVa158Gbx8sh7NzmTk",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 3.3249971255518207,
+    "buyCost1000Pct": 6.1082033265173035,
+    "volume24hUsd": 16269.621477045086,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:FLYRq3en8r2Z69gN3KyAnDrvnitEJNkwPYY7favinHeD",
+   "kind": "stock",
+   "symbol": "FLY",
+   "name": "Firefly Aerospace - Backpack Securities",
+   "underlying": "FLY",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "FLYRq3en8r2Z69gN3KyAnDrvnitEJNkwPYY7favinHeD",
+   "themes": [
+    "Space and defense"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 3.394377812351701,
+    "buyCost1000Pct": 20.203627078594156,
+    "volume24hUsd": 507.45827250777717,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:RcZmt84VMJv9bDhKqmw1uWDahYrUT468VwAChTnfD8p",
+   "kind": "stock",
+   "symbol": "RIVN",
+   "name": "Rivian Automotive - Backpack Securities",
+   "underlying": "RIVN",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "RcZmt84VMJv9bDhKqmw1uWDahYrUT468VwAChTnfD8p",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.408670139002277,
+    "buyCost1000Pct": 2.9624646838160684,
+    "volume24hUsd": 3360.1592629018514,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:GPRR2u6NS5yBQHWGauoJ9HXgjrTH8dDsrBfTV5zAYvDH",
+   "kind": "stock",
+   "symbol": "GPRO",
+   "name": "GoPro - Backpack Securities",
+   "underlying": "GPRO",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "GPRR2u6NS5yBQHWGauoJ9HXgjrTH8dDsrBfTV5zAYvDH",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.6677672574087814,
+    "buyCost1000Pct": 2.340303880820455,
+    "volume24hUsd": 21071.931541240177,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XszvaiXGPwvk2nwb3o9C1CX4K6zH8sez11E6uyup6fe",
+   "kind": "stock",
+   "symbol": "UNHx",
+   "name": "UnitedHealth xStock",
+   "underlying": "UNH",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XszvaiXGPwvk2nwb3o9C1CX4K6zH8sez11E6uyup6fe",
+   "themes": [
+    "Healthcare"
+   ],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 1.3144691938955289,
+    "buyCost1000Pct": 3.3360633673569673,
+    "volume24hUsd": 1782.5069783850342,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+   "kind": "stock",
+   "symbol": "WMTx",
+   "name": "Walmart xStock",
+   "underlying": "WMT",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 2.4272101784927447,
+    "buyCost1000Pct": 18.304297117791933,
+    "volume24hUsd": 322.7472528570591,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:CBRSFBbQPpp77NpMcwbTN6fhBHmZM94oFLJvruytw4Fi",
+   "kind": "stock",
+   "symbol": "CBRS",
+   "name": "Cerebras Systems - Backpack Securities",
+   "underlying": "CBRS",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "CBRSFBbQPpp77NpMcwbTN6fhBHmZM94oFLJvruytw4Fi",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.799958572915783,
+    "buyCost1000Pct": 2.1565993620664914,
+    "volume24hUsd": 64263.28136032675,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsfAzPzYrYjd4Dpa9BU3cusBsvWfVB9gBcyGC87S57n",
+   "kind": "stock",
+   "symbol": "NVOx",
+   "name": "Novo Nordisk xStock",
+   "underlying": "NVO",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsfAzPzYrYjd4Dpa9BU3cusBsvWfVB9gBcyGC87S57n",
+   "themes": [
+    "Healthcare"
+   ],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 4.510726363512429,
+    "buyCost1000Pct": 7.44758290080606,
+    "volume24hUsd": 6.378541155015692,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsNNMt7WTNA2sV3jrb1NNfNgapxRF5i4i6GcnTRRHts",
+   "kind": "stock",
+   "symbol": "CVXx",
+   "name": "Chevron xStock",
+   "underlying": "CVX",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsNNMt7WTNA2sV3jrb1NNfNgapxRF5i4i6GcnTRRHts",
+   "themes": [
+    "Energy and power"
+   ],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 2.6303511723680284,
+    "buyCost1000Pct": null,
+    "volume24hUsd": 474.5353486677236,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsYdjDjNUygZ7yGKfQaB6TxLh2gC6RRjzLtLAGJrhzV",
+   "kind": "stock",
+   "symbol": "PGx",
+   "name": "Procter & Gamble xStock",
+   "underlying": "PG",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsYdjDjNUygZ7yGKfQaB6TxLh2gC6RRjzLtLAGJrhzV",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 1.3379673326055053,
+    "buyCost1000Pct": 34.11850950181942,
+    "volume24hUsd": 555.5318974120585,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xs3ZFkPYT2BN7qBMqf1j1bfTeTm1rFzEFSsQ1z3wAKU",
+   "kind": "stock",
+   "symbol": "AZNx",
+   "name": "AstraZeneca xStock",
+   "underlying": "AZN",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xs3ZFkPYT2BN7qBMqf1j1bfTeTm1rFzEFSsQ1z3wAKU",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 2.053971661780851,
+    "buyCost1000Pct": 7.946712362758623,
+    "volume24hUsd": 94.52234329704227,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsqgsbXwWogGJsNcVZ3TyVouy2MbTkfCFhCGGGcQZ2p",
+   "kind": "stock",
+   "symbol": "Vx",
+   "name": "Visa xStock",
+   "underlying": "V",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsqgsbXwWogGJsNcVZ3TyVouy2MbTkfCFhCGGGcQZ2p",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 10.975777857136382,
+    "buyCost1000Pct": 57.88763460406854,
+    "volume24hUsd": 344.8434809146171,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsjFwUPiLofddX5cWFHW35GCbXcSu1BCUGfxoQAQjeL",
+   "kind": "stock",
+   "symbol": "ORCLx",
+   "name": "Oracle xStock",
+   "underlying": "ORCL",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsjFwUPiLofddX5cWFHW35GCbXcSu1BCUGfxoQAQjeL",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 1.8446559131660822,
+    "buyCost1000Pct": 4.502433938355621,
+    "volume24hUsd": 3062.11211345586,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsAsZLF4MmsvS1sDxRMrUz7REjHfwbC9UAMXSRBqgEB",
+   "kind": "stock",
+   "symbol": "UBERx",
+   "name": "Uber xStock",
+   "underlying": "UBER",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsAsZLF4MmsvS1sDxRMrUz7REjHfwbC9UAMXSRBqgEB",
+   "themes": [
+    "Consumer and media"
+   ],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 13.72973711789226,
+    "buyCost1000Pct": 47.99327027682276,
+    "volume24hUsd": 337.4095766413719,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsMAqkcKsUewDrzVkait4e5u4y8REgtyS7jWgCpLV2C",
+   "kind": "stock",
+   "symbol": "JPMx",
+   "name": "JPMorgan Chase xStock",
+   "underlying": "JPM",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsMAqkcKsUewDrzVkait4e5u4y8REgtyS7jWgCpLV2C",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 2.2741369045995996,
+    "buyCost1000Pct": 8.768660330149336,
+    "volume24hUsd": 680.9874201895741,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsSr8anD1hkvNMu8XQiVcmiaTP7XGvYu7Q58LdmtE8Z",
+   "kind": "stock",
+   "symbol": "LINx",
+   "name": "Linde xStock",
+   "underlying": "LIN",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsSr8anD1hkvNMu8XQiVcmiaTP7XGvYu7Q58LdmtE8Z",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 3.148994573907271,
+    "buyCost1000Pct": null,
+    "volume24hUsd": null,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsssYEQjzxBCFgvYFFNuhJFBeHNdLWYeUSP8F45cDr9",
+   "kind": "stock",
+   "symbol": "VTIx",
+   "name": "Vanguard xStock",
+   "underlying": "VTI",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsssYEQjzxBCFgvYFFNuhJFBeHNdLWYeUSP8F45cDr9",
+   "themes": [
+    "Index and macro"
+   ],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 1.750858693077617,
+    "buyCost1000Pct": null,
+    "volume24hUsd": 0,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsHtf5RpxsQ7jeJ9ivNewouZKJHbPxhPoEy6yYvULr7",
+   "kind": "stock",
+   "symbol": "ABTx",
+   "name": "Abbott xStock",
+   "underlying": "ABT",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsHtf5RpxsQ7jeJ9ivNewouZKJHbPxhPoEy6yYvULr7",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 3.6384014216207405,
+    "buyCost1000Pct": 17.496794487848522,
+    "volume24hUsd": 0,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:TKVC45Wshi9sjunhyTAyg7xHRVCSHoSe4AebGiFDkDC",
+   "kind": "stock",
+   "symbol": "TKO",
+   "name": "TKO Group Holdings - Backpack Securities",
+   "underlying": "TKO",
+   "issuer": "Backpack Securities",
+   "venue": "Jupiter",
+   "mint": "TKVC45Wshi9sjunhyTAyg7xHRVCSHoSe4AebGiFDkDC",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "backpack",
+    "buyCost100Pct": 1.6645134217041058,
+    "buyCost1000Pct": 1.9975645785173857,
+    "volume24hUsd": 962.2573111545714,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsaQTCgebC2KPbf27KUhdv5JFvHhQ4GDAPURwrEhAzb",
+   "kind": "stock",
+   "symbol": "AMBRx",
+   "name": "AMBRx xStock",
+   "underlying": "AMBR",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsaQTCgebC2KPbf27KUhdv5JFvHhQ4GDAPURwrEhAzb",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 20.955340402570965,
+    "buyCost1000Pct": 38.834263213770505,
+    "volume24hUsd": 0.5986846484176388,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsApJFV9MAktqnAc6jqzsHVujxkGm9xcSUffaBoYLKC",
+   "kind": "stock",
+   "symbol": "MAx",
+   "name": "Mastercard xStock",
+   "underlying": "MA",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsApJFV9MAktqnAc6jqzsHVujxkGm9xcSUffaBoYLKC",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 4.036320129532567,
+    "buyCost1000Pct": 36.64244979573583,
+    "volume24hUsd": 57.79442718977353,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xs5UJzmCRQ8DWZjskExdSQDnbE6iLkRu2jjrRAB1JSU",
+   "kind": "stock",
+   "symbol": "ACNx",
+   "name": "Accenture xStock",
+   "underlying": "ACN",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xs5UJzmCRQ8DWZjskExdSQDnbE6iLkRu2jjrRAB1JSU",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 19.609893362630217,
+    "buyCost1000Pct": 88.57968052603671,
+    "volume24hUsd": 1.1372623704566929,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsRbLZthfABAPAfumWNEJhPyiKDW6TvDVeAeW7oKqA2",
+   "kind": "stock",
+   "symbol": "HONx",
+   "name": "Honeywell xStock",
+   "underlying": "HON",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsRbLZthfABAPAfumWNEJhPyiKDW6TvDVeAeW7oKqA2",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 45.334103355204725,
+    "buyCost1000Pct": 82.27969241334203,
+    "volume24hUsd": null,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:CqW2pd6dCPG9xKZfAsTovzDsMmAGKJSDBNcwM96ondo",
+   "kind": "etf",
+   "symbol": "IVVon",
+   "name": "iShares Core S&P 500 ETF (Ondo Tokenized)",
+   "underlying": "IVV",
+   "issuer": "Ondo Global Markets",
+   "venue": "Jupiter",
+   "mint": "CqW2pd6dCPG9xKZfAsTovzDsMmAGKJSDBNcwM96ondo",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "ondo",
+    "buyCost100Pct": 46.66566668078609,
+    "buyCost1000Pct": 86.88744887432517,
+    "volume24hUsd": 82.79367478716424,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsEdDDTcVGJU6nvdRdVnj53eKTrsCkvtrVfXGmUK68V",
+   "kind": "stock",
+   "symbol": "VTx",
+   "name": "Vanguard Total World xStock",
+   "underlying": "VT",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsEdDDTcVGJU6nvdRdVnj53eKTrsCkvtrVfXGmUK68V",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 55.290273691413304,
+    "buyCost1000Pct": 85.05135086795367,
+    "volume24hUsd": 399.97900537265906,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:XsgaUyp4jd1fNBCxgtTKkW64xnnhQcvgaxzsbAq5ZD1",
+   "kind": "stock",
+   "symbol": "GSx",
+   "name": "Goldman Sachs xStock",
+   "underlying": "GS",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "XsgaUyp4jd1fNBCxgtTKkW64xnnhQcvgaxzsbAq5ZD1",
+   "themes": [],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 20.592528433303794,
+    "buyCost1000Pct": 34.50967933584938,
+    "volume24hUsd": 8.70311592157837,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:1eLZPRsn8bAKmoxsqDMH9Q2m2k7GMNp6RLSQGm8ondo",
+   "kind": "stock",
+   "symbol": "ASMLon",
+   "name": "ASML Holding NV (Ondo Tokenized)",
+   "underlying": "ASML",
+   "issuer": "Ondo Global Markets",
+   "venue": "Jupiter",
+   "mint": "1eLZPRsn8bAKmoxsqDMH9Q2m2k7GMNp6RLSQGm8ondo",
+   "themes": [
+    "AI and compute"
+   ],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "ondo",
+    "buyCost100Pct": 72.97488164495556,
+    "buyCost1000Pct": 83.73685529696544,
+    "volume24hUsd": 89.67307166562557,
+    "pyth": null
+   }
+  },
+  {
+   "id": "jup:Xs54CrhmpVp6uxZXwgSTegrRH2kShh88XFPzgf4BExu",
+   "kind": "stock",
+   "symbol": "XLEx",
+   "name": "Energy Select Sector SPDR Fund xStock",
+   "underlying": "XLE",
+   "issuer": "xStocks (Backed Finance, owned by Kraken)",
+   "venue": "Jupiter",
+   "mint": "Xs54CrhmpVp6uxZXwgSTegrRH2kShh88XFPzgf4BExu",
+   "themes": [
+    "Energy and power"
+   ],
+   "liquidity": "thin",
+   "us_persons": "no",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "issuerTag": "xstocks",
+    "buyCost100Pct": 64.03611839550697,
+    "buyCost1000Pct": 88.73021300012064,
+    "volume24hUsd": 99.52777422821728,
+    "pyth": null
+   }
+  },
+  {
+   "id": "phoenix:UNI",
+   "kind": "perp",
+   "symbol": "UNI",
+   "name": "Uniswap perp",
+   "underlying": "UNI",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 1220.76127,
+    "depthUsdWithin1Pct": {
+     "bids": 154090.60328999997,
+     "asks": 155977.54459000006
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:NBIS",
+   "kind": "perp",
+   "symbol": "NBIS",
+   "name": "Nebius perp",
+   "underlying": "NBIS",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 10375.165679999998,
+    "depthUsdWithin1Pct": {
+     "bids": 398409.28459,
+     "asks": 403730.70621
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:ORE",
+   "kind": "perp",
+   "symbol": "ORE",
+   "name": "Ore perp",
+   "underlying": "ORE",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 3,
+    "openInterestUsd": 8931.18399,
+    "depthUsdWithin1Pct": {
+     "bids": 1055.9355600000001,
+     "asks": 1068.80112
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:AVGO",
+   "kind": "perp",
+   "symbol": "AVGO",
+   "name": "Broadcom perp",
+   "underlying": "AVGO",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 13918.047219999999,
+    "depthUsdWithin1Pct": {
+     "bids": 177533.23855,
+     "asks": 177348.56869
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:TXN",
+   "kind": "perp",
+   "symbol": "TXN",
+   "name": "Texas Instruments perp",
+   "underlying": "TXN",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 39279.42,
+    "depthUsdWithin1Pct": {
+     "bids": 68315.78949000001,
+     "asks": 57065.806619999996
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:OPEN",
+   "kind": "perp",
+   "symbol": "OPEN",
+   "name": "Opendoor perp",
+   "underlying": "OPEN",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 18315.89685,
+    "depthUsdWithin1Pct": {
+     "bids": 65021.698619999996,
+     "asks": 66033.31518
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:CRV",
+   "kind": "perp",
+   "symbol": "CRV",
+   "name": "Curve DAO perp",
+   "underlying": "CRV",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 45758.9808,
+    "depthUsdWithin1Pct": {
+     "bids": 120889.06899999999,
+     "asks": 122577.19820000001
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:ARB",
+   "kind": "perp",
+   "symbol": "ARB",
+   "name": "Arbitrum perp",
+   "underlying": "ARB",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 15,
+    "openInterestUsd": 29305.496280000003,
+    "depthUsdWithin1Pct": {
+     "bids": 123043.8868,
+     "asks": 124609.34535999999
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:kBONK",
+   "kind": "perp",
+   "symbol": "kBONK",
+   "name": "Bonk perp",
+   "underlying": "kBONK",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 44786.5416,
+    "depthUsdWithin1Pct": {
+     "bids": 60243.432700000005,
+     "asks": 61038.4997
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:MRVL",
+   "kind": "perp",
+   "symbol": "MRVL",
+   "name": "Marvell Technology, Inc. perp",
+   "underlying": "MRVL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 17205.974860000002,
+    "depthUsdWithin1Pct": {
+     "bids": 177266.69700000001,
+     "asks": 177614.46223
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:INTC",
+   "kind": "perp",
+   "symbol": "INTC",
+   "name": "Intel perp",
+   "underlying": "INTC",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 56677.3975,
+    "depthUsdWithin1Pct": {
+     "bids": 396487.71343,
+     "asks": 401163.90161
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:SNDK",
+   "kind": "perp",
+   "symbol": "SNDK",
+   "name": "Sandisk perp",
+   "underlying": "SNDK",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 15,
+    "openInterestUsd": 130552.65228,
+    "depthUsdWithin1Pct": {
+     "bids": 397360.32076,
+     "asks": 401872.02264
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:WLD",
+   "kind": "perp",
+   "symbol": "WLD",
+   "name": "Worldcoin perp",
+   "underlying": "WLD",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 23512.113400000002,
+    "depthUsdWithin1Pct": {
+     "bids": 122796.28255999999,
+     "asks": 124450.22604
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:DRV",
+   "kind": "perp",
+   "symbol": "DRV",
+   "name": "Derive perp",
+   "underlying": "DRV",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 3,
+    "openInterestUsd": 161.98548,
+    "depthUsdWithin1Pct": {
+     "bids": 24132.42401000001,
+     "asks": 25601.53499000001
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:ENA",
+   "kind": "perp",
+   "symbol": "ENA",
+   "name": "Ethena perp",
+   "underlying": "ENA",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 1778.4080000000001,
+    "depthUsdWithin1Pct": {
+     "bids": 123817.20605,
+     "asks": 125412.33314999999
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:ARM",
+   "kind": "perp",
+   "symbol": "ARM",
+   "name": "ARM perp",
+   "underlying": "ARM",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 72216.79143,
+    "depthUsdWithin1Pct": {
+     "bids": 393805.20174000005,
+     "asks": 399613.4537
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:WTIOIL",
+   "kind": "perp",
+   "symbol": "WTIOIL",
+   "name": "West Texas Intermediate perp",
+   "underlying": "WTIOIL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "commodities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 8556.3912,
+    "depthUsdWithin1Pct": {
+     "bids": 517348.3068,
+     "asks": 519352.88999999996
+    },
+    "assetClass": "commodities"
+   }
+  },
+  {
+   "id": "phoenix:TLT",
+   "kind": "perp",
+   "symbol": "TLT",
+   "name": "20+ Year Treasury Bond ETF (Derivatives) perp",
+   "underlying": "TLT",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 109624.76349999999,
+    "depthUsdWithin1Pct": {
+     "bids": 281860.2364,
+     "asks": 283140.03020000004
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:ANSEM",
+   "kind": "perp",
+   "symbol": "ANSEM",
+   "name": "ANSEM perp",
+   "underlying": "ANSEM",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 3,
+    "openInterestUsd": 6040.4432400000005,
+    "depthUsdWithin1Pct": {
+     "bids": 993.93756,
+     "asks": 1003.838
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:IREN",
+   "kind": "perp",
+   "symbol": "IREN",
+   "name": "IREN Limited perp",
+   "underlying": "IREN",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 10697.0528,
+    "depthUsdWithin1Pct": {
+     "bids": 83211.36694,
+     "asks": 83933.24848
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:AMAT",
+   "kind": "perp",
+   "symbol": "AMAT",
+   "name": "Applied Materials perp",
+   "underlying": "AMAT",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 18230.469599999997,
+    "depthUsdWithin1Pct": {
+     "bids": 443780.09043,
+     "asks": 448595.28435
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:BNB",
+   "kind": "perp",
+   "symbol": "BNB",
+   "name": "BNB perp",
+   "underlying": "BNB",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 269218.9952,
+    "depthUsdWithin1Pct": {
+     "bids": 162697.06999999998,
+     "asks": 164694.5204
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:AMD",
+   "kind": "perp",
+   "symbol": "AMD",
+   "name": "AMD perp",
+   "underlying": "AMD",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 114905.30046,
+    "depthUsdWithin1Pct": {
+     "bids": 472139.16153999994,
+     "asks": 477351.3363000001
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:AMZN",
+   "kind": "perp",
+   "symbol": "AMZN",
+   "name": "Amazon perp",
+   "underlying": "AMZN",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 151139.7449,
+    "depthUsdWithin1Pct": {
+     "bids": 569164.6294,
+     "asks": 571528.1621000001
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:FARTCOIN",
+   "kind": "perp",
+   "symbol": "FARTCOIN",
+   "name": "Fartcoin perp",
+   "underlying": "FARTCOIN",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 13944.54348,
+    "depthUsdWithin1Pct": {
+     "bids": 124211.39162000001,
+     "asks": 126008.22664000001
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:GOOGL",
+   "kind": "perp",
+   "symbol": "GOOGL",
+   "name": "Google perp",
+   "underlying": "GOOGL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 331764.1404,
+    "depthUsdWithin1Pct": {
+     "bids": 579724.60964,
+     "asks": 582114.9769599999
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:VIRTUAL",
+   "kind": "perp",
+   "symbol": "VIRTUAL",
+   "name": "Virtuals Protocol perp",
+   "underlying": "VIRTUAL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 29673.95333,
+    "depthUsdWithin1Pct": {
+     "bids": 128730.34865999999,
+     "asks": 130356.34172
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:STONK",
+   "kind": "perp",
+   "symbol": "STONK",
+   "name": "STONK perp",
+   "underlying": "STONK",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 3,
+    "openInterestUsd": 5884.31429,
+    "depthUsdWithin1Pct": {
+     "bids": 1093.8703,
+     "asks": 1107.44382
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:TSM",
+   "kind": "perp",
+   "symbol": "TSM",
+   "name": "TSMC perp",
+   "underlying": "TSM",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 185622.46560000003,
+    "depthUsdWithin1Pct": {
+     "bids": 441353.03809,
+     "asks": 446017.46842999995
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:MON",
+   "kind": "perp",
+   "symbol": "MON",
+   "name": "Monad perp",
+   "underlying": "MON",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 244713.28912,
+    "depthUsdWithin1Pct": {
+     "bids": 130004.59347400001,
+     "asks": 131529.29295
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:MSTR",
+   "kind": "perp",
+   "symbol": "MSTR",
+   "name": "Strategy perp",
+   "underlying": "MSTR",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 42519.99024,
+    "depthUsdWithin1Pct": {
+     "bids": 596531.8416200001,
+     "asks": 603847.94183
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:ORCL",
+   "kind": "perp",
+   "symbol": "ORCL",
+   "name": "Oracle Corporation perp",
+   "underlying": "ORCL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 83203.0056,
+    "depthUsdWithin1Pct": {
+     "bids": 409125.8563200001,
+     "asks": 413382.93734999996
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:XPL",
+   "kind": "perp",
+   "symbol": "XPL",
+   "name": "Plasma perp",
+   "underlying": "XPL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 69483.55286000001,
+    "depthUsdWithin1Pct": {
+     "bids": 123257.66394999999,
+     "asks": 124978.29413
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:QQQ",
+   "kind": "perp",
+   "symbol": "QQQ",
+   "name": "QQQ perp",
+   "underlying": "QQQ",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 161315.4502,
+    "depthUsdWithin1Pct": {
+     "bids": 807171.33682,
+     "asks": 737553.0875999999
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:MSFT",
+   "kind": "perp",
+   "symbol": "MSFT",
+   "name": "Microsoft perp",
+   "underlying": "MSFT",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 82679.1948,
+    "depthUsdWithin1Pct": {
+     "bids": 644463.41093,
+     "asks": 647205.0330699997
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:EURUSD",
+   "kind": "perp",
+   "symbol": "EURUSD",
+   "name": "Euro perp",
+   "underlying": "EURUSD",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "unknown"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 100,
+    "openInterestUsd": 39596.031388,
+    "depthUsdWithin1Pct": {
+     "bids": 585702.9183940002,
+     "asks": 588903.6600219996
+    },
+    "assetClass": "unknown"
+   }
+  },
+  {
+   "id": "phoenix:XLM",
+   "kind": "perp",
+   "symbol": "XLM",
+   "name": "Stellar perp",
+   "underlying": "XLM",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 21360.150560000002,
+    "depthUsdWithin1Pct": {
+     "bids": 129429.28273000008,
+     "asks": 130950.26256999995
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:HOOD",
+   "kind": "perp",
+   "symbol": "HOOD",
+   "name": "Robinhood perp",
+   "underlying": "HOOD",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 71857.55369999999,
+    "depthUsdWithin1Pct": {
+     "bids": 398515.97636000003,
+     "asks": 402956.68879999995
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:AVAX",
+   "kind": "perp",
+   "symbol": "AVAX",
+   "name": "Avalanche perp",
+   "underlying": "AVAX",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 1228.27704,
+    "depthUsdWithin1Pct": {
+     "bids": 125041.90861999999,
+     "asks": 126565.17946000001
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:GOLD",
+   "kind": "perp",
+   "symbol": "GOLD",
+   "name": "Gold perp",
+   "underlying": "GOLD",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "commodities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 25,
+    "openInterestUsd": 56115.390600000006,
+    "depthUsdWithin1Pct": {
+     "bids": 581197.8084,
+     "asks": 583515.1207
+    },
+    "assetClass": "commodities"
+   }
+  },
+  {
+   "id": "phoenix:SOL",
+   "kind": "perp",
+   "symbol": "SOL",
+   "name": "Solana perp",
+   "underlying": "SOL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 25,
+    "openInterestUsd": 1654722.5221499999,
+    "depthUsdWithin1Pct": {
+     "bids": 1982442.6032000005,
+     "asks": 1991314.3094
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:AERO",
+   "kind": "perp",
+   "symbol": "AERO",
+   "name": "Aerodrome Finance perp",
+   "underlying": "AERO",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 3,
+    "openInterestUsd": 11802.505379999999,
+    "depthUsdWithin1Pct": {
+     "bids": 41022.19717,
+     "asks": 41533.732910000006
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:ZEC",
+   "kind": "perp",
+   "symbol": "ZEC",
+   "name": "Zcash perp",
+   "underlying": "ZEC",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 1620939.5809000002,
+    "depthUsdWithin1Pct": {
+     "bids": 408719.2444,
+     "asks": 385211.8496
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:TRX",
+   "kind": "perp",
+   "symbol": "TRX",
+   "name": "Tron perp",
+   "underlying": "TRX",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 29299.164119999998,
+    "depthUsdWithin1Pct": {
+     "bids": 147693.49369,
+     "asks": 149394.12483
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:CSCO",
+   "kind": "perp",
+   "symbol": "CSCO",
+   "name": "Cisco Systems perp",
+   "underlying": "CSCO",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 18955.8954,
+    "depthUsdWithin1Pct": {
+     "bids": 401892.08009999996,
+     "asks": 406094.07
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:JTO",
+   "kind": "perp",
+   "symbol": "JTO",
+   "name": "Jito perp",
+   "underlying": "JTO",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 11201.380320000002,
+    "depthUsdWithin1Pct": {
+     "bids": 67118.55064,
+     "asks": 67901.62842
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:PLTR",
+   "kind": "perp",
+   "symbol": "PLTR",
+   "name": "Palantir perp",
+   "underlying": "PLTR",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 64239.63948,
+    "depthUsdWithin1Pct": {
+     "bids": 423184.16414000007,
+     "asks": 427507.81324
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:LIT",
+   "kind": "perp",
+   "symbol": "LIT",
+   "name": "Lighter perp",
+   "underlying": "LIT",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 60392.5569,
+    "depthUsdWithin1Pct": {
+     "bids": 138707.18917,
+     "asks": 140318.73982999998
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:ETH",
+   "kind": "perp",
+   "symbol": "ETH",
+   "name": "Ethereum perp",
+   "underlying": "ETH",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 25,
+    "openInterestUsd": 410915.35250000004,
+    "depthUsdWithin1Pct": {
+     "bids": 1426041.9555000002,
+     "asks": 1621502.9841999998
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:ADA",
+   "kind": "perp",
+   "symbol": "ADA",
+   "name": "Cardano perp",
+   "underlying": "ADA",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 52212.29154,
+    "depthUsdWithin1Pct": {
+     "bids": 130659.32452000001,
+     "asks": 132182.47957999998
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:ANTHROPIC",
+   "kind": "perp",
+   "symbol": "ANTHROPIC",
+   "name": "Anthropic perp",
+   "underlying": "ANTHROPIC",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 6,
+    "openInterestUsd": 851565.64805,
+    "depthUsdWithin1Pct": {
+     "bids": 31465.74612,
+     "asks": 31860.12324
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:PONS",
+   "kind": "perp",
+   "symbol": "PONS",
+   "name": "Pons perp",
+   "underlying": "PONS",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 3,
+    "openInterestUsd": 11.41088,
+    "depthUsdWithin1Pct": {
+     "bids": 60464.380150000005,
+     "asks": 61191.839210000006
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:TSLA",
+   "kind": "perp",
+   "symbol": "TSLA",
+   "name": "Tesla perp",
+   "underlying": "TSLA",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 159577.05869,
+    "depthUsdWithin1Pct": {
+     "bids": 466100.00643,
+     "asks": 471064.62948
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:FET",
+   "kind": "perp",
+   "symbol": "FET",
+   "name": "Artificial Superintelligence Alliance perp",
+   "underlying": "FET",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 25827.678690000004,
+    "depthUsdWithin1Pct": {
+     "bids": 65755.07865000001,
+     "asks": 66505.80733
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:kPEPE",
+   "kind": "perp",
+   "symbol": "kPEPE",
+   "name": "Pepe perp",
+   "underlying": "kPEPE",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 151881.2103,
+    "depthUsdWithin1Pct": {
+     "bids": 60873.624800000005,
+     "asks": 61587.890799999994
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:LTC",
+   "kind": "perp",
+   "symbol": "LTC",
+   "name": "Litecoin perp",
+   "underlying": "LTC",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 26465.046239999996,
+    "depthUsdWithin1Pct": {
+     "bids": 149676.86733000004,
+     "asks": 151470.53715000002
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:CBRS",
+   "kind": "perp",
+   "symbol": "CBRS",
+   "name": "Cerebras perp",
+   "underlying": "CBRS",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 15584.38101,
+    "depthUsdWithin1Pct": {
+     "bids": 84139.22517,
+     "asks": 83328.92194
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:AAVE",
+   "kind": "perp",
+   "symbol": "AAVE",
+   "name": "Aave perp",
+   "underlying": "AAVE",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 30505.475800000004,
+    "depthUsdWithin1Pct": {
+     "bids": 129998.5051,
+     "asks": 131471.6521
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:IBM",
+   "kind": "perp",
+   "symbol": "IBM",
+   "name": "International Business Machines perp",
+   "underlying": "IBM",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 36751.128699999994,
+    "depthUsdWithin1Pct": {
+     "bids": 433068.59025,
+     "asks": 437586.11789
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:NEAR",
+   "kind": "perp",
+   "symbol": "NEAR",
+   "name": "NEAR Protocol perp",
+   "underlying": "NEAR",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 499462.5824,
+    "depthUsdWithin1Pct": {
+     "bids": 252859.5569,
+     "asks": 194982.26179999998
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:META",
+   "kind": "perp",
+   "symbol": "META",
+   "name": "Meta perp",
+   "underlying": "META",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 303939.02880000003,
+    "depthUsdWithin1Pct": {
+     "bids": 517496.7434599999,
+     "asks": 523403.03355
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:TAO",
+   "kind": "perp",
+   "symbol": "TAO",
+   "name": "Bittensor perp",
+   "underlying": "TAO",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 27592.6776,
+    "depthUsdWithin1Pct": {
+     "bids": 66003.245,
+     "asks": 66821.03499999999
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:MET",
+   "kind": "perp",
+   "symbol": "MET",
+   "name": "Meteora perp",
+   "underlying": "MET",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 7833.75372,
+    "depthUsdWithin1Pct": {
+     "bids": 10124.553769999999,
+     "asks": 21649.109109999998
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:BP",
+   "kind": "perp",
+   "symbol": "BP",
+   "name": "Backpack perp",
+   "underlying": "BP",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 127723.47969499999,
+    "depthUsdWithin1Pct": {
+     "bids": 3083.07593,
+     "asks": 1112.92462
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:PUMP",
+   "kind": "perp",
+   "symbol": "PUMP",
+   "name": "Pump.fun perp",
+   "underlying": "PUMP",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 45910.90741000001,
+    "depthUsdWithin1Pct": {
+     "bids": 131549.27318,
+     "asks": 133163.84372000003
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:LLY",
+   "kind": "perp",
+   "symbol": "LLY",
+   "name": "Eli Lilly and Company perp",
+   "underlying": "LLY",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 41995.277819999996,
+    "depthUsdWithin1Pct": {
+     "bids": 177580.8442,
+     "asks": 177466.04682
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:MRNA",
+   "kind": "perp",
+   "symbol": "MRNA",
+   "name": "Moderna perp",
+   "underlying": "MRNA",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 55661.32982,
+    "depthUsdWithin1Pct": {
+     "bids": 177530.50332999998,
+     "asks": 177442.60064
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:VVV",
+   "kind": "perp",
+   "symbol": "VVV",
+   "name": "Venice Token perp",
+   "underlying": "VVV",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 53021.66424,
+    "depthUsdWithin1Pct": {
+     "bids": 97143.64189999999,
+     "asks": 98437.51402
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:PANW",
+   "kind": "perp",
+   "symbol": "PANW",
+   "name": "Palo Alto Networks Inc perp",
+   "underlying": "PANW",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 33906.92361,
+    "depthUsdWithin1Pct": {
+     "bids": 48951.50318,
+     "asks": 47459.27412
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:SKHY",
+   "kind": "perp",
+   "symbol": "SKHY",
+   "name": "SK hynix perp",
+   "underlying": "SKHY",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 82242.97896000001,
+    "depthUsdWithin1Pct": {
+     "bids": 405965.62084,
+     "asks": 410227.75166
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:CRCL",
+   "kind": "perp",
+   "symbol": "CRCL",
+   "name": "Circle Internet Group perp",
+   "underlying": "CRCL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 50057.86425,
+    "depthUsdWithin1Pct": {
+     "bids": 379396.83988,
+     "asks": 385972.55396000005
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:BABA",
+   "kind": "perp",
+   "symbol": "BABA",
+   "name": "Alibaba perp",
+   "underlying": "BABA",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 60135.06964,
+    "depthUsdWithin1Pct": {
+     "bids": 406313.67355999997,
+     "asks": 410590.27436000004
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:NET",
+   "kind": "perp",
+   "symbol": "NET",
+   "name": "Cloudflare perp",
+   "underlying": "NET",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 20644.71552,
+    "depthUsdWithin1Pct": {
+     "bids": 78079.22933,
+     "asks": 78746.28133
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:KLAC",
+   "kind": "perp",
+   "symbol": "KLAC",
+   "name": "KLA Corporation perp",
+   "underlying": "KLAC",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 30932.79924,
+    "depthUsdWithin1Pct": {
+     "bids": 48858.318660000004,
+     "asks": 47379.00229999999
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:BTC",
+   "kind": "perp",
+   "symbol": "BTC",
+   "name": "Bitcoin perp",
+   "underlying": "BTC",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 40,
+    "openInterestUsd": 1175638.62555,
+    "depthUsdWithin1Pct": {
+     "bids": 2603468.2232000004,
+     "asks": 2855306.5605999976
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:ZRO",
+   "kind": "perp",
+   "symbol": "ZRO",
+   "name": "LayerZero perp",
+   "underlying": "ZRO",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 44562.033319999995,
+    "depthUsdWithin1Pct": {
+     "bids": 67330.77373,
+     "asks": 68144.95315
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:DELL",
+   "kind": "perp",
+   "symbol": "DELL",
+   "name": "Dell Technologies perp",
+   "underlying": "DELL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 62016.218519999995,
+    "depthUsdWithin1Pct": {
+     "bids": 402941.41263,
+     "asks": 407435.12001
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:XRP",
+   "kind": "perp",
+   "symbol": "XRP",
+   "name": "Ripple perp",
+   "underlying": "XRP",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 15,
+    "openInterestUsd": 33903.77015,
+    "depthUsdWithin1Pct": {
+     "bids": 40817.32137,
+     "asks": 41400.88243
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:FIL",
+   "kind": "perp",
+   "symbol": "FIL",
+   "name": "Filecoin perp",
+   "underlying": "FIL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 22000.28391,
+    "depthUsdWithin1Pct": {
+     "bids": 59833.34448,
+     "asks": 60481.36265999999
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:SPCX",
+   "kind": "perp",
+   "symbol": "SPCX",
+   "name": "SpaceX perp",
+   "underlying": "SPCX",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 15,
+    "openInterestUsd": 324628.85177,
+    "depthUsdWithin1Pct": {
+     "bids": 413510.99720999994,
+     "asks": 428280.72647
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:AAPL",
+   "kind": "perp",
+   "symbol": "AAPL",
+   "name": "Apple perp",
+   "underlying": "AAPL",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 75894.19816,
+    "depthUsdWithin1Pct": {
+     "bids": 594039.46262,
+     "asks": 596527.80868
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:GBPUSD",
+   "kind": "perp",
+   "symbol": "GBPUSD",
+   "name": "Pound Sterling perp",
+   "underlying": "GBPUSD",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "unknown"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 100,
+    "openInterestUsd": 53229.16278399999,
+    "depthUsdWithin1Pct": {
+     "bids": 552937.552478,
+     "asks": 448142.64981200005
+    },
+    "assetClass": "unknown"
+   }
+  },
+  {
+   "id": "phoenix:JUP",
+   "kind": "perp",
+   "symbol": "JUP",
+   "name": "Jupiter perp",
+   "underlying": "JUP",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 72319.62487,
+    "depthUsdWithin1Pct": {
+     "bids": 129322.34392,
+     "asks": 130951.79254000001
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:HYPE",
+   "kind": "perp",
+   "symbol": "HYPE",
+   "name": "Hyperliquid perp",
+   "underlying": "HYPE",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 244865.57566499998,
+    "depthUsdWithin1Pct": {
+     "bids": 480009.0008100001,
+     "asks": 482483.1146999999
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:CHIP",
+   "kind": "perp",
+   "symbol": "CHIP",
+   "name": "USD.AI perp",
+   "underlying": "CHIP",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 26386.434,
+    "depthUsdWithin1Pct": {
+     "bids": 32458.594730000004,
+     "asks": 32902.51354
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:USDJPY",
+   "kind": "perp",
+   "symbol": "USDJPY",
+   "name": "Yen perp",
+   "underlying": "USDJPY",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "unknown"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 100,
+    "openInterestUsd": 86518.59592600001,
+    "depthUsdWithin1Pct": {
+     "bids": 492513.01892799995,
+     "asks": 504875.2550540001
+    },
+    "assetClass": "unknown"
+   }
+  },
+  {
+   "id": "phoenix:MORPHO",
+   "kind": "perp",
+   "symbol": "MORPHO",
+   "name": "Morpho perp",
+   "underlying": "MORPHO",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 141427.53674,
+    "depthUsdWithin1Pct": {
+     "bids": 127257.41960999998,
+     "asks": 36332.177070000005
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:CRWD",
+   "kind": "perp",
+   "symbol": "CRWD",
+   "name": "CrowdStrike Holdings perp",
+   "underlying": "CRWD",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 47976.03478,
+    "depthUsdWithin1Pct": {
+     "bids": 177602.85249000002,
+     "asks": 177438.34268
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:ASML",
+   "kind": "perp",
+   "symbol": "ASML",
+   "name": "ASML perp",
+   "underlying": "ASML",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 49491.44600000001,
+    "depthUsdWithin1Pct": {
+     "bids": 411829.7010500001,
+     "asks": 416170.5644699999
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:COIN",
+   "kind": "perp",
+   "symbol": "COIN",
+   "name": "Coinbase perp",
+   "underlying": "COIN",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 51583.10416999999,
+    "depthUsdWithin1Pct": {
+     "bids": 403766.4055,
+     "asks": 408189.68596
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:RAY",
+   "kind": "perp",
+   "symbol": "RAY",
+   "name": "Raydium perp",
+   "underlying": "RAY",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 7930.7142,
+    "depthUsdWithin1Pct": {
+     "bids": 20853.98712,
+     "asks": 11137.368300000002
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:LINK",
+   "kind": "perp",
+   "symbol": "LINK",
+   "name": "Chainlink perp",
+   "underlying": "LINK",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 5570.8112,
+    "depthUsdWithin1Pct": {
+     "bids": 176806.9937000001,
+     "asks": 179108.4623
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:ORCA",
+   "kind": "perp",
+   "symbol": "ORCA",
+   "name": "Orca perp",
+   "underlying": "ORCA",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 48931.69068,
+    "depthUsdWithin1Pct": {
+     "bids": 20896.76274,
+     "asks": 11160.73491
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:MU",
+   "kind": "perp",
+   "symbol": "MU",
+   "name": "Micron perp",
+   "underlying": "MU",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 15,
+    "openInterestUsd": 117114.79584000002,
+    "depthUsdWithin1Pct": {
+     "bids": 399222.80949,
+     "asks": 403624.24659
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:ONDO",
+   "kind": "perp",
+   "symbol": "ONDO",
+   "name": "Ondo perp",
+   "underlying": "ONDO",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 23902.09164,
+    "depthUsdWithin1Pct": {
+     "bids": 95848.00648000001,
+     "asks": 97127.48302
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:MEGA",
+   "kind": "perp",
+   "symbol": "MEGA",
+   "name": "MegaETH perp",
+   "underlying": "MEGA",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 46500.452075,
+    "depthUsdWithin1Pct": {
+     "bids": 20533.487689999998,
+     "asks": 61946.183410000005
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:SILVER",
+   "kind": "perp",
+   "symbol": "SILVER",
+   "name": "Silver perp",
+   "underlying": "SILVER",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "commodities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 25,
+    "openInterestUsd": 56794.907400000004,
+    "depthUsdWithin1Pct": {
+     "bids": 338155.4096100002,
+     "asks": 339752.78919
+    },
+    "assetClass": "commodities"
+   }
+  },
+  {
+   "id": "phoenix:COPPER",
+   "kind": "perp",
+   "symbol": "COPPER",
+   "name": "Copper perp",
+   "underlying": "COPPER",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "commodities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 4690.64285,
+    "depthUsdWithin1Pct": {
+     "bids": 147163.61591999995,
+     "asks": 147738.28564
+    },
+    "assetClass": "commodities"
+   }
+  },
+  {
+   "id": "phoenix:NVDA",
+   "kind": "perp",
+   "symbol": "NVDA",
+   "name": "NVIDIA perp",
+   "underlying": "NVDA",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 1039234.38762,
+    "depthUsdWithin1Pct": {
+     "bids": 539586.34325,
+     "asks": 541903.7760700003
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:NFLX",
+   "kind": "perp",
+   "symbol": "NFLX",
+   "name": "Netflix perp",
+   "underlying": "NFLX",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 67087.6785,
+    "depthUsdWithin1Pct": {
+     "bids": 503709.78545,
+     "asks": 509376.87961999985
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:DOGE",
+   "kind": "perp",
+   "symbol": "DOGE",
+   "name": "Dogecoin perp",
+   "underlying": "DOGE",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 41018.108104,
+    "depthUsdWithin1Pct": {
+     "bids": 166013.94617600003,
+     "asks": 168049.07398
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:METADAO",
+   "kind": "perp",
+   "symbol": "METADAO",
+   "name": "MetaDAO perp",
+   "underlying": "METADAO",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 3,
+    "openInterestUsd": 991.7369200000002,
+    "depthUsdWithin1Pct": {
+     "bids": 943.2003399999999,
+     "asks": 958.1395399999999
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:SUI",
+   "kind": "perp",
+   "symbol": "SUI",
+   "name": "Sui perp",
+   "underlying": "SUI",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 26222.342,
+    "depthUsdWithin1Pct": {
+     "bids": 180511.26747000008,
+     "asks": 182776.56444999983
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:CRWV",
+   "kind": "perp",
+   "symbol": "CRWV",
+   "name": "CoreWeave perp",
+   "underlying": "CRWV",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 49355.654089999996,
+    "depthUsdWithin1Pct": {
+     "bids": 396038.74784,
+     "asks": 401832.27009999997
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:RENDER",
+   "kind": "perp",
+   "symbol": "RENDER",
+   "name": "Render perp",
+   "underlying": "RENDER",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 5,
+    "openInterestUsd": 68128.52476,
+    "depthUsdWithin1Pct": {
+     "bids": 124892.0937,
+     "asks": 110893.34780999999
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:SKR",
+   "kind": "perp",
+   "symbol": "SKR",
+   "name": "Seeker perp",
+   "underlying": "SKR",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 3,
+    "openInterestUsd": 1125.4010409999999,
+    "depthUsdWithin1Pct": {
+     "bids": 6499.705722000001,
+     "asks": 8320.768529
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:QCOM",
+   "kind": "perp",
+   "symbol": "QCOM",
+   "name": "Qualcomm perp",
+   "underlying": "QCOM",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 59963.09659999999,
+    "depthUsdWithin1Pct": {
+     "bids": 398045.56317,
+     "asks": 403248.78877
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "phoenix:kSHIB",
+   "kind": "perp",
+   "symbol": "kSHIB",
+   "name": "Shiba Inu perp",
+   "underlying": "kSHIB",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "crypto"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 10,
+    "openInterestUsd": 36483.356,
+    "depthUsdWithin1Pct": {
+     "bids": 58528.4572,
+     "asks": 59209.7972
+    },
+    "assetClass": "crypto"
+   }
+  },
+  {
+   "id": "phoenix:SPY",
+   "kind": "perp",
+   "symbol": "SPY",
+   "name": "SPY perp",
+   "underlying": "SPY",
+   "issuer": null,
+   "venue": "Phoenix",
+   "mint": null,
+   "themes": [
+    "equities"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "no",
+   "can_short": true,
+   "expires_at": null,
+   "data": {
+    "maxLeverage": 20,
+    "openInterestUsd": 97035.39648,
+    "depthUsdWithin1Pct": {
+     "bids": 829310.20972,
+     "asks": 726474.4610199999
+    },
+    "assetClass": "equities"
+   }
+  },
+  {
+   "id": "yield:9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D",
+   "kind": "yield",
+   "symbol": "USDC",
+   "name": "jupiter lend USDC (Jupiter Lend Earn)",
+   "underlying": "USDC",
+   "issuer": null,
+   "venue": "Jupiter Lend Earn",
+   "mint": "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D",
+   "themes": [
+    "Cash yield"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "apyPct": 4.15,
+    "tvlUsd": 464450511.58487135,
+    "program": "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"
+   }
+  },
+  {
+   "id": "yield:B5pjfZAiKjyUEuqB2694NHrsjcaM67uuJaWqjzTVtzR6",
+   "kind": "yield",
+   "symbol": "USDC",
+   "name": "Kamino Institutional Commodity Yield (Kamino Earn)",
+   "underlying": "USDC",
+   "issuer": null,
+   "venue": "Kamino Earn",
+   "mint": "2bnxGUrAevL2i9zYtJWwPnAE2RmiPpRxjYnwv886DGCC",
+   "themes": [
+    "Cash yield"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "apyPct": 7.6077057897190326,
+    "tvlUsd": 49597904.9068397,
+    "program": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"
+   }
+  },
+  {
+   "id": "yield:DWSXb18xZApz29vnQpgR2m6MynCT7PznaXt7Ut7M7KaP",
+   "kind": "yield",
+   "symbol": "USDC",
+   "name": "RWA USDC (Kamino Earn)",
+   "underlying": "USDC",
+   "issuer": null,
+   "venue": "Kamino Earn",
+   "mint": "DgHN3q3dSYAchNX7V3D4aYiTWMx8RHTgHbfPiwiqBkE9",
+   "themes": [
+    "Cash yield"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "apyPct": 5.748285971181044,
+    "tvlUsd": 44858035.31535194,
+    "program": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"
+   }
+  },
+  {
+   "id": "yield:HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E",
+   "kind": "yield",
+   "symbol": "USDC",
+   "name": "Steakhouse USDC (Kamino Earn)",
+   "underlying": "USDC",
+   "issuer": null,
+   "venue": "Kamino Earn",
+   "mint": "7D8C5pDFxug58L9zkwK7bCiDg4kD4AygzbcZUmf5usHS",
+   "themes": [
+    "Cash yield"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "apyPct": 3.3347661655153127,
+    "tvlUsd": 15442292.458623247,
+    "program": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"
+   }
+  },
+  {
+   "id": "yield:HJFEPRRRLBfJBfSJaC69r3nMYskViL9Yy1QLLAqjvnW",
+   "kind": "yield",
+   "symbol": "USDC",
+   "name": "Plume x Re7 USDC (Kamino Earn)",
+   "underlying": "USDC",
+   "issuer": null,
+   "venue": "Kamino Earn",
+   "mint": "BVPfgxUyzw8xYSq9ZvuKnRpr3Czoixnz5pCK5Xj69WEh",
+   "themes": [
+    "Cash yield"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "apyPct": 5.434353449576812,
+    "tvlUsd": 9656656.856426666,
+    "program": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"
+   }
+  },
+  {
+   "id": "yield:A1USdzqDHmw5oz97AkqAGLxEQZfFjASZFuy4T6Qdvnpo",
+   "kind": "yield",
+   "symbol": "USDC",
+   "name": "Allez USDC (Kamino Earn)",
+   "underlying": "USDC",
+   "issuer": null,
+   "venue": "Kamino Earn",
+   "mint": "BDh5h1uqhdL3pdCcTB1AEc2dyRsorDx9fF8Y72H1XZu8",
+   "themes": [
+    "Cash yield"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "apyPct": 4.563593471854399,
+    "tvlUsd": 9590958.438954752,
+    "program": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"
+   }
+  },
+  {
+   "id": "yield:91b1opzHNUQobfLZxGMNYT5qDRKoqV8FdsdQBmH4wBxy",
+   "kind": "yield",
+   "symbol": "USDC",
+   "name": "Kamino Private Credit USDC (Kamino Earn)",
+   "underlying": "USDC",
+   "issuer": null,
+   "venue": "Kamino Earn",
+   "mint": "B9t9wg8r39Lxm2D9Gmqn2rJ5pVQQwjtGBfSsHAXSEnVe",
+   "themes": [
+    "Cash yield"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "apyPct": 7.5169293204151,
+    "tvlUsd": 7327685.475035678,
+    "program": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"
+   }
+  },
+  {
+   "id": "yield:A3hTCWdnfV6uiQLxRmnv17EpiEtmc93v1AGQnWy44Mup",
+   "kind": "yield",
+   "symbol": "USDC",
+   "name": "Elemental USDC Turbo (Kamino Earn)",
+   "underlying": "USDC",
+   "issuer": null,
+   "venue": "Kamino Earn",
+   "mint": "EzqBwrAebfhRNZw6nxFK4vaEhKCSeQPL36FZeUB9PsJA",
+   "themes": [
+    "Cash yield"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "apyPct": 7.315729397313131,
+    "tvlUsd": 2867144.703677091,
+    "program": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"
+   }
+  },
+  {
+   "id": "yield:ADcgKvst9u9qRXgSCxg2eZtqKNYPuMbfqjntaLepxwE5",
+   "kind": "yield",
+   "symbol": "USDC",
+   "name": "Galaxy USDC (Kamino Earn)",
+   "underlying": "USDC",
+   "issuer": null,
+   "venue": "Kamino Earn",
+   "mint": "3aKWfLSwX83NxEL5BJvCV81wHKjDWDd8NKaEx7x7bYm1",
+   "themes": [
+    "Cash yield"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "apyPct": 4.13713250459522,
+    "tvlUsd": 2070349.1564995404,
+    "program": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"
+   }
+  },
+  {
+   "id": "cards:Pokemon",
+   "kind": "card",
+   "symbol": "Pokemon",
+   "name": "Pokemon trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Pokemon"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 8908,
+    "medianUsd": 83,
+    "p90Usd": 989
+   }
+  },
+  {
+   "id": "cards:One Piece",
+   "kind": "card",
+   "symbol": "One Piece",
+   "name": "One Piece trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "One Piece"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 1136,
+    "medianUsd": 120,
+    "p90Usd": 500
+   }
+  },
+  {
+   "id": "cards:Dragon Ball",
+   "kind": "card",
+   "symbol": "Dragon Ball",
+   "name": "Dragon Ball trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Dragon Ball"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 208,
+    "medianUsd": 145,
+    "p90Usd": 599
+   }
+  },
+  {
+   "id": "cards:Riftbound",
+   "kind": "card",
+   "symbol": "Riftbound",
+   "name": "Riftbound trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Riftbound"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 126,
+    "medianUsd": 165,
+    "p90Usd": 689
+   }
+  },
+  {
+   "id": "cards:Moonbirds",
+   "kind": "card",
+   "symbol": "Moonbirds",
+   "name": "Moonbirds trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Moonbirds"
+   ],
+   "liquidity": "tradeable",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 125,
+    "medianUsd": 80,
+    "p90Usd": 500
+   }
+  },
+  {
+   "id": "cards:Marvel",
+   "kind": "card",
+   "symbol": "Marvel",
+   "name": "Marvel trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Marvel"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 87,
+    "medianUsd": 30,
+    "p90Usd": 150
+   }
+  },
+  {
+   "id": "cards:(uncategorised)",
+   "kind": "card",
+   "symbol": "(uncategorised)",
+   "name": "(uncategorised) trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "(uncategorised)"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 78,
+    "medianUsd": 50,
+    "p90Usd": 1250
+   }
+  },
+  {
+   "id": "cards:Soccer",
+   "kind": "card",
+   "symbol": "Soccer",
+   "name": "Soccer trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Soccer"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 57,
+    "medianUsd": 100,
+    "p90Usd": 600
+   }
+  },
+  {
+   "id": "cards:Collectible Card Games",
+   "kind": "card",
+   "symbol": "Collectible Card Games",
+   "name": "Collectible Card Games trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Collectible Card Games"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 32,
+    "medianUsd": 100,
+    "p90Usd": 9999
+   }
+  },
+  {
+   "id": "cards:Azuki",
+   "kind": "card",
+   "symbol": "Azuki",
+   "name": "Azuki trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Azuki"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 31,
+    "medianUsd": 350,
+    "p90Usd": 432
+   }
+  },
+  {
+   "id": "cards:Basketball",
+   "kind": "card",
+   "symbol": "Basketball",
+   "name": "Basketball trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Basketball"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 29,
+    "medianUsd": 250,
+    "p90Usd": 639
+   }
+  },
+  {
+   "id": "cards:Vibes",
+   "kind": "card",
+   "symbol": "Vibes",
+   "name": "Vibes trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Vibes"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 23,
+    "medianUsd": 250,
+    "p90Usd": 1500
+   }
+  },
+  {
+   "id": "cards:Non-Sport",
+   "kind": "card",
+   "symbol": "Non-Sport",
+   "name": "Non-Sport trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Non-Sport"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 21,
+    "medianUsd": 249,
+    "p90Usd": 45000
+   }
+  },
+  {
+   "id": "cards:Lorcana",
+   "kind": "card",
+   "symbol": "Lorcana",
+   "name": "Lorcana trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Lorcana"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 17,
+    "medianUsd": 100,
+    "p90Usd": 1500
+   }
+  },
+  {
+   "id": "cards:Yu-Gi-Oh!",
+   "kind": "card",
+   "symbol": "Yu-Gi-Oh!",
+   "name": "Yu-Gi-Oh! trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Yu-Gi-Oh!"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 17,
+    "medianUsd": 295,
+    "p90Usd": 599
+   }
+  },
+  {
+   "id": "cards:Football",
+   "kind": "card",
+   "symbol": "Football",
+   "name": "Football trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Football"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 15,
+    "medianUsd": 85,
+    "p90Usd": 495
+   }
+  },
+  {
+   "id": "cards:Baseball",
+   "kind": "card",
+   "symbol": "Baseball",
+   "name": "Baseball trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Baseball"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 14,
+    "medianUsd": 149,
+    "p90Usd": 2500
+   }
+  },
+  {
+   "id": "cards:Naruto",
+   "kind": "card",
+   "symbol": "Naruto",
+   "name": "Naruto trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Naruto"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 13,
+    "medianUsd": 255,
+    "p90Usd": 799
+   }
+  },
+  {
+   "id": "cards:DC",
+   "kind": "card",
+   "symbol": "DC",
+   "name": "DC trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "DC"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 12,
+    "medianUsd": 65,
+    "p90Usd": 65
+   }
+  },
+  {
+   "id": "cards:Watch",
+   "kind": "card",
+   "symbol": "Watch",
+   "name": "Watch trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Watch"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 7,
+    "medianUsd": 240,
+    "p90Usd": 1000
+   }
+  },
+  {
+   "id": "cards:Gundam",
+   "kind": "card",
+   "symbol": "Gundam",
+   "name": "Gundam trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Gundam"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 5,
+    "medianUsd": 107.2,
+    "p90Usd": 444.4
+   }
+  },
+  {
+   "id": "cards:Hockey",
+   "kind": "card",
+   "symbol": "Hockey",
+   "name": "Hockey trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Hockey"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 5,
+    "medianUsd": 555.55,
+    "p90Usd": 3600
+   }
+  },
+  {
+   "id": "cards:Union Arena",
+   "kind": "card",
+   "symbol": "Union Arena",
+   "name": "Union Arena trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Union Arena"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 5,
+    "medianUsd": 90,
+    "p90Usd": 100
+   }
+  },
+  {
+   "id": "cards:Sports",
+   "kind": "card",
+   "symbol": "Sports",
+   "name": "Sports trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Sports"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 3,
+    "medianUsd": 20.5,
+    "p90Usd": 29.99
+   }
+  },
+  {
+   "id": "cards:Magic The Gathering",
+   "kind": "card",
+   "symbol": "Magic The Gathering",
+   "name": "Magic The Gathering trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Magic The Gathering"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 2,
+    "medianUsd": 150,
+    "p90Usd": 150
+   }
+  },
+  {
+   "id": "cards:Nobody Sausage",
+   "kind": "card",
+   "symbol": "Nobody Sausage",
+   "name": "Nobody Sausage trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Nobody Sausage"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 2,
+    "medianUsd": 348,
+    "p90Usd": 348
+   }
+  },
+  {
+   "id": "cards:Boxing & MMA",
+   "kind": "card",
+   "symbol": "Boxing & MMA",
+   "name": "Boxing & MMA trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Boxing & MMA"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 1,
+    "medianUsd": 488,
+    "p90Usd": 488
+   }
+  },
+  {
+   "id": "cards:Playmat",
+   "kind": "card",
+   "symbol": "Playmat",
+   "name": "Playmat trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Playmat"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 1,
+    "medianUsd": 40,
+    "p90Usd": 40
+   }
+  },
+  {
+   "id": "cards:Incursion",
+   "kind": "card",
+   "symbol": "Incursion",
+   "name": "Incursion trading cards",
+   "underlying": null,
+   "issuer": null,
+   "venue": "Collector Crypt",
+   "mint": null,
+   "themes": [
+    "Collectibles",
+    "Incursion"
+   ],
+   "liquidity": "thin",
+   "us_persons": "unknown",
+   "can_short": false,
+   "expires_at": null,
+   "data": {
+    "listed": 1,
+    "medianUsd": 6900,
+    "p90Usd": 6900
+   }
+  }
+ ]
+}
