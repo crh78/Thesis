@@ -10,10 +10,13 @@ import { AddCash, CapLine, CashActivity } from "@/components/CashSheets";
 import Chart from "@/components/Chart";
 import CreatorFees from "@/components/CreatorFees";
 import EditProfile from "@/components/EditProfile";
+import { hasPhoenixCash, LiquidationLines, PhoenixCashCard } from "@/components/Phoenix";
+import { PostingRow } from "@/components/PostingRecovery";
 import ShareButton from "@/components/ShareButton";
 import { money, pct, rpcNow, topicImage, type Profile, type Take } from "@/lib/data";
-import { fork, holdings, TRADED_AT_KEY, TRADED_EVENT, useForkWallet, type CreatorFees as Fees, type History, type Portfolio, type WalletSummary } from "@/lib/fork";
+import { fork, holdings, TRADED_AT_KEY, TRADED_EVENT, useForkWallet, type CreatorFees as Fees, type History, type PhoenixCash, type Portfolio, type WalletSummary } from "@/lib/fork";
 import { X_LOGIN } from "@/lib/flags";
+import { MY_TAKES_EVENT } from "@/lib/posting";
 import { useSession } from "@/lib/session";
 
 type Tab = "positions" | "takes" | "badges";
@@ -32,9 +35,17 @@ export default function MePage() {
   const [summary, setSummary] = useState<WalletSummary | null>(null);
   const [history, setHistory] = useState<Record<string, History>>({});
   const [fees, setFees] = useState<Fees | null>(null);
+  const [phoenix, setPhoenix] = useState<PhoenixCash | null>(null);
   const [range, setRange] = useState<(typeof RANGES)[number]>("1W");
   const [scrub, setScrub] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("positions");
+  // "Didn't post" links here with ?tab=takes (and says so with an event when Me is already open).
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "takes") setTab("takes");
+    const on = () => setTab("takes");
+    window.addEventListener(MY_TAKES_EVENT, on);
+    return () => window.removeEventListener(MY_TAKES_EVENT, on);
+  }, []);
   const [sheet, setSheet] = useState<"add" | "cash" | null>(null);
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -74,6 +85,15 @@ export default function MePage() {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
   }, [address]);
+
+  // Cash a sale left on Phoenix (leveraged legs, fade shorts), waiting for "Cash out". Loaded on
+  // open, after a trade or sale, and when the Cash sheet opens; not with every portfolio poll.
+  const loadPhoenix = useCallback(async () => {
+    if (!address) return;
+    setPhoenix(await fork<PhoenixCash>("GET", `/wallets/${address}/phoenix`).catch(() => null));
+  }, [address]);
+  useEffect(() => { loadPhoenix(); }, [loadPhoenix, traded]);
+  useEffect(() => { if (sheet === "cash") loadPhoenix(); }, [sheet, loadPhoenix]);
 
   // Once per wallet (it signs a message), and again after a claim.
   const walletReady = !!wallet;
@@ -141,7 +161,7 @@ export default function MePage() {
         <span />
         <div className="me-actions">
           <button className="icon-btn" onClick={() => setEditing(true)}>Edit profile</button>
-          <ShareButton text="My takes on Thesis" label="Share" className="icon-btn" url={me.handle ? `/u/${me.handle}` : undefined} />
+          <ShareButton text="My takes on Thesis" label="Share" className="icon-btn" icon url={me.handle ? `/u/${me.handle}` : undefined} />
           <div className="menu-wrap">
             <button className="icon-btn" aria-label="Settings" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" /></svg>
@@ -204,6 +224,7 @@ export default function MePage() {
         <button className="pill small" onClick={() => setSheet("add")}>Add cash</button>
       </section>
       {summary ? <CapLine summary={summary} /> : null}
+      {hasPhoenixCash(phoenix) && address ? <PhoenixCashCard address={address} phoenix={phoenix} onDone={() => { loadPhoenix(); loadFork(); }} /> : null}
       {loadError ? <div className="err">Couldn&apos;t load your money: {loadError}</div> : null}
       <div className="hair" />
 
@@ -232,6 +253,8 @@ export default function MePage() {
                 <div className="item-main">
                   <div className="item-claim">{p.claim}</div>
                   <div className="item-meta"><b className={p.side === "fade" ? "down" : "up"}>{p.side === "fade" ? "Faded" : "Traded"}</b> · {[p.authorHandle && `@${p.authorHandle}`, detail].filter(Boolean).join(" · ")}</div>
+                  {/* Leveraged legs and fade shorts: where each is liquidated (the take page adds the leverage). */}
+                  <LiquidationLines risks={p.phoenix} />
                 </div>
                 <div className="item-num">
                   <div className="mono">{money(p.valueUsd ?? p.stakeUsd)}</div>
@@ -245,14 +268,7 @@ export default function MePage() {
         {tab === "takes" ? (
           takes.length ? takes.map((t) => (
             t.posting ? (
-              <div key={t.id} className="item">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img className="tile" src={topicImage((t as Take & { topic?: string }).topic)} alt="" />
-                <div className="item-main">
-                  <div className="item-claim">{t.claim}</div>
-                  <div className="item-meta"><b className="muted">Posting</b> · only you can see it</div>
-                </div>
-              </div>
+              <PostingRow key={t.id} take={t} onChanged={loadSocial} />
             ) : (
               <Link key={t.id} href={`/t/${t.id}`} className="item">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -291,7 +307,11 @@ export default function MePage() {
         <AddCash address={address} summary={summary} onClose={() => setSheet(null)} onDone={(s) => { setSummary(s); loadFork(); }} />
       ) : null}
       {editing ? <EditProfile bio={profile?.bio ?? ""} onClose={() => setEditing(false)} onSaved={loadSocial} /> : null}
-      {sheet === "cash" ? <CashActivity balance={balance} activity={summary?.activity ?? []} onClose={() => setSheet(null)} /> : null}
+      {sheet === "cash" ? (
+        <CashActivity balance={balance} activity={summary?.activity ?? []} onClose={() => setSheet(null)}>
+          {hasPhoenixCash(phoenix) && address ? <PhoenixCashCard address={address} phoenix={phoenix} onDone={() => { loadPhoenix(); loadFork(); }} /> : null}
+        </CashActivity>
+      ) : null}
     </main>
   );
 }

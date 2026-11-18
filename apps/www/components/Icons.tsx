@@ -14,3 +14,9 @@ export const PersonIcon = (p: P) => (
 export const SearchIcon = (p: P) => (
   <svg {...base} {...p}><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></svg>
 );
+export const ShareIcon = (p: P) => (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}><path d="M12 3v12M7 8l5-5 5 5M5 13v7h14v-7" /></svg>
+);
+export const CheckIcon = (p: P) => (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+);
