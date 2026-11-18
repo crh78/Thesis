@@ -25,7 +25,12 @@ import type { StateStore } from "./store.ts";
 
 /** One Phoenix leg of one position: the take leg, its child subaccount and market. */
 export type PhoenixLeg = { leg: number; sub: number; symbol: string };
-export type PhoenixPositions = Record<string, { owner: string; legs: PhoenixLeg[]; at: number }>;
+/**
+ * Position → its Phoenix legs. `draft`: recorded for a build not submitted (yet): its children
+ * may go to the owner's next build instead (a rebuild as the amount changes), and `commit` checks
+ * at submit that no other submitted trade took them meanwhile. `at`: when recorded, or committed.
+ */
+export type PhoenixPositions = Record<string, { owner: string; legs: PhoenixLeg[]; at: number; draft?: boolean }>;
 
 /**
  * Liquidation warnings: a leg is "near" when its market is within 25% of its
@@ -64,7 +69,7 @@ export class PhoenixDesk {
   #p: PhoenixOpts;
   #store: StateStore;
   #program: ThesisProgram;
-  /** owner → sub → reserved until (ms): children promised to builds not yet submitted. */
+  /** owner → sub → reserved until (ms): children given to the owner's recent builds, offered to their next build first. */
   #reserved = new Map<string, Map<number, number>>();
 
   constructor(o: ServiceOpts, p: PhoenixOpts, store: StateStore, program: ThesisProgram) {
@@ -84,10 +89,34 @@ export class PhoenixDesk {
     return this.#positions[position.toBase58()]?.legs ?? [];
   }
 
-  /** Records which children a position's trade uses. Called when the trade is built. */
+  /**
+   * Records which children a position's trade uses, as a draft. Called when the trade is built;
+   * the owner's drafts older than RESERVE_MS (builds never submitted) are dropped.
+   */
   record(position: PublicKey, owner: PublicKey, legs: PhoenixLeg[]) {
     if (!legs.length) return;
-    this.#positions[position.toBase58()] = { owner: owner.toBase58(), legs, at: Date.now() };
+    const now = Date.now();
+    for (const [k, p] of Object.entries(this.#positions)) if (p.draft && p.owner === owner.toBase58() && p.at < now - RESERVE_MS) delete this.#positions[k];
+    this.#positions[position.toBase58()] = { owner: owner.toBase58(), legs, at: now, draft: true };
+    this.#store.save();
+  }
+
+  /**
+   * A trade with Phoenix legs is being submitted (in the owner's queue, before it's sent): its
+   * children are its own now. 409 `build_stale` when another trade submitted since this one was
+   * built took one of them (two builds made at once can share a draft's children). Nothing to do
+   * for a position with no Phoenix legs, or one committed already (a retry).
+   */
+  commit(position: PublicKey) {
+    const key = position.toBase58();
+    const mine = this.#positions[key];
+    if (!mine?.draft) return;
+    const subs = new Set(mine.legs.map((l) => l.sub));
+    const now = Date.now();
+    const taken = Object.entries(this.#positions).some(([k, p]) =>
+      k !== key && p.owner === mine.owner && !p.draft && p.at >= now - RESERVE_MS && p.legs.some((l) => subs.has(l.sub)));
+    if (taken) throw new ApiError(409, "build_stale", "Another trade took this trade's Phoenix account. Build again.");
+    this.#positions[key] = { ...mine, at: now, draft: undefined };
     this.#store.save();
   }
 
@@ -102,23 +131,27 @@ export class PhoenixDesk {
     return infos.map((i) => (i ? decodeTrader(i.data) : null));
   }
 
-  /** Children whose recorded position is still open on-chain (or was just built): not free. */
+  /**
+   * Children whose recorded position is still open on-chain (or was just submitted): not free. The
+   * owner's drafts don't count: a rebuild takes their children again (see `commit`).
+   */
   async #busy(owner: PublicKey): Promise<Set<number>> {
-    const mine = Object.entries(this.#positions).filter(([, p]) => p.owner === owner.toBase58());
+    const mine = Object.entries(this.#positions).filter(([, p]) => p.owner === owner.toBase58() && !p.draft);
     const accounts = mine.length ? await this.#program.account.position.fetchMultiple(mine.map(([k]) => new PublicKey(k))) : [];
     const busy = new Set<number>();
     mine.forEach(([, p], i) => {
       const live = accounts[i] && !accounts[i]!.exited;
       if (live || Date.now() - p.at < RESERVE_MS) for (const l of p.legs) busy.add(l.sub);
     });
-    for (const [sub, until] of this.#reserved.get(owner.toBase58()) ?? []) if (until > Date.now()) busy.add(sub);
     return busy;
   }
 
   /**
    * `count` free children for `owner`, registered and synced, with the parent onboarded first if
    * needed. The API sends those transactions itself (the app's payer and the fork's onboarder
-   * sign). A child is free when no open position uses it and it holds no position.
+   * sign). A child is free when no open position uses it and it holds no position. The children
+   * the owner's last builds reserved come first, so rebuilding a trade (a new amount, a prebuild
+   * made again) reuses them instead of registering new ones.
    */
   async prepare(owner: PublicKey, count: number): Promise<number[]> {
     if (count === 0) return [];
@@ -129,15 +162,19 @@ export class PhoenixDesk {
     }
     const busy = await this.#busy(owner);
     const chosen: { sub: number; exists: boolean }[] = [];
-    for (let from = FIRST_CHILD; from <= LAST_CHILD && chosen.length < count; from += 10) {
-      const subs = Array.from({ length: Math.min(10, LAST_CHILD - from + 1) }, (_, i) => from + i).filter((s) => !busy.has(s));
+    const reserved = this.#reserved.get(owner.toBase58()) ?? new Map<number, number>();
+    const again = [...reserved].filter(([sub, until]) => until > Date.now() && !busy.has(sub)).map(([sub]) => sub).sort((a, b) => a - b);
+    const look = async (subs: number[]) => {
       const traders = await this.#traders(owner, subs);
       subs.forEach((sub, i) => {
         if (chosen.length < count && !traders[i]?.positions.length) chosen.push({ sub, exists: Boolean(traders[i]) });
       });
+    };
+    if (again.length) await look(again.slice(0, count));
+    for (let from = FIRST_CHILD; from <= LAST_CHILD && chosen.length < count; from += 10) {
+      await look(Array.from({ length: Math.min(10, LAST_CHILD - from + 1) }, (_, i) => from + i).filter((s) => !busy.has(s) && !chosen.some((c) => c.sub === s)));
     }
     if (chosen.length < count) throw new ApiError(409, "too_many_perp_legs", `This wallet already holds ${LAST_CHILD} open Phoenix legs, the most it can.`);
-    const reserved = this.#reserved.get(owner.toBase58()) ?? new Map<number, number>();
     for (const c of chosen) reserved.set(c.sub, Date.now() + RESERVE_MS);
     this.#reserved.set(owner.toBase58(), reserved);
     for (const c of chosen.filter((x) => !x.exists)) {

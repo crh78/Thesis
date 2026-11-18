@@ -7,7 +7,7 @@
 //                                                     expiresAt, quotedAt }; prebuild: built ahead of the tap (its own
 //                                                     per-wallet window; the money action counts at submit)
 //                                                     409 take_closed once the take isn't open
-//   POST /takes/:id/positions/:pos/exit  { owner }  → a sale's build, with closesTake (the author's buy-in)
+//   POST /takes/:id/positions/:pos/exit  { owner, prebuild? }  → a sale's build, with closesTake (the author's buy-in)
 //   POST /takes/:id/publish  { author, usd }        → same, for posting an app take with the author's buy-in
 //   POST /takes/:id/confirm                         → { onChain, take?, relayed }: is the author's publish
 //                                                     on-chain here? If so, its events go to the backend again
@@ -243,10 +243,12 @@ export function forkApiServer(
           return send(200, await queued(() => service.buildTrade(parts[1], owner, side, usd, { timings: t, prebuild }), t));
         }
         if (m === "POST" && parts[2] === "positions" && parts[3] && parts[4] === "exit" && parts.length === 5) {
-          const owner = str((await body(req)).owner, "owner");
-          await money(req, owner, "sell");
+          const b = await body(req);
+          const owner = str(b.owner, "owner");
+          const prebuild = b.prebuild === true;
+          await buildLimits(req, owner, "sell", prebuild);
           const t = timed();
-          return send(200, await queued(() => service.buildExit(parts[1], parts[3], owner, { timings: t }), t));
+          return send(200, await queued(() => service.buildExit(parts[1], parts[3], owner, { timings: t, prebuild }), t));
         }
         if (m === "POST" && parts[2] === "confirm" && parts.length === 3) {
           // Harmless (it only re-delivers a landed publish), so it counts as a read.
