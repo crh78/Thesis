@@ -16,9 +16,11 @@
 //   DELETE /follows/:profileId
 //   GET    /takes/posting             → { takes } your takes still waiting for the chain
 //   POST   /takes                     { claim, topic, risk, horizon, tags, legs, await_chain? } → { take }
-//                                      (each leg may carry asset_id, its securities row;
-//                                      await_chain: true keeps it posting, seen by you only,
-//                                      until its on-chain takeCreated makes it live)
+//                                      (each leg may carry asset_id, its securities row). It's
+//                                      posting, seen by you only, until its on-chain takeCreated
+//                                      makes it live. Only a project with
+//                                      TAKES_LIVE_WITHOUT_CHAIN=on lets a client post it live at
+//                                      once by leaving out await_chain: true (./rules.ts).
 //   DELETE /takes/:id                 discard your take while it's still posting
 //   POST   /comments                  { take_id, parent_id?, body } → { comments } (the take's thread)
 //   DELETE /comments/:id              your own comment
@@ -42,6 +44,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { privyDid } from "../_shared/privy.ts";
+import { takeStatus, validHorizon } from "./rules.ts";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -51,7 +54,6 @@ const db = createClient(
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOPIC_RE = /^topic-[a-z]+$/;
-const HORIZON_RE = /^[0-9]{1,2}(wk|mo)$/;
 const RISKS = new Set(["low", "medium", "high"]);
 
 function json(status: number, body: unknown) {
@@ -154,7 +156,7 @@ async function createTake(me: string, body: Record<string, unknown>) {
   const risk = String(body.risk ?? "").toLowerCase();
   check(RISKS.has(risk), "invalid_risk");
   const horizon = String(body.horizon ?? "");
-  check(HORIZON_RE.test(horizon), "invalid_horizon");
+  check(validHorizon(horizon), "invalid_horizon");
 
   const tags = Array.isArray(body.tags) ? body.tags : [];
   check(tags.length <= 5, "invalid_tags");
@@ -186,6 +188,8 @@ async function createTake(me: string, body: Record<string, unknown>) {
   });
   const total = legs.reduce((sum, l) => sum + l.weight, 0);
   check(Math.abs(total - 100) <= 1, "weights_must_total_100");
+  // Every pick has its own slot (the composer's nextSlot): its color, and its leg on-chain.
+  check(new Set(legs.map((l) => l.slot)).size === legs.length, "invalid_leg_slot");
 
   const id = await rpc<string>("create_take", {
     p_author: me,
@@ -195,9 +199,9 @@ async function createTake(me: string, body: Record<string, unknown>) {
     p_horizon: horizon,
     p_tags: cleanTags,
     p_legs: legs,
-    // Fork-mode builds wait for the chain: the take stays hidden from everyone but its author
+    // The server decides, not the client: the take stays hidden from everyone but its author
     // until the on-chain buy-in's takeCreated event makes it live (migrations/*_post_after_chain.sql).
-    p_status: body.await_chain === true ? "posting" : "live",
+    p_status: takeStatus(body.await_chain),
   });
   return json(201, { take: await rpc("take", { p_id: id }) });
 }
