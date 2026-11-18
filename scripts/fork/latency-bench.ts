@@ -124,9 +124,15 @@ async function bench(): Promise<void> {
       const refreshed = ok("back refresh", await call("POST", `/builds/${built.json.buildId}/refresh`, undefined, "back refresh"));
       if (refreshed.json.buildId !== built.json.buildId || refreshed.json.quotedAt !== built.json.quotedAt) throw new Error(`back refresh: ${JSON.stringify(refreshed.json)}`);
       // The transactions answered before the refresh can't be sent any more.
-      const stale = await call("POST", "/submit", { buildId: built.json.buildId, transactions: sign(built.json.transactions, user), until: "accepted" });
-      if (stale.status !== 400 || stale.json.error !== "transaction_changed") throw new Error(`stale submit: ${stale.status} ${JSON.stringify(stale.json)}`);
-      await accepted("back", refreshed.json, user);
+      // The set a refresh replaced stays good until the first submit (a tap during a refresh); bytes
+      // from two refreshes back are refused.
+      const again = ok("back refresh", await call("POST", `/builds/${built.json.buildId}/refresh`, undefined, "back refresh"));
+      // (Only when the blockhash moved: refreshes within one blockhash answer the same bytes.)
+      if (JSON.stringify(again.json.transactions) !== JSON.stringify(built.json.transactions) && JSON.stringify(refreshed.json.transactions) !== JSON.stringify(built.json.transactions)) {
+        const stale = await call("POST", "/submit", { buildId: built.json.buildId, transactions: sign(built.json.transactions, user), until: "accepted" });
+        if (stale.status !== 400 || stale.json.error !== "transaction_changed") throw new Error(`stale submit: ${stale.status} ${JSON.stringify(stale.json)}`);
+      }
+      await accepted("back", again.json, user);
 
       const receipt = ok("receipt", await call("GET", `/takes/${TAKE.id}?viewer=${me}`));
       const mine = receipt.json.viewerPositions?.find((p: any) => !p.exited);
