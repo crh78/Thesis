@@ -31,7 +31,8 @@ struct ForkAPI {
     // A trade is two steps, so the slow one happens before the tap: `prepareTrade` builds it (the
     // sheet does that as it opens, and again as the amount changes), and `commit` signs and sends
     // it when you tap. `prebuild` marks a build made ahead of a tap: the fork API counts the money
-    // action at submit instead (older fork APIs ignore it).
+    // action at submit instead, and says so with `prebuilt: true`. Without that answer it was a
+    // normal build (an older fork API, or one that can't defer the money action).
 
     /// Builds a back (or fade) of a take for `amount`, ready to sign.
     func prepareTrade(_ takeID: String, side: Side, amount: Double, prebuild: Bool = false) async throws -> ForkPrepared {
@@ -59,6 +60,9 @@ struct ForkAPI {
         }
     }
 
+    /// `GET /submissions` answers that mean "nothing to learn here" (all 404s).
+    static let unknownSubmission: Set<String> = ["no_such_submission", "no_such_route", "http_404", "not_found"]
+
     private static let buildAgain: Set<String> = ["quote_stale", "build_gone", "build_expired", "no_such_route", "http_404", "http_409", "http_410"]
 
     /// Signs every transaction of a build at once and sends them. Returns as soon as the fork has
@@ -74,7 +78,8 @@ struct ForkAPI {
     }
 
     /// Where a submitted build stands. Waits up to `wait` seconds while it's pending (a long poll).
-    /// Nil when the fork API doesn't know it (or can't answer this): check the wallet instead.
+    /// Nil when the fork API doesn't know it (`no_such_submission`: it restarted without it, or kept
+    /// it past 10 minutes) or can't answer this: an unknown, so stop asking and check the wallet.
     func submission(_ buildID: String, wait: Int = 10) async throws -> ForkSubmission? {
         var req = URLRequest(url: base.appending(path: "submissions/\(buildID)").appending(queryItems: [
             URLQueryItem(name: "wait", value: String(wait * 1000)),
@@ -82,7 +87,7 @@ struct ForkAPI {
         req.timeoutInterval = TimeInterval(wait + 15)
         do {
             return try await send(req)
-        } catch let e as ForkAPIError where e.code == "no_such_route" || e.code == "http_404" || e.code == "not_found" {
+        } catch let e as ForkAPIError where Self.unknownSubmission.contains(e.code) {
             return nil
         }
     }
@@ -393,6 +398,9 @@ struct ForkBuild: Decodable {
     /// Missing on older fork APIs (`ForkAPI.buildLifetime` stands in).
     var expiresAt: Double? = nil
     var quotedAt: Double? = nil
+    /// The fork API served a `prebuild: true` request as a prebuild (its money action counts at
+    /// submit). Missing: it was a normal build, so the app stops building ahead (`PrebuildSupport`).
+    var prebuilt: Bool? = nil
 
     struct LeftOut: Decodable, Equatable {
         let name: String
@@ -404,7 +412,7 @@ struct ForkBuild: Decodable {
         ForkBuild(buildId: buildId, transactions: transactions, expectedUsd: expectedUsd ?? old.expectedUsd,
                   minimumUsd: minimumUsd ?? old.minimumUsd, phoenixCashOut: phoenixCashOut ?? old.phoenixCashOut,
                   excluded: excluded ?? old.excluded, closesTake: closesTake ?? old.closesTake,
-                  expiresAt: expiresAt, quotedAt: quotedAt ?? old.quotedAt)
+                  expiresAt: expiresAt, quotedAt: quotedAt ?? old.quotedAt, prebuilt: prebuilt ?? old.prebuilt)
     }
 }
 

@@ -9,6 +9,11 @@ import os
 /// Keyed by what a build is for: the trade sheet's amount in cents, or a sale's position. A build
 /// is used once. Builds stop being refreshed after three minutes without a change, and asking
 /// stops for a while if the fork API says it's busy or you're over its limits.
+///
+/// Building ahead goes on only once a build made ahead answered `prebuilt: true`: the fork API
+/// served it as a prebuild, its money action counted at submit (`PrebuildSupport`). An API that
+/// answers without it (it ignores `prebuild`, or can't defer the money action) counts every build
+/// against the wallet's money limit, so it gets one early build, and the tap builds as before.
 @MainActor
 final class Prebuilds<Key: Hashable> {
     typealias Build = (_ key: Key, _ prebuild: Bool) async throws -> ForkPrepared
@@ -20,6 +25,8 @@ final class Prebuilds<Key: Hashable> {
     /// Builds signed already: one that comes back from a refresh started before is dropped.
     private var used: Set<String> = []
     private var lastActivity = Date.now
+    /// The key last asked for: built once the first early build says the API serves prebuilds.
+    private var lastWanted: Key?
     private var pausedUntil = Date.distantPast
     private let log = Logger(subsystem: "xyz.yourthesis.app", category: "trade")
 
@@ -38,10 +45,14 @@ final class Prebuilds<Key: Hashable> {
         ready[key].flatMap { $0.isFresh ? $0 : nil }
     }
 
-    /// Builds `key` ahead of the tap, unless a fresh build is ready or one is being made.
+    /// Builds `key` ahead of the tap, unless a fresh build is ready or one is being made, or the
+    /// fork API doesn't serve prebuilds.
     func want(_ key: Key) {
         lastActivity = .now
-        guard Date.now >= pausedUntil, readyBuild(key) == nil, building[key] == nil else { return }
+        lastWanted = key
+        guard PrebuildSupport.served != false, Date.now >= pausedUntil, readyBuild(key) == nil, building[key] == nil else { return }
+        // Until the first answer says what this API does, one early build at a time.
+        if PrebuildSupport.served == nil, !building.isEmpty { return }
         start(key) { [build] in try await build(key, true) }
     }
 
@@ -52,7 +63,10 @@ final class Prebuilds<Key: Hashable> {
         if let pending = building[key], let made = await pending.value, made.isFresh, !used.contains(made.build.buildId) {
             return made
         }
-        let made = try await build(key, true)
+        // A prebuild only while the API may serve one (otherwise a normal build, as at the tap).
+        let early = PrebuildSupport.served != false
+        let made = try await build(key, early)
+        if early { PrebuildSupport.note(made.build) }
         ready[key] = made
         return made
     }
@@ -77,7 +91,7 @@ final class Prebuilds<Key: Hashable> {
     /// to expiring, and lets builds for other keys go once they're stale.
     func tick(_ key: Key) {
         for (k, made) in ready where k != key && !made.isFresh { ready[k] = nil }
-        guard Date.now.timeIntervalSince(lastActivity) < Self.idleLimit, Date.now >= pausedUntil,
+        guard PrebuildSupport.served == true, Date.now.timeIntervalSince(lastActivity) < Self.idleLimit, Date.now >= pausedUntil,
               building[key] == nil, let made = ready[key], made.secondsLeft < ForkPrepared.refreshBelow else { return }
         start(key) { [build, refresh] in
             // A fresh blockhash for the same quote; if the API can't (or the quote is old), a new build.
@@ -102,9 +116,13 @@ final class Prebuilds<Key: Hashable> {
         building[key] = Task { [weak self] in
             do {
                 let made = try await work()
+                let first = PrebuildSupport.served == nil
+                PrebuildSupport.note(made.build)
                 guard let self, !Task.isCancelled else { return made }
                 self.building[key] = nil
                 if !self.used.contains(made.build.buildId) { self.ready[key] = made }
+                // The amount changed while the first early build was out (and was skipped then).
+                if first, PrebuildSupport.served == true, let next = self.lastWanted, next != key { self.want(next) }
                 return made
             } catch {
                 guard let self, !Task.isCancelled else { return nil }
@@ -117,5 +135,17 @@ final class Prebuilds<Key: Hashable> {
                 return nil
             }
         }
+    }
+}
+
+/// Whether this fork API serves `prebuild: true` as a prebuild: nil until a build made ahead
+/// answered, then true only if it said `prebuilt: true`. Shared by every sheet for the app's run.
+@MainActor
+enum PrebuildSupport {
+    static var served: Bool?
+
+    /// What a build asked for with `prebuild: true` (or its refresh) says about the API.
+    static func note(_ build: ForkBuild) {
+        served = build.prebuilt == true
     }
 }
