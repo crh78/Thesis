@@ -13,7 +13,7 @@
 // The cards tier also reads every card a basket has picked (the catalog's card:<cardId> rows,
 // public, with SUPABASE_PUBLISHABLE_KEY) so the settler can price card legs.
 // Keys are read from the environment or the repo-root .env and never printed.
-import { AssetBankPoller, RequestCounter, TIERS, defaultSink, loadBankConfig, type TierName } from "@thesis/venues/bank";
+import { AssetBankPoller, FileSink, RequestCounter, TIERS, buildsBusy, buildsBusyFileFor, defaultSink, loadBankConfig, type TierName } from "@thesis/venues/bank";
 import { geminiIndexEnv, indexGeminiContracts } from "@thesis/take-builder/gemini-index";
 import { syncLiquidity } from "@thesis/take-builder/liquidity-sync";
 
@@ -53,7 +53,10 @@ const pickedCards = catalogEnv?.publishableKey
   }
   : undefined;
 if (!pickedCards) log("asset-bank: card legs won't be tracked (set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY)");
-const poller = await AssetBankPoller.open({ sink, config, log, afterGemini, pickedCards });
+// Probes pause while the fork API's trade builds run or wait (it touches this file; same machine).
+const busyFile = sink instanceof FileSink ? buildsBusyFileFor(sink.path) : null;
+const yieldToTrades = busyFile ? () => buildsBusy(busyFile) : undefined;
+const poller = await AssetBankPoller.open({ sink, config, log, afterGemini, pickedCards, yieldToTrades });
 if (args["max-probes"]) poller.maxProbesPerRun = Number(args["max-probes"]);
 console.log(`${stamp()} asset-bank: sink=${sink.name}, jupiter=${poller.jup.label} at ${config.jupiterRpm} req/min, ${Object.keys(poller.state.tokens).length} tokens loaded`);
 

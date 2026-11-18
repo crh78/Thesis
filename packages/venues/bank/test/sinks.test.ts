@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileSink, SupabaseSink, cleanDirty, defaultSink } from "../src/sinks.ts";
 import { getAssetBank } from "../src/read.ts";
+import { buildsBusy, buildsBusyFileFor, markBuildsBusy, pricesFileFor, readBankPrices } from "../src/side-files.ts";
 import { fixtureState } from "./helpers.ts";
 
 test("file sink round-trips the state and getAssetBank reads through it", async () => {
@@ -63,4 +64,31 @@ test("defaultSink picks the file unless ASSET_BANK_SINK=supabase, which needs it
   assert.throws(() => defaultSink((k) => (k === "ASSET_BANK_SINK" ? "supabase" : null)), /SUPABASE_URL/);
   const env: Record<string, string> = { ASSET_BANK_SINK: "supabase", SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "k" };
   assert.equal(defaultSink((k) => env[k] ?? null).name, "supabase");
+});
+
+test("the file sink also writes the token prices alone, for the fork API's display values", async () => {
+  const path = join(mkdtempSync(join(tmpdir(), "bank-")), "asset-bank.json");
+  const s = fixtureState();
+  await new FileSink(path).save(s);
+  assert.equal(pricesFileFor(path), path.replace(/asset-bank\.json$/, "asset-bank.prices.json"));
+  const p = await readBankPrices(pricesFileFor(path));
+  assert.ok(p);
+  const priced = Object.values(s.tokens).filter((t) => t.price && t.price.usd > 0);
+  assert.ok(priced.length > 0);
+  assert.equal(Object.keys(p.tokens).length, priced.length);
+  const t = priced[0];
+  assert.deepEqual(p.tokens[t.mint], { usd: t.price!.usd, at: t.price!.at, pooledUsd: t.jupiterPooledUsd ?? null });
+  assert.equal(await readBankPrices(join(tmpdir(), "no-such-dir", "x.prices.json")), null);
+});
+
+test("the trade-builds busy file: fresh for 15 s after a touch, missing means not busy", async () => {
+  const path = buildsBusyFileFor(join(mkdtempSync(join(tmpdir(), "bank-")), "nested", "asset-bank.json"));
+  assert.equal(buildsBusy(path), false);
+  const at = new Date(Date.now() - 1_000);
+  await markBuildsBusy(path, at);
+  assert.equal(buildsBusy(path, at.getTime() + 1_000), true);
+  assert.equal(buildsBusy(path, at.getTime() + 15_000), true);
+  assert.equal(buildsBusy(path, at.getTime() + 15_001), false);
+  await markBuildsBusy(path); // touching again keeps it busy
+  assert.equal(buildsBusy(path), true);
 });

@@ -6,6 +6,7 @@ export { bestIssuer, issuerPool, PRICEABLE_MIN_POOLED_USD, type BestIssuerOpts, 
 export { AssetBankPoller, RequestCounter, TIERS, type TierName } from "./poller.ts";
 export { loadBankConfig, CONFIG_ENV, FRESHNESS_ENV, type BankConfig } from "./config.ts";
 export { FileSink, SupabaseSink, defaultSink, type BankSink, type Dirty } from "./sinks.ts";
+export { BUILDS_BUSY_HOLD_MS, bankPrices, buildsBusy, buildsBusyFileFor, markBuildsBusy, pricesFileFor, readBankPrices, type BankPrices } from "./side-files.ts";
 export { Scheduler, type Job, type Clock } from "./scheduler.ts";
 export { JupiterClient, type QuoteFn, type JupQuote } from "./jupiter.ts";
 export type { BankState, TokenEntry, UnderlyingEntry, PerpMarket } from "./state.ts";

@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { envVar } from "../../registry/src/lib/env.ts";
+import { pricesFileFor, writeBankPrices } from "./side-files.ts";
 import { BANK_VERSION, bankBestIssuer, emptyState, type BankState } from "./state.ts";
 
 export type Dirty = { tokens: Set<string>; underlyings: Set<string>; venues: Set<string>; meta: boolean };
@@ -46,6 +47,11 @@ export class FileSink implements BankSink {
     const tmp = `${this.path}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(state));
     renameSync(tmp, this.path); // atomic on one filesystem: readers never see half a file
+    // The token prices alone, for the fork API's display values (side-files.ts). Best effort: the
+    // bank itself is written, and readers fall back to Jupiter without it.
+    try {
+      writeBankPrices(state, pricesFileFor(this.path));
+    } catch {}
   }
 }
 
