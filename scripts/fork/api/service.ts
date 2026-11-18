@@ -1159,7 +1159,9 @@ export class ForkService {
    */
   async buildSweep(wallet: string, address?: string) {
     const owner = parseKey(wallet);
-    if (!address && !this.#split.list(owner.toBase58()).length) return { done: true as const, phoenixCashOut: false };
+    // Nothing left: no stopped trade at all, or none at `address` (already swept, retried or finished).
+    const list = this.#split.list(owner.toBase58());
+    if (!address ? !list.length : !list.some(([p]) => p === parseKey(address).toBase58())) return { done: true as const, phoenixCashOut: false };
     const [position, rec] = this.#incomplete(owner, address);
     const ticket = await this.#ticket(owner, position);
     if (!ticket) {

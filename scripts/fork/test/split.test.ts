@@ -224,6 +224,8 @@ test("sweep: a ticket with only a Phoenix leg is cancelled, and cash-out is poin
   const { signatures } = await f.service.submit(built.buildId, f.sign(built));
   assert.equal(signatures.length, 1);
   assert.equal(f.service.incompleteTrades(f.wallet).trades.length, 0, "swept: the trade is over");
+  // Sweep, submit, sweep again: done, with or without the position.
+  assert.deepEqual(await f.service.buildSweep(f.wallet, f.position.toBase58()), { done: true, phoenixCashOut: false });
   assert.deepEqual(await f.service.buildSweep(f.wallet), { done: true, phoenixCashOut: false });
 });
 
