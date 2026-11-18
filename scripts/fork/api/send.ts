@@ -27,12 +27,33 @@ export class SendFailed extends ApiError {
   readonly landed: string[];
   /** The failed transaction's fate is unknown (it may still land): never counted as not landed. */
   readonly unknown: boolean;
-  constructor(e: ApiError, landed: string[], unknown = false) {
+  /** The first transaction was refused by its preflight: nothing went out (`resendIfStale` may send it again). */
+  readonly nothingSent: boolean;
+  constructor(e: ApiError, landed: string[], unknown = false, nothingSent = false) {
     super(e.status, e.code, e.message);
     this.headers = e.headers;
     this.body = e.body;
     this.landed = landed;
     this.unknown = unknown;
+    this.nothingSent = nothingSent;
+  }
+}
+
+/**
+ * Sends with `send`. If its first transaction's preflight refused it (so nothing went out) while
+ * some of the build's market accounts were left as they were (`stale`: the submit skipped
+ * accounts copied from mainnet less than a minute ago), resets them all (`reset`) and sends the
+ * same signed bytes once more: a pool that moved on mainnet since its copy is the usual cause.
+ * Any other failure, or a second refusal, is thrown as it was.
+ */
+export async function resendIfStale<T>(send: () => Promise<T>, o: { stale: boolean; reset: () => Promise<unknown>; log?: (m: string) => void }): Promise<T> {
+  try {
+    return await send();
+  } catch (e) {
+    if (!o.stale || !(e instanceof SendFailed) || !e.nothingSent) throw e;
+    o.log?.(`preflight refused with markets copied under a minute ago (${e.message.slice(0, 160)}); resetting them and sending again`);
+    await o.reset();
+    return send();
   }
 }
 
@@ -86,12 +107,17 @@ export async function sendBackToBack(
   let sent = 0;
   let stop: ApiError | null = null;
   let unknown = false;
+  /** The first one's preflight refused it: nothing went out. */
+  let nothingSent = false;
   for (const [i, tx] of txs.entries()) {
     const started = Date.now();
     const refused = await conn.sendTransaction(tx, { skipPreflight: false, preflightCommitment: "processed" }).then(
       () => null,
       async (e: unknown) => {
-        if (refusedByPreflight(e)) return new ApiError(502, "send_failed", errorText(e));
+        if (refusedByPreflight(e)) {
+          nothingSent = i === 0;
+          return new ApiError(502, "send_failed", errorText(e));
+        }
         o.log?.(`sending ${sigs[i]} failed (${errorText(e)}); waiting to see if it landed`);
         const [fate] = await fates(conn, [sigs[i]], lastValidBlockHeight);
         if (fate === "landed") return null;
@@ -121,5 +147,5 @@ export async function sendBackToBack(
     // The first one that didn't land is what stopped the trade.
     stop = new ApiError(502, "transaction_failed", `${sigs[failed]}: ${known[failed] === "unknown" ? "not confirmed yet" : "not confirmed"}`);
   }
-  throw new SendFailed(stop!, sigs.slice(0, failed === -1 ? sent : failed), unknown);
+  throw new SendFailed(stop!, sigs.slice(0, failed === -1 ? sent : failed), unknown, nothingSent);
 }

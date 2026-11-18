@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Keypair, SystemProgram, TransactionMessage, VersionedTransaction, type Connection } from "@solana/web3.js";
 import { base58 } from "../api/common.ts";
-import { SendFailed, fates, sendBackToBack } from "../api/send.ts";
+import { SendFailed, fates, resendIfStale, sendBackToBack } from "../api/send.ts";
 
 const payer = Keypair.generate();
 const tx = (lamports: number) => {
@@ -85,4 +85,40 @@ test("fates: landed, failed with an error, failed once its blockhash passed unse
   const later = fork({ status: () => (++reads > 2 ? ok : { err: null, confirmationStatus: "processed" }) });
   assert.deepEqual(await fates(later.conn, [a], 100), ["landed"]);
   assert.deepEqual(await fates(fork({ status: () => null }).conn, [a], 100, { maxMs: 0 }), ["unknown"], "never seen, blockhash still live: unknown, never failed");
+});
+
+test("stale markets: a first transaction refused by preflight gets the markets reset and the same bytes sent once more", async () => {
+  const txs = [tx(1), tx(2)];
+  let resets = 0;
+  // The pool moved on mainnet: the first preflight is refused until the markets are reset.
+  const { conn, sent } = fork({ send: (i) => (i === 0 && resets === 0 ? refused() : Promise.resolve()), status: () => ok });
+  let accepted = 0;
+  const logs: string[] = [];
+  const out = await resendIfStale(() => sendBackToBack(conn, txs, 100, { accept: () => accepted++ }), {
+    stale: true,
+    reset: async () => void resets++,
+    log: (m) => logs.push(m),
+  });
+  assert.deepEqual(out, txs.map(sig));
+  assert.equal(resets, 1);
+  assert.deepEqual(sent, [sig(txs[0]), sig(txs[0]), sig(txs[1])], "the same signed bytes again");
+  assert.equal(accepted, 1);
+  assert.match(logs[0], /resetting them and sending again/);
+});
+
+test("stale markets: no resend when the markets were all reset, after something went out, or a second time", async () => {
+  const txs = [tx(1), tx(2)];
+  const run = async (o: { stale: boolean; refuse: (i: number) => boolean }) => {
+    let resets = 0;
+    const { conn, sent } = fork({ send: (i) => (o.refuse(i) ? refused() : Promise.resolve()), status: () => ok });
+    const e = await resendIfStale(() => sendBackToBack(conn, txs, 100, { accept: () => {} }), { stale: o.stale, reset: async () => void resets++ }).then(
+      () => assert.fail("expected a refusal"),
+      (err: unknown) => err,
+    );
+    assert.ok(e instanceof SendFailed && e.code === "send_failed");
+    return { resets, sent: sent.length, nothingSent: (e as SendFailed).nothingSent };
+  };
+  assert.deepEqual(await run({ stale: false, refuse: (i) => i === 0 }), { resets: 0, sent: 1, nothingSent: true }, "markets reset at submit: the refusal stands");
+  assert.deepEqual(await run({ stale: true, refuse: (i) => i === 1 }), { resets: 0, sent: 2, nothingSent: false }, "the first went out: never sent again");
+  assert.deepEqual(await run({ stale: true, refuse: () => true }), { resets: 1, sent: 2, nothingSent: true }, "refused again after the reset: once only");
 });

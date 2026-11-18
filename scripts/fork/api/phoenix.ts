@@ -71,6 +71,11 @@ export class PhoenixDesk {
   #program: ThesisProgram;
   /** owner → sub → reserved until (ms): children given to the owner's recent builds, offered to their next build first. */
   #reserved = new Map<string, Map<number, number>>();
+  /**
+   * Positions whose draft was dropped because another of the owner's trades took one of its
+   * children (see `commit`): their builds are stale, and claiming one is refused. In memory, like builds.
+   */
+  #superseded = new Set<string>();
 
   constructor(o: ServiceOpts, p: PhoenixOpts, store: StateStore, program: ThesisProgram) {
     this.#o = o;
@@ -106,16 +111,28 @@ export class PhoenixDesk {
    * children are its own now. 409 `build_stale` when another trade submitted since this one was
    * built took one of them (two builds made at once can share a draft's children). Nothing to do
    * for a position with no Phoenix legs, or one committed already (a retry).
+   *
+   * The owner's other drafts using any of these children are dropped (their builds are stale now,
+   * and submitting one later is refused): otherwise `children` could map a child to a draft never
+   * submitted, and `strays` would take this trade's live leg for a stray and cash-out would close it.
    */
   commit(position: PublicKey) {
     const key = position.toBase58();
+    const stale = () => new ApiError(409, "build_stale", "Another trade took this trade's Phoenix account. Build again.");
+    if (this.#superseded.has(key)) throw stale();
     const mine = this.#positions[key];
     if (!mine?.draft) return;
     const subs = new Set(mine.legs.map((l) => l.sub));
     const now = Date.now();
     const taken = Object.entries(this.#positions).some(([k, p]) =>
       k !== key && p.owner === mine.owner && !p.draft && p.at >= now - RESERVE_MS && p.legs.some((l) => subs.has(l.sub)));
-    if (taken) throw new ApiError(409, "build_stale", "Another trade took this trade's Phoenix account. Build again.");
+    if (taken) throw stale();
+    if (this.#superseded.size > 10_000) this.#superseded.clear();
+    for (const [k, p] of Object.entries(this.#positions)) {
+      if (k === key || !p.draft || p.owner !== mine.owner || !p.legs.some((l) => subs.has(l.sub))) continue;
+      delete this.#positions[k];
+      this.#superseded.add(k);
+    }
     this.#positions[key] = { ...mine, at: now, draft: undefined };
     this.#store.save();
   }
@@ -299,11 +316,17 @@ export class PhoenixDesk {
     return out;
   }
 
-  /** Every child this service ever gave `owner`, with what it holds now. */
+  /**
+   * Every child this service ever gave `owner`, with what it holds now. A child can be reused: it
+   * maps to its latest submitted position. A draft (a build not submitted) holds nothing of its
+   * own, so it counts only for a child no submitted trade used.
+   */
   async children(owner: PublicKey): Promise<{ sub: number; symbol: string; position: string; trader: TraderView }[]> {
     const mine = Object.entries(this.#positions).filter(([, p]) => p.owner === owner.toBase58());
+    // Drafts first, then submitted ones, each oldest first: the last one set wins.
+    const rank = (p: PhoenixPositions[string]) => (p.draft ? 0 : 1);
+    mine.sort(([, a], [, b]) => rank(a) - rank(b) || a.at - b.at);
     const flat = mine.flatMap(([position, p]) => p.legs.map((l) => ({ ...l, position })));
-    // A child can be reused: keep its latest position.
     const latest = new Map<number, (typeof flat)[number]>();
     for (const l of flat) latest.set(l.sub, l);
     const list = [...latest.values()];

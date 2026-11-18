@@ -20,18 +20,47 @@ test("a build says when it expires and when it was quoted; a refresh keeps its i
   const built = await f.service.buildTrade(TAKE_ID, f.wallet, "back", 20, { prebuild: true });
   assert.ok(built.expiresAt > before && built.expiresAt <= Date.now() + 55_000);
   assert.ok(typeof built.quotedAt === "number" && built.quotedAt >= before);
+  assert.ok(f.logs.some((l) => l.startsWith(`timing back build ${TAKE_ID.slice(0, 8)}`) && l.includes("jupiter lane 2, 0 calls")), "a prebuild is in Jupiter's prebuild lane, and says what it used");
   const fresh = await f.service.refreshBuild(built.buildId);
   assert.equal(fresh.buildId, built.buildId);
   assert.equal(fresh.quotedAt, built.quotedAt, "the same quotes");
   assert.ok(fresh.expiresAt >= built.expiresAt);
   assert.deepEqual((fresh as { included?: number[] }).included, built.included, "the same answer otherwise");
   assert.notEqual(blockhashOf(fresh.transactions[0]), blockhashOf(built.transactions[0]));
-  // What was answered before can't be sent any more; the refreshed transactions can.
-  await assert.rejects(f.service.submit(built.buildId, f.sign(built)), apiError(400, "transaction_changed"));
+  assert.equal(built.prebuilt, true, "a prebuild says so");
+  assert.equal((fresh as { prebuilt?: boolean }).prebuilt, true, "and its refresh too");
   const { signatures } = await f.service.submit(built.buildId, f.sign(fresh));
   assert.equal(signatures.length, 1);
   await assert.rejects(f.service.refreshBuild(built.buildId), apiError(410, "build_gone"), "submitted: gone");
   await assert.rejects(f.service.refreshBuild("00000000-0000-4000-8000-000000000001"), apiError(410, "build_gone"));
+  const normal = await f.service.buildTrade(TAKE_ID, f.wallet, "back", 20);
+  assert.equal("prebuilt" in normal, false, "a tap-time build has no prebuilt");
+});
+
+test("a refresh while the client signed: the bytes answered before it still submit, once; then the build is used", async (t) => {
+  const f = await tradeFixture(t, { status: () => confirmed });
+  const built = await f.service.buildTrade(TAKE_ID, f.wallet, "back", 20, { prebuild: true });
+  // The client signs the first build while the sheet's refresh runs.
+  const signedEarly = f.sign(built);
+  const fresh = await f.service.refreshBuild(built.buildId);
+  const { signatures } = await f.service.submit(built.buildId, signedEarly);
+  assert.equal(signatures.length, 1);
+  assert.equal(f.sent.length, 1);
+  assert.equal(blockhashOf(Buffer.from(f.sent[0].serialize()).toString("base64")), blockhashOf(built.transactions[0]), "the bytes it signed went out");
+  assert.ok(f.sent[0].signatures.every((s) => s.some((b) => b !== 0)), "with the app payer's signature too");
+  // The first submit used the build: the refreshed bytes are other bytes now.
+  await assert.rejects(f.service.submit(built.buildId, f.sign(fresh)), apiError(409, "build_used"));
+  assert.deepEqual(await f.service.submit(built.buildId, signedEarly), { status: "landed", buildId: built.buildId, signatures }, "the same bytes again: its status");
+  assert.equal(f.sent.length, 1);
+});
+
+test("after two refreshes only the last two answers submit; something else is transaction_changed", async (t) => {
+  const f = await tradeFixture(t, { status: () => confirmed });
+  const built = await f.service.buildTrade(TAKE_ID, f.wallet, "back", 20, { prebuild: true });
+  await f.service.refreshBuild(built.buildId);
+  await f.service.refreshBuild(built.buildId);
+  await assert.rejects(f.service.submit(built.buildId, f.sign(built)), apiError(400, "transaction_changed"), "two refreshes ago");
+  assert.equal(f.sent.length, 0);
 });
 
 test("a refresh past QUOTE_REFRESH_MS is quote_stale: the client builds again", async (t) => {
@@ -99,4 +128,40 @@ test("server: a prebuild checks who's asking without a money action, counts it a
   assert.equal(refresh.status, 200);
   assert.match(refresh.headers.get("server-timing") ?? "", /total;dur=/);
   assert.equal((await fetch(`${url}/builds/nope/refresh`, { method: "POST" })).status, 400);
+});
+
+test("server: without a guard that can defer the money action, a prebuild is a normal build and its answer has no prebuilt", async (t) => {
+  const f = await tradeFixture(t);
+  const calls: string[] = [];
+  // A guard with checkMoney only (an older one): it can't check a caller without counting.
+  const guard = { checkRead: () => {}, build: <T>(work: () => Promise<T>) => work(), checkMoney: async () => void calls.push("money") };
+  for (const g of [guard, undefined]) {
+    const server = forkApiServer(f.service, () => {}, { guard: g as never });
+    server.listen(0, "127.0.0.1");
+    t.after(() => server.close());
+    await once(server, "listening");
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const res = await fetch(`${url}/takes/${TAKE_ID}/trades`, { method: "POST", body: JSON.stringify({ owner: f.wallet, side: "back", usd: 20, prebuild: true }) });
+    assert.equal(res.status, 200);
+    const body = await res.json() as { buildId: string; prebuilt?: boolean };
+    assert.equal("prebuilt" in body, false, "the apps see no prebuilt, and build at the tap");
+    assert.ok(f.logs.some((l) => l.startsWith(`timing back build ${TAKE_ID.slice(0, 8)}`) && l.includes("jupiter lane 1")), "built in the tap lane");
+    f.logs.length = 0;
+  }
+  assert.deepEqual(calls, ["money"], "counted as a money action now");
+});
+
+test("server: with a guard that defers the money action, a prebuild's answer says prebuilt: true", async (t) => {
+  const f = await tradeFixture(t);
+  const guard = { checkRead: () => {}, build: <T>(work: () => Promise<T>) => work(), checkMoney: async () => assert.fail("not a money action"), checkAuth: async () => {}, countMoney: () => {} };
+  const server = forkApiServer(f.service, () => {}, { guard: guard as never });
+  server.listen(0, "127.0.0.1");
+  t.after(() => server.close());
+  await once(server, "listening");
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const res = await fetch(`${url}/takes/${TAKE_ID}/trades`, { method: "POST", body: JSON.stringify({ owner: f.wallet, side: "back", usd: 20, prebuild: true }) });
+  const body = await res.json() as { buildId: string; prebuilt?: boolean };
+  assert.equal(body.prebuilt, true);
+  const refreshed = await (await fetch(`${url}/builds/${body.buildId}/refresh`, { method: "POST" })).json() as { prebuilt?: boolean };
+  assert.equal(refreshed.prebuilt, true);
 });
