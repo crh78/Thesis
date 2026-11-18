@@ -224,6 +224,7 @@ export class Settler {
     // 1. Prices.
     let { positions, takes, exits } = await this.#load(true);
     const scanned = this.#set.fullScan;
+    await this.#prefetchTokens(positions, takes, exits, now, rules);
     const priceItems: Item[] = [];
     for (const { publicKey, account: p } of positions) {
       const take = takes.get(p.take.toBase58());
@@ -420,6 +421,52 @@ export class Settler {
       cu: { entry: THESIS_COMPUTE_UNITS.recordEntryPrices, exit: THESIS_COMPUTE_UNITS.recordExitPrices, sale: THESIS_COMPUTE_UNITS.recordSalePrices }[moment],
       label: `record_${moment}_prices ${position} legs ${quotes.map((q) => q.leg).join(",")}`,
     };
+  }
+
+  /**
+   * Reads, in batches, the issuer token of every spot leg this tick may price live (its moment
+   * passed within the live window), after the chain's clock was read, so the legs below answer
+   * from the source's per-tick cache. Only how the calls are made changes: each leg is still
+   * priced by the same rules, at or after its own moment. A failed read is logged, and the legs
+   * then ask one mint at a time (or wait, while the source rests after a 429). Called every tick,
+   * even with no mints, so the cache never carries a price from before this tick's clock.
+   */
+  async #prefetchTokens(
+    positions: { publicKey: PublicKey; account: PositionAccount }[],
+    takes: Map<string, TakeAccount>,
+    exits: Map<string, ExitAccount>,
+    now: number,
+    rules: PriceRules,
+  ): Promise<void> {
+    const tokens = this.#o.sources.tokens;
+    if (!tokens.prefetch) return;
+    const mints = new Set<string>();
+    for (const { publicKey, account: p } of positions) {
+      const take = takes.get(p.take.toBase58());
+      if (!take) continue;
+      const exit = exits.get(publicKey.toBase58()) ?? null;
+      const side = "back" in p.side ? "back" : "fade";
+      for (const [moment, at] of priceMoments(take, p, exit, now)) {
+        if (now < at || now - at > rules.liveWindowSecs) continue;
+        const legs = missingLegs(take, p, moment, exit).filter((i) => !this.#gaveUp.has(`${publicKey}:${moment}:${i}`));
+        if (!legs.length) continue;
+        const proof = await this.#proofFor(publicKey);
+        if (!proof) continue;
+        for (const i of legs) {
+          const leg = take.legs[i];
+          const kind = kindName(leg.kind);
+          if (kind !== "spot") continue;
+          const d = provedToken({ kind, assetIdHex: leg.asset.toBuffer().toString("hex") }, side, proof, i, this.#o.bank);
+          if (d.ok && d.token) mints.add(d.token.mint);
+        }
+      }
+    }
+    try {
+      // With no mints this only clears the cache (no request).
+      await tokens.prefetch([...mints]);
+    } catch (e) {
+      this.#log(`token prices (${mints.size} mints): ${e instanceof Error ? e.message : e}`);
+    }
   }
 
   /**

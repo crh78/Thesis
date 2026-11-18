@@ -14,7 +14,14 @@ WorkingDirectory=/opt/thesis
 EnvironmentFile=/etc/thesis/executor.env
 # Surfpool needs a few seconds before it answers.
 ExecStartPre=/bin/sh -c 'for i in $(seq 60); do curl -sf -X POST -H content-type:application/json -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getVersion\"}" http://127.0.0.1:18899 >/dev/null && exit 0; sleep 2; done; exit 1'
-ExecStart=/usr/bin/pnpm fork:up
+# Node directly (`pnpm fork:up` runs the same file), without the pnpm wrapper.
+ExecStart=/usr/bin/node scripts/fork/up.ts
+# Writes only the fork's keys, lookup table and state under .data/fork.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/thesis/.data
+ProtectHome=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

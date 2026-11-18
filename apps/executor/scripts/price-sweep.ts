@@ -47,10 +47,10 @@ const fnEnv = (() => {
 
 const SUPABASE_URL = envVar("SUPABASE_URL")!;
 const SUPABASE_KEY = envVar("SUPABASE_PUBLISHABLE_KEY")!;
-const JUP_KEY = envVar("JUPITER_API_KEY");
-// Prices go through the keyless lite-api so the sweep doesn't eat the asset bank's keyed budget.
-const JUP = "https://lite-api.jup.ag";
-const JUP_H: Record<string, string> = {};
+const JUP_KEY = envVar("JUPITER_API_KEY") ?? "";
+// Prices go through the keyed api.jup.ag (the keyless lite-api is being retired): JUPITER_API_KEY is required.
+const JUP = "https://api.jup.ag";
+const JUP_H: Record<string, string> = { "x-api-key": JUP_KEY };
 const ALPACA_H = { "APCA-API-KEY-ID": envVar("ALPACA_API_KEY_ID") ?? "", "APCA-API-SECRET-KEY": envVar("ALPACA_API_SECRET_KEY") ?? "" };
 const retry = async <T>(fn: () => Promise<T>, tries = 6): Promise<T> => {
   for (let i = 0; ; i++) {
@@ -287,13 +287,13 @@ async function predictions(n: number) {
 async function yieldLegs(cat: Security[]) {
   header("yield: jlUSDC share value, and catalog APY vs what the deposit earns");
   const rows = cat.filter((s) => s.kind === "yield" && s.liquidity === "tradeable");
-  const lendList: any[] = await getJson(`https://lite-api.jup.ag/lend/v1/earn/tokens`).catch(() => []);
+  const lendList: any[] = await getJson(`${JUP}/lend/v1/earn/tokens`, JUP_H).catch(() => []);
   const jl = lendList.find((x) => x.asset?.symbol === "USDC" || x.symbol === "jlUSDC");
   if (!jl) { note("yield", "FAIL", "jlUSDC", "Jupiter Lend doesn't list jlUSDC: every yield leg would be unpriced"); return; }
   const jlApy = (Number(jl.totalRate ?? jl.supplyRate ?? 0)) / 100; // basis points → %
-  const a = await retry(() => jupiterLendShareValue(jl.address, {}));
+  const a = await retry(() => jupiterLendShareValue(jl.address, { apiKey: JUP_KEY }));
   await sleep(4000);
-  const b = await retry(() => jupiterLendShareValue(jl.address, {}));
+  const b = await retry(() => jupiterLendShareValue(jl.address, { apiKey: JUP_KEY }));
   if (!a || !b) note("yield", "FAIL", "jlUSDC", "share value unreadable");
   else {
     const lvl: Level = b.usdcPerShare < a.usdcPerShare ? "FAIL" : a.usdcPerShare < 1 || a.usdcPerShare > 2 ? "WARN" : "PASS";
@@ -313,13 +313,13 @@ async function settle(cat: Security[]) {
   const rules: PriceRules = { minLiquidityUsd: 50_000, liveWindowSecs: 300, maxDelaySecs: 3600, staleRefSecs: 900 };
   const src: Sources = {
     stocks: new AlpacaStocks(ALPACA_H["APCA-API-KEY-ID"], ALPACA_H["APCA-API-SECRET-KEY"]),
-    tokens: new JupiterPrices(JUP_KEY), // keyed: the bank isn't running alongside
+    tokens: new JupiterPrices(JUP_KEY),
     phoenix: new PhoenixVenue({ rpcUrl: envVar("SOLANA_RPC_URL") ?? "https://api.mainnet-beta.solana.com" }),
-    lend: { shareValue: async (m) => { const v = await retry(() => jupiterLendShareValue(m, {})); return v && { usdcPerShare: v.usdcPerShare, at: nowSec(), raw: v.raw }; } },
+    lend: { shareValue: async (m) => { const v = await retry(() => jupiterLendShareValue(m, { apiKey: JUP_KEY })); return v && { usdcPerShare: v.usdcPerShare, at: nowSec(), raw: v.raw }; } },
   };
   // yield rows are all traded as jlUSDC (see yieldLegs), so one jlUSDC leg stands for them
   const rows = cat.filter((s) => s.liquidity === "tradeable" && ["stock", "etf", "commodity", "pre-ipo", "card"].includes(s.kind));
-  const jl: any = (await getJson(`https://lite-api.jup.ag/lend/v1/earn/tokens`).catch(() => [])).find((x: any) => x.asset?.symbol === "USDC");
+  const jl: any = (await getJson(`${JUP}/lend/v1/earn/tokens`, JUP_H).catch(() => [])).find((x: any) => x.asset?.symbol === "USDC");
   if (jl) rows.push({ id: "lend:jlUSDC", kind: "yield", symbol: "jlUSDC", name: "Jupiter Lend USDC", underlying: null, issuer: null, venue: "Jupiter Lend Earn", mint: jl.address, liquidity: "tradeable", us_persons: "yes", can_short: false, expires_at: null, data: {} });
   const tally = new Map<string, Map<string, number>>();
   const bump = (kind: string, k: string) => {

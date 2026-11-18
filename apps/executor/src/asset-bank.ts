@@ -69,12 +69,20 @@ if (args.once) {
   process.exit(Object.values(res).every((r) => r.ok) ? 0 : 1);
 }
 
+// On a stop, tiers that are running get STOP_GRACE_MS to finish; then the bank is flushed with
+// what they've written so far (each write is atomic) and the process exits, instead of systemd
+// killing it after 90 s and losing the unflushed changes.
+const STOP_GRACE_MS = 10_000;
 const ctl = new AbortController();
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => ctl.abort());
 const report = setInterval(() => console.log(`${stamp()} requests/hour by host: ${JSON.stringify(counter.perHour())}`), 15 * 60_000);
 const liq = setInterval(syncLiq, 15 * 60_000);
-await poller.scheduler(tiers).loop(ctl.signal);
+const graceOver = new Promise<"grace">((resolve) =>
+  ctl.signal.addEventListener("abort", () => setTimeout(() => resolve("grace"), STOP_GRACE_MS).unref(), { once: true }),
+);
+const ended = await Promise.race([poller.scheduler(tiers).loop(ctl.signal), graceOver]);
 clearInterval(report);
 clearInterval(liq);
-await poller.flush();
-console.log(`${stamp()} asset-bank: stopped, bank flushed`);
+await poller.flush().catch((e) => log(`asset-bank: final flush failed: ${e instanceof Error ? e.message : e}`));
+console.log(`${stamp()} asset-bank: stopped${ended === "grace" ? " (tiers still running were cut off)" : ""}, bank flushed`);
+process.exit(0);

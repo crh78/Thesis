@@ -11,9 +11,17 @@ Wants=thesis-fork-up.service network-online.target
 User=thesis
 WorkingDirectory=/opt/thesis
 EnvironmentFile=/etc/thesis/executor.env
-ExecStart=/usr/bin/pnpm --filter @thesis/executor marker
+# Node directly (`pnpm --filter @thesis/executor marker` runs the same file), without the pnpm
+# wrapper. On SIGTERM it stops within about 15 s.
+ExecStart=/usr/bin/node apps/executor/src/marker.ts
 Restart=always
 RestartSec=30
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/thesis/.data
+ProtectHome=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

@@ -26,6 +26,7 @@
     "fork:exit-e2e": "node scripts/fork/exit-e2e.ts",
     "fork:ticket-e2e": "node scripts/fork/ticket-e2e.ts",
     "fork:gemini-e2e": "node scripts/fork/gemini-e2e.ts",
+    "fork:cards-e2e": "node scripts/fork/cards-e2e.ts",
     "fork:phoenix-e2e": "node scripts/fork/phoenix-e2e.ts",
     "fork:phoenix-api-e2e": "node scripts/fork/phoenix-api-e2e.ts",
     "fork:friend": "node scripts/fork/friend.ts"

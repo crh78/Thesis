@@ -20,8 +20,8 @@
 //   MARKER_INTERVAL_SEC         300
 //   ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY   US stock prices (required)
 //   GEMINI_PROXY_TOKEN          prediction picks (without it they keep their last mark)
-//   JUPITER_API_KEY             only with MARKER_JUPITER_KEYED=1 (default: the keyless lite-api,
-//                               so the marker doesn't spend the asset bank's budget)
+//   JUPITER_API_KEY             token prices and Jupiter Lend on api.jup.ag (required; the keyless
+//                               lite-api is being retired). One batched call per 50 mints a run.
 //   ASSET_BANK_SINK / ASSET_BANK_FILE   the asset bank: units per token, multipliers, Phoenix units
 //   SOLANA_RPC_URL              default the local fork; positions are skipped when it's down
 //   SETTLER_CHAIN_NETWORK       chain_positions network (solana-mainnet-fork for a local RPC)
@@ -30,6 +30,7 @@ import { geminiProxy } from "@thesis/venues/gemini";
 import { PhoenixVenue } from "@thesis/venues/phoenix";
 import { envVar } from "../../../packages/venues/registry/src/lib/env.ts";
 import { AlpacaStocks } from "./settler/sources.ts";
+import { sleepUnless } from "./http.ts";
 import { planTake, resolvePick, type Base, type LegUpdate, type PickAsset } from "./marker/mark.ts";
 import { bankLookup, Db, historicalBase, snapshot } from "./marker/live.ts";
 import { chainReader, FRESH_MS, MissingAccounts, positionExit, positionLiveBps } from "./marker/positions.ts";
@@ -54,7 +55,7 @@ const marksUrl = envVar("MARKS_URL") ?? `${supabaseUrl}/functions/v1/marks`;
 const marksToken = dry ? null : need("MARKS_TOKEN");
 const alpacaHeaders = { "APCA-API-KEY-ID": need("ALPACA_API_KEY_ID"), "APCA-API-SECRET-KEY": need("ALPACA_API_SECRET_KEY") };
 const stocks = new AlpacaStocks(alpacaHeaders["APCA-API-KEY-ID"], alpacaHeaders["APCA-API-SECRET-KEY"]);
-const keyed = envVar("MARKER_JUPITER_KEYED") === "1" && envVar("JUPITER_API_KEY");
+const jupiterApiKey = need("JUPITER_API_KEY");
 const rpcUrl = envVar("SOLANA_RPC_URL") ?? "http://127.0.0.1:18899";
 const local = ["127.0.0.1", "localhost"].includes(new URL(rpcUrl).hostname);
 const network = envVar("SETTLER_CHAIN_NETWORK") ?? (local ? "solana-mainnet-fork" : "solana-mainnet");
@@ -96,7 +97,7 @@ async function run() {
   }
 
   const all = [...assets.values()].flatMap((m) => [...m.values()]);
-  const snap = await snapshot(all, { alpacaHeaders, phoenix, gemini, log, cards, ...(keyed ? { jupiterBase: "https://api.jup.ag", jupiterHeaders: { "x-api-key": keyed } } : {}) }, [...extraPerps]);
+  const snap = await snapshot(all, { alpacaHeaders, phoenix, gemini, log, cards, jupiterApiKey }, [...extraPerps]);
 
   // Open positions' live returns, first: the author's buy-in's is the take's return.
   const posRows: { network: string; address: string; live_return_bps: number }[] = [];
@@ -157,15 +158,27 @@ async function run() {
     if (dry && args.includes("--json")) console.log(JSON.stringify(marks, null, 1));
     return;
   }
-  const r = await fetch(marksUrl, { method: "POST", headers: { "content-type": "application/json", "x-marks-token": marksToken! }, body: JSON.stringify({ marks }) });
+  const r = await fetch(marksUrl, { method: "POST", headers: { "content-type": "application/json", "x-marks-token": marksToken! }, body: JSON.stringify({ marks }), signal: AbortSignal.timeout(60_000) });
   const body = await r.text();
   if (!r.ok) throw new Error(`marks: HTTP ${r.status} ${body.slice(0, 200)}`);
   log(`written: ${body}`);
 }
 
 const intervalMs = Number(envVar("MARKER_INTERVAL_SEC") ?? 300) * 1000;
-let stop = false;
-for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => (stop = true));
+// A stop ends the 5-minute wait at once. A run in progress gets STOP_GRACE_MS to finish (its
+// marks are rewritten by the next run anyway), then the process exits instead of being killed.
+const STOP_GRACE_MS = 15_000;
+const stopping = new AbortController();
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    if (stopping.signal.aborted) return;
+    stopping.abort();
+    setTimeout(() => {
+      log("stopped mid-run");
+      process.exit(0);
+    }, STOP_GRACE_MS).unref();
+  });
+}
 do {
   try {
     await run();
@@ -173,5 +186,5 @@ do {
     log(`run failed: ${e instanceof Error ? e.message : e}`);
     if (once) process.exit(1);
   }
-  if (!once && !stop) await new Promise((r) => setTimeout(r, intervalMs));
-} while (!once && !stop);
+  if (!once && !stopping.signal.aborted) await sleepUnless(intervalMs, stopping.signal);
+} while (!once && !stopping.signal.aborted);

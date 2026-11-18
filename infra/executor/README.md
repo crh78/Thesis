@@ -39,9 +39,32 @@ Always Free Arm (2 OCPUs, 12 GB) runs always-on at no cost, and the stack is sma
   service, and the services run as `thesis`, which can't open it.
 - **The settler key** is a systemd credential. `/etc/thesis/settler.json` stays root-only, and only
   `thesis-settler` gets a copy, in its private credentials directory.
+- **On the fork,** `fork:up` also keeps the fork's own copy of the settler key in
+  `/opt/thesis/.data/fork/settler.json` (with the admin, allowlist-admin and app-payer keys). Every
+  service runs as `thesis`, so the fork API can read it. `fork:up` needs that file (it funds the key
+  and names it in `init_config` on a fresh fork, and makes a new one if it's missing), and
+  `fork:settler-e2e` and `fork:jupiter-e2e` sign with it, so it stays. It's a fork-only key; on
+  mainnet the settler key exists only as the credential.
 - **On mainnet,** the settler key moves to OCI Vault (see "Settler key in OCI Vault" below). The VM
   fetches it at boot with its own instance identity, so no OCI credential is stored on it. The
   key lives only in memory-backed `/run/thesis`.
+
+## Hardening
+
+- **No Docker for `thesis`.** Only `thesis-surfpool` uses Docker, and it runs as root. The
+  `docker` group is root-equivalent, so `setup.sh` and `update.sh` take `thesis` out of it.
+- **Each Thesis service** (`fork-up`, `fork-api`, `relay`, `settler`, `asset-bank`, `marker`) runs
+  with `NoNewPrivileges=yes`, `ProtectSystem=strict` (the whole filesystem read-only, `/opt/thesis`
+  included) with `ReadWritePaths=/opt/thesis/.data`, `ProtectHome=yes` and `PrivateTmp=yes`.
+  Everything they write is under `.data`: the fork's keys and state, the asset bank, the settler's
+  audit log, the relay's state.
+- **Node runs each service directly** (`/usr/bin/node apps/executor/src/settler.ts`, …), the same
+  file the `pnpm` script runs, without a ~135 MB `pnpm` wrapper per service. `pnpm` is still used
+  for `pnpm install` and the e2e suites.
+- **The Helius key stays off command lines.** `thesis-surfpool` passes `FORK_DATASOURCE_RPC_URL` to
+  Surfpool as the `SURFPOOL_DATASOURCE_RPC_URL` environment variable (Surfpool 1.7.0 reads it in
+  place of `--rpc-url`), and drops any journal line carrying `api-key=`.
+- Still open (before phase 2): a separate user and env file per service, and code owned by root.
 
 ## Setting it up
 
@@ -55,7 +78,8 @@ Always Free Arm (2 OCPUs, 12 GB) runs always-on at no cost, and the stack is sma
    smaller shape, or upgrade the account to Pay As You Go (the free allowance stays free).
 3. **Run the setup script.** `ssh -A ubuntu@<public IP>`, then
    `git clone <repo-url> ~/thesis && sudo bash ~/thesis/infra/executor/setup.sh`.
-   It installs Docker, Node 24, pnpm and Tailscale, creates the `thesis` user and the app in
+   It installs Docker, Node 24, pnpm and Tailscale, creates the `thesis` user (not in the `docker`
+   group) and the app in
    `/opt/thesis` (cloned from `~/thesis`), pulls the Surfpool image, and installs the units. It
    starts nothing.
 4. **Join Tailscale** with `sudo tailscale up --ssh --hostname=thesis-executor` and approve the
@@ -70,7 +94,7 @@ Always Free Arm (2 OCPUs, 12 GB) runs always-on at no cost, and the stack is sma
      `thesis-asset-bank` and wait for it before starting `thesis-fork-api`.
 7. **Start the fork side** with
    `sudo systemctl enable --now thesis-surfpool thesis-fork-up thesis-asset-bank thesis-fork-api thesis-relay`.
-   `thesis-fork-up` runs `pnpm fork:up` once Surfpool answers. That deploys the program, creates
+   `thesis-fork-up` runs `scripts/fork/up.ts` (`pnpm fork:up`) once Surfpool answers. That deploys the program, creates
    the fork's keys in `/opt/thesis/.data/fork/`, and sets up the config, the badge base and the
    lookup table.
 8. **Hand the settler its key, and start it:**
@@ -88,7 +112,7 @@ Always Free Arm (2 OCPUs, 12 GB) runs always-on at no cost, and the stack is sma
 
 ## Mainnet RPC for the fork
 
-Set `FORK_DATASOURCE_RPC_URL` in `/etc/thesis/executor.env` (Helius free plan today; not the free QuickNode plan, which caps `getMultipleAccounts` at 5), then `sudo systemctl restart thesis-surfpool thesis-fork-up`. Public mainnet rate-limits heavy use (`Failed to fetch accounts`).
+Set `FORK_DATASOURCE_RPC_URL` in `/etc/thesis/executor.env` (Helius free plan today; not the free QuickNode plan, which caps `getMultipleAccounts` at 5), then `sudo systemctl restart thesis-surfpool thesis-fork-up`. Public mainnet rate-limits heavy use (`Failed to fetch accounts`). Restarting Surfpool starts a fresh fork (its state is in memory). The unit hands the URL to Surfpool through the environment, never its command line; if a key was ever shown in `ps` or the journal, rotate it in the provider's dashboard, put the new URL in the env file and restart as above.
 
 ## Settler key in OCI Vault
 
@@ -124,8 +148,11 @@ against a real Vault.
 - **Updating** (the same day a PR merges that touches the fork's code; see CLAUDE.md, "The one
   fork"): over `ssh -A`, run `git -C ~/thesis fetch origin && git -C ~/thesis checkout --detach origin/main`,
   then `sudo bash ~/thesis/infra/executor/update.sh`. It moves `/opt/thesis` to that commit, runs
-  `pnpm install`, reinstalls the units and restarts the running services. For a new program
-  build, copy `thesis.so` first and add `--fresh-fork`, which resets the fork.
+  `pnpm install`, reinstalls the units and restarts the running services, then checks that each
+  one is still active and the fork API answers `/health`. On a failure it names the unit, its
+  `journalctl` line and the command to go back to the previous commit, and exits 1. For a new
+  program build, copy `thesis.so` first and add `--fresh-fork`, which resets the fork. A change to
+  `thesis-surfpool.service` takes effect only when Surfpool restarts, which also resets the fork.
 - **Running e2e suites on the VM**, with the services' environment:
   ```sh
   sudo systemd-run --quiet --wait --pipe --collect -p EnvironmentFile=/etc/thesis/executor.env \

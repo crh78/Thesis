@@ -7,7 +7,7 @@
 //   SOLANA_RPC_URL              default the local fork, http://127.0.0.1:18899
 //   SETTLER_KEYPAIR             Solana CLI keypair file; default <repo>/.data/fork/settler.json
 //   ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY   US stock prices and splits (required)
-//   JUPITER_API_KEY             issuer token prices (optional: keyless lite-api otherwise)
+//   JUPITER_API_KEY             issuer token prices and yield legs, on api.jup.ag (required)
 //   COLLECTOR_CRYPT_API_KEY     optional ccsk_ key for card legs' insured values (higher rate limits)
 //   SETTLER_MIN_LIQUIDITY_USD   50000 (PRICEABLE_MIN_POOLED_USD): token price used only with this much pooled liquidity
 //   SETTLER_LIVE_WINDOW_SEC     300: token prices only within 5 minutes of the trade or horizon
@@ -24,6 +24,9 @@
 //   SETTLER_CHAIN_NETWORK       chain_positions network: solana-mainnet-fork for a local RPC,
 //                               solana-mainnet otherwise
 //   SETTLER_FULL_SCAN_SEC       600: the full program scan's period, a backstop for the Stream
+//
+// Every outbound read times out after 15 s (src/http.ts), so one hung source can't stall a tick
+// past the live window.
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Connection, Keypair } from "@solana/web3.js";
@@ -35,6 +38,7 @@ import { CollectorCryptClient, cardPrice } from "@thesis/venues/collector-crypt"
 import { decodeTrader, PhoenixVenue } from "@thesis/venues/phoenix";
 import { PublicKey } from "@solana/web3.js";
 import { envVar } from "../../../packages/venues/registry/src/lib/env.ts";
+import { sleepUnless, timedFetch } from "./http.ts";
 import {
   AlpacaStocks,
   DEFAULT_MIN_RECEIVED_RATIO,
@@ -62,6 +66,9 @@ const required = (k: string) => {
 };
 
 const once = process.argv.includes("--once");
+const jupiterKey = required("JUPITER_API_KEY");
+// For the venue clients that take a fetch function (Gemini proxy, Collector Crypt, Jupiter Lend).
+const fetchWithTimeout = timedFetch();
 const rpcUrl = envVar("SOLANA_RPC_URL") ?? "http://127.0.0.1:18899";
 const keyPath = envVar("SETTLER_KEYPAIR") ?? join(REPO, ".data/fork/settler.json");
 const settler = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keyPath, "utf8"))));
@@ -82,7 +89,7 @@ let bankLoadedAt = Date.now();
 function geminiEvents() {
   try {
     const proxy = geminiProxy(envVar);
-    return new GeminiEvents((ticker) => fetchGeminiEvent(proxy, ticker));
+    return new GeminiEvents((ticker) => fetchGeminiEvent(proxy, ticker, fetchWithTimeout));
   } catch (e) {
     log(`prediction legs won't be priced: ${e instanceof Error ? e.message : e}`);
     return undefined;
@@ -133,7 +140,7 @@ const audit = (() => {
 })();
 if (audit instanceof RemoteAuditLog) log(`price audit: ${await audit.load()} entry docs read back, ${audit.backfill()} local docs queued`);
 
-const cards = new CollectorCryptClient({ apiKey: envVar("COLLECTOR_CRYPT_API_KEY") });
+const cards = new CollectorCryptClient({ apiKey: envVar("COLLECTOR_CRYPT_API_KEY"), fetchFn: fetchWithTimeout });
 const s = new Settler({
   program,
   connection,
@@ -144,13 +151,13 @@ const s = new Settler({
   sources: {
     // Trades, plus corporate actions: splits for tokens with no multiplier (pricing.ts).
     stocks: new AlpacaStocks(required("ALPACA_API_KEY_ID"), required("ALPACA_API_SECRET_KEY")),
-    tokens: new JupiterPrices(envVar("JUPITER_API_KEY")),
+    tokens: new JupiterPrices(jupiterKey),
     predictions: geminiEvents(),
     phoenix,
     // Yield legs (scored): one vault share's value.
     lend: {
       shareValue: async (mint: string) => {
-        const v = await jupiterLendShareValue(mint, { apiKey: envVar("JUPITER_API_KEY") });
+        const v = await jupiterLendShareValue(mint, { apiKey: jupiterKey, fetchFn: fetchWithTimeout });
         return v && { usdcPerShare: v.usdcPerShare, at: Math.floor(Date.now() / 1000), raw: v.raw };
       },
     },
@@ -178,8 +185,10 @@ const s = new Settler({
 
 log(`settler ${settler.publicKey.toBase58()} on ${new URL(rpcUrl).host}, bank from ${sink.name}${open ? `, open positions from ${open.name}` : ""}`);
 const intervalMs = num("SETTLER_INTERVAL_SEC", 20) * 1000;
-let stop = false;
-for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => (stop = true));
+// A stop ends the wait between ticks at once; a tick that's running finishes first.
+const stopping = new AbortController();
+for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => stopping.abort());
+const stopped = () => stopping.signal.aborted;
 do {
   if (Date.now() - bankLoadedAt > 10 * 60_000) {
     bank = bankIndex(await loadBankState(sink));
@@ -192,6 +201,6 @@ do {
     log(`tick failed: ${e instanceof Error ? e.message : e}`);
     if (once) process.exit(1);
   }
-  if (!once && !stop) await new Promise((r) => setTimeout(r, intervalMs));
-} while (!once && !stop);
+  if (!once && !stopped()) await sleepUnless(intervalMs, stopping.signal);
+} while (!once && !stopped());
 if (audit instanceof RemoteAuditLog) await audit.close();

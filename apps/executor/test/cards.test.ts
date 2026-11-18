@@ -71,6 +71,14 @@ test("not yet: before the moment, or a card the bank hasn't learned", async () =
   assert.deepEqual(await priceCard({ index: 0, card: null }, M, M + 1, RULES, src, null), { ok: false, retry: true, reason: "the leg's card isn't in the asset bank yet" });
 });
 
+test("a card the bank never learns stops being retried at the price deadline", async () => {
+  const src = source({ insuredValueUsd: 70, at: M, raw: {} });
+  const atDeadline = await priceCard({ index: 0, card: null }, M, M + RULES.maxDelaySecs, RULES, src, null);
+  assert.equal(!atDeadline.ok && atDeadline.retry, true);
+  const past = await priceCard({ index: 0, card: null }, M, M + RULES.maxDelaySecs + 1, RULES, src, null);
+  assert.deepEqual(past, { ok: false, retry: false, reason: "the leg's card never reached the asset bank before the price deadline" });
+});
+
 test("priceLeg sends card legs here, through the cards source", async () => {
   const sources = { stocks: {} as Sources["stocks"], tokens: {} as Sources["tokens"], cards: source({ insuredValueUsd: 1250, at: M + 5, raw: {} }) } as Sources;
   const out = await priceLeg({ index: 2, kind: "card", underlying: null, token: null, card: bankRef() }, M, M + 5, RULES, sources, null, "entry");

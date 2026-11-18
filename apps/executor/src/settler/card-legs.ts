@@ -30,10 +30,11 @@ export async function priceCard(
 ): Promise<LegOutcome> {
   // The entry's basis names the card; an exit with none (a lost audit log) finds it through the bank.
   const cardId = entry?.source === "card" ? entry.cardId : (leg.card?.cardId ?? null);
-  if (!cardId) return { ok: false, retry: true, reason: "the leg's card isn't in the asset bank yet" };
-  if (nowSec < momentSec) return { ok: false, retry: true, reason: "moment not reached" };
   const until = momentSec + rules.maxDelaySecs;
   const open = nowSec <= until;
+  // Waits for the bank only while the price window is open; past it the leg stays unpriced.
+  if (!cardId) return { ok: false, retry: open, reason: open ? "the leg's card isn't in the asset bank yet" : "the leg's card never reached the asset bank before the price deadline" };
+  if (nowSec < momentSec) return { ok: false, retry: true, reason: "moment not reached" };
   const basis: EntryBasis = entry?.source === "card" ? entry : { source: "card", cardId };
   const quote = (price: number, publishedAt: number, inputs: Record<string, unknown>): LegOutcome => ({
     ok: true,

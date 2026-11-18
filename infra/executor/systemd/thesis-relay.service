@@ -11,9 +11,16 @@ User=thesis
 WorkingDirectory=/opt/thesis
 EnvironmentFile=/etc/thesis/executor.env
 Environment=FORK_RPC_URL=http://127.0.0.1:18899 FORK_WS_URL=ws://127.0.0.1:18900
-ExecStart=/usr/bin/pnpm fork:relay
+# Node directly (`pnpm fork:relay` runs the same file), without the pnpm wrapper. It keeps the last
+# transaction it delivered in .data/fork/relay-state.json and back-fills from it on start.
+ExecStart=/usr/bin/node infra/quicknode/fork-relay.ts
 Restart=always
 RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/thesis/.data
+ProtectHome=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

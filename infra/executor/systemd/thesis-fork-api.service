@@ -11,9 +11,17 @@ User=thesis
 WorkingDirectory=/opt/thesis
 EnvironmentFile=/etc/thesis/executor.env
 Environment=FORK_HOST=127.0.0.1 FORK_API_PORT=18901 FORK_BLINK_PORT=18902
-ExecStart=/usr/bin/pnpm fork:api
+# Node directly (`pnpm fork:api` runs the same file), without the pnpm wrapper.
+ExecStart=/usr/bin/node scripts/fork/api.ts
 Restart=always
 RestartSec=5
+# Public through Funnel: it writes only under .data, can't gain privileges, and sees no home
+# directories (infra/executor/README.md, "Hardening").
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/thesis/.data
+ProtectHome=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

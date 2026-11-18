@@ -163,7 +163,7 @@ THESIS_WEBHOOK_URL=http://127.0.0.1:54321/functions/v1/quicknode-stream \
 
 - Requests are signed like QuickNode's (`X-QN-Nonce`, `X-QN-Timestamp`, `X-QN-Signature`), so the webhook's check runs on the fork too. `THESIS_WEBHOOK_AUTH` is sent as `Authorization`.
 - `network` is `"solana-mainnet-fork"`, so fork rows stay apart from real ones.
-- Each delivery holds one transaction, and there's no backfill: anything that happens while the relay is down isn't delivered. Failed deliveries retry 3 times, then are skipped.
+- Each delivery holds one transaction. The relay keeps the last transaction it handled in `.data/fork/relay-state.json` (`FORK_RELAY_STATE`) and, on start and on every reconnect, back-fills everything since it (`getSignaturesForAddress`, oldest first, up to 5,000), so restarts lose nothing. The first start with no state begins at the newest transaction. Failed deliveries are retried with backoff (1 s doubling to a minute) for as long as it takes and keep their place in the queue; 401/403/404 are retried too. Only a payload the webhook can't take (400, 413, 422), a back-filled transaction `getTransaction` never returns (5 minutes) or a relaying error is given up, with a loud log naming it, and the saved position then stays before it, so a restart retries it. A state file from another fork (its lookup table differs) is ignored, and `update.sh --fresh-fork` removes it. Past 10,000 queued transactions new ones wait for the next back-fill.
 - `FORK_RELAY_RECORD=<file>` records raw notifications (how the relay's test fixture was made).
 
 ## Phoenix perps

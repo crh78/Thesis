@@ -1,10 +1,12 @@
 // Price sources for the settler: Alpaca (US stock trades, free IEX feed) and Jupiter Price v3
 // (issuer tokens). Each call returns the raw response next to the parsed price, so the settler
-// can hash exactly what it priced from.
+// can hash exactly what it priced from. Every read times out (http.ts), and Jupiter is read in
+// batches of up to 50 mints with a per-tick cache, resting after a 429.
 
 import type { ScaledUi } from "@thesis/venues/bank";
+import { CoolDown, getJson, type FetchFn } from "../http.ts";
 
-export type FetchFn = typeof fetch;
+export type { FetchFn };
 
 /** Jupiter Price v3's `scaledUiConfig` (ISO effective time) as a ScaledUi, or null. */
 export function parseScaledUiConfig(cfg: any): ScaledUi | null {
@@ -49,22 +51,15 @@ export interface StockSource {
 
 export interface TokenSource {
   price(mint: string): Promise<TokenPrice | null>;
+  /**
+   * Reads these mints now, in as few calls as it can, so this tick's `price` calls answer from
+   * memory. Optional: a source without it is read one mint at a time.
+   */
+  prefetch?(mints: string[]): Promise<void>;
 }
 
 const toSec = (iso: string) => Math.floor(Date.parse(iso) / 1000);
 const iso = (sec: number) => new Date(sec * 1000).toISOString();
-
-async function getJson(fetchFn: FetchFn, url: string, headers: Record<string, string>): Promise<any> {
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetchFn(url, { headers });
-    if (res.ok) return res.json();
-    if ((res.status === 429 || res.status >= 500) && attempt < 3) {
-      await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
-      continue;
-    }
-    throw new Error(`${new URL(url).host}${new URL(url).pathname}: HTTP ${res.status}`);
-  }
-}
 
 type AlpacaTrade = { p: number; t: string; s?: number; x?: string; c?: string[]; i?: number };
 
@@ -80,18 +75,21 @@ export class AlpacaStocks implements StockSource {
     this.base = base;
     this.#headers = { "APCA-API-KEY-ID": keyId, "APCA-API-SECRET-KEY": secret };
   }
+  #opts() {
+    return { headers: this.#headers, fetchFn: this.fetchFn };
+  }
 
   async firstTradeAtOrAfter(symbol: string, fromSec: number, untilSec: number): Promise<Observation | null> {
     if (untilSec < fromSec) return null;
     const qs = new URLSearchParams({ start: iso(fromSec), end: iso(untilSec), limit: "1", sort: "asc", feed: this.feed });
-    const j = await getJson(this.fetchFn, `${this.base}/v2/stocks/${encodeURIComponent(symbol)}/trades?${qs}`, this.#headers);
+    const j = await getJson(`${this.base}/v2/stocks/${encodeURIComponent(symbol)}/trades?${qs}`, this.#opts());
     const t: AlpacaTrade | undefined = j?.trades?.[0];
     return t && typeof t.p === "number" ? { price: t.p, at: toSec(t.t), raw: { symbol, feed: this.feed, trade: t } } : null;
   }
 
   async latestTrade(symbol: string): Promise<Observation | null> {
     const qs = new URLSearchParams({ symbols: symbol, feed: this.feed });
-    const j = await getJson(this.fetchFn, `${this.base}/v2/stocks/trades/latest?${qs}`, this.#headers);
+    const j = await getJson(`${this.base}/v2/stocks/trades/latest?${qs}`, this.#opts());
     const t: AlpacaTrade | undefined = j?.trades?.[symbol];
     return t && typeof t.p === "number" ? { price: t.p, at: toSec(t.t), raw: { symbol, feed: this.feed, trade: t } } : null;
   }
@@ -108,7 +106,7 @@ export class AlpacaStocks implements StockSource {
     const hit = this.#splits.get(key);
     if (hit && Date.now() - hit.at < 3_600_000) return hit.value.filter((x) => x.exAt > fromSec && x.exAt <= untilSec);
     const qs = new URLSearchParams({ symbols: symbol, types: "forward_split,reverse_split", start: day(fromSec), end: day(untilSec) });
-    const j = await getJson(this.fetchFn, `${this.base}/v1/corporate-actions?${qs}`, this.#headers);
+    const j = await getJson(`${this.base}/v1/corporate-actions?${qs}`, this.#opts());
     const ca = j?.corporate_actions ?? {};
     const all: Split[] = [...(ca.forward_splits ?? []), ...(ca.reverse_splits ?? [])]
       .filter((x: any) => x.symbol === symbol && Number(x.new_rate) > 0 && Number(x.old_rate) > 0 && typeof x.ex_date === "string")
@@ -120,23 +118,62 @@ export class AlpacaStocks implements StockSource {
   #splits = new Map<string, { at: number; value: Split[] }>();
 }
 
-/** Jupiter Price v3. With JUPITER_API_KEY it uses api.jup.ag, otherwise the keyless lite-api. */
+/** Price v3 takes up to 50 ids per call. */
+export const JUPITER_PRICE_BATCH = 50;
+
+/**
+ * Jupiter Price v3, on api.jup.ag with JUPITER_API_KEY (the keyless lite-api is being retired).
+ *
+ * The settler calls `prefetch` once a tick, after it reads the chain's clock, with every mint it
+ * may price live: a burst of positions costs one call per 50 mints instead of one per leg. An
+ * answer is reused for `cacheSecs` (less than a tick), so no price is older than the tick that
+ * signs it, and every leg is still priced at or after its own moment. A 429 rests the source
+ * (CoolDown) instead of being retried.
+ */
 export class JupiterPrices implements TokenSource {
-  #base: string;
   #headers: Record<string, string>;
+  #cache = new Map<string, { at: number; price: TokenPrice | null }>();
+  #cool: CoolDown;
   fetchFn: FetchFn;
   now: () => number;
-  constructor(apiKey: string | null, fetchFn: FetchFn = fetch, now = () => Math.floor(Date.now() / 1000)) {
+  base: string;
+  cacheSecs: number;
+  constructor(apiKey: string, fetchFn: FetchFn = fetch, now = () => Math.floor(Date.now() / 1000), o: { base?: string; cacheSecs?: number } = {}) {
+    if (!apiKey) throw new Error("JUPITER_API_KEY is not set: token prices come from the keyed api.jup.ag");
     this.fetchFn = fetchFn;
     this.now = now;
-    this.#base = apiKey ? "https://api.jup.ag" : "https://lite-api.jup.ag";
-    this.#headers = apiKey ? { "x-api-key": apiKey } : {};
+    this.base = o.base ?? "https://api.jup.ag";
+    this.cacheSecs = o.cacheSecs ?? 15;
+    this.#headers = { "x-api-key": apiKey };
+    this.#cool = new CoolDown(`${new URL(this.base).host}/price/v3`, { now: () => this.now() * 1000 });
+  }
+
+  async prefetch(mints: string[]): Promise<void> {
+    this.#cache.clear();
+    const uniq = [...new Set(mints)];
+    for (let i = 0; i < uniq.length; i += JUPITER_PRICE_BATCH) await this.#read(uniq.slice(i, i + JUPITER_PRICE_BATCH));
   }
 
   async price(mint: string): Promise<TokenPrice | null> {
-    const j = await getJson(this.fetchFn, `${this.#base}/price/v3?ids=${mint}`, this.#headers);
-    const p = j?.[mint];
-    if (!p || typeof p.usdPrice !== "number") return null;
-    return { mint, usdPrice: p.usdPrice, liquidityUsd: typeof p.liquidity === "number" ? p.liquidity : 0, at: this.now(), scaledUi: parseScaledUiConfig(p.scaledUiConfig), raw: { mint, response: p } };
+    const hit = this.#cache.get(mint);
+    if (hit && this.now() - hit.at <= this.cacheSecs) return hit.price;
+    await this.#read([mint]);
+    return this.#cache.get(mint)?.price ?? null;
+  }
+
+  async #read(mints: string[]): Promise<void> {
+    // A 5xx is retried once; a 429 isn't: it rests the source.
+    const j = await this.#cool.run(() =>
+      getJson(`${this.base}/price/v3?ids=${mints.join(",")}`, { headers: this.#headers, fetchFn: this.fetchFn, tries: 1, retryStatus: (s) => s >= 500 }),
+    );
+    const at = this.now();
+    for (const mint of mints) {
+      const p = j?.[mint];
+      const price: TokenPrice | null =
+        p && typeof p.usdPrice === "number"
+          ? { mint, usdPrice: p.usdPrice, liquidityUsd: typeof p.liquidity === "number" ? p.liquidity : 0, at, scaledUi: parseScaledUiConfig(p.scaledUiConfig), raw: { mint, response: p } }
+          : null;
+      this.#cache.set(mint, { at, price });
+    }
   }
 }

@@ -227,7 +227,8 @@ async function startSurfpool(): Promise<void> {
   const datasource = envVar("FORK_DATASOURCE_RPC_URL") ?? undefined;
   const args = [
     "start",
-    ...(datasource ? ["--rpc-url", datasource] : ["--network", "mainnet"]),
+    // The datasource URL (with its key) goes through SURFPOOL_DATASOURCE_RPC_URL, not argv, so `ps` doesn't show it.
+    ...(datasource ? [] : ["--network", "mainnet"]),
     "--host", HOST,
     "--port", String(RPC_PORT),
     "--ws-port", String(WS_PORT),
@@ -237,10 +238,13 @@ async function startSurfpool(): Promise<void> {
     "--log-path", `${DATA_DIR}/logs`,
     ...(process.env.SURFPOOL_ARGS?.split(" ").filter(Boolean) ?? []),
   ];
-  console.log(`• Starting ${bin} ${args.join(" ").replace(/(--rpc-url )\S+/, "$1<FORK_DATASOURCE_RPC_URL>")}`);
+  console.log(`• Starting ${bin} ${args.join(" ")}${datasource ? " (datasource: FORK_DATASOURCE_RPC_URL)" : ""}`);
   const log = openSync(PATHS.log, "a");
   // Run from .data/fork so Surfpool doesn't pick up a txtx.yml or Anchor.toml elsewhere.
-  const child = spawn(bin, args, { cwd: DATA_DIR, detached: true, stdio: ["ignore", log, log] });
+  const env = { ...process.env };
+  if (datasource) env.SURFPOOL_DATASOURCE_RPC_URL = datasource;
+  else delete env.SURFPOOL_DATASOURCE_RPC_URL; // --network mainnet: an inherited URL would conflict with it
+  const child = spawn(bin, args, { cwd: DATA_DIR, env, detached: true, stdio: ["ignore", log, log] });
   closeSync(log);
   let exited: number | null = null;
   child.on("exit", (code) => (exited = code ?? -1));
