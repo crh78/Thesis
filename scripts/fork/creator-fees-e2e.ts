@@ -72,6 +72,8 @@ async function e2e(): Promise<void> {
     const author = Keypair.generate();
     const backer = Keypair.generate();
     const a = author.publicKey.toBase58();
+    // Only a take's author can publish it: these takes are the author's.
+    for (const t of takes) t.author_wallet = a;
     const fader = Keypair.generate();
     const b = backer.publicKey.toBase58();
     const f = fader.publicKey.toBase58();

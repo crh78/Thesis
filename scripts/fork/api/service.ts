@@ -97,6 +97,18 @@ type Build = {
   cleanup?: number;
 };
 
+/** What's known about one take's positions (see ForkService#positionsOf). */
+type PositionEntry = {
+  keys: Set<string>;
+  /** Position → owner, for positions open and not sold, as last read: the owner index. */
+  owners: Map<string, string>;
+  /** When the last program-account scan finished (0: never). */
+  scannedAt: number;
+  /** When this service last noted a trade on the take. */
+  tradedAt: number;
+  scan: Promise<void> | null;
+};
+
 /** Abandoned tickets cancelled in one cleanup transaction, at most. */
 const CLEANUP_TICKETS = 6;
 
@@ -110,12 +122,45 @@ type BlinkCheckout = {
 
 const BLINK_MAX_LEGS = 3;
 const DEMO_AUTHOR_BUY_IN_USD = 10;
-const BUILD_TTL_MS = 90_000;
+/**
+ * How long a build can be submitted. A blockhash lives ~150 blocks (~60 s), counted from when
+ * the build fetched it, so a build must expire before its blockhash does.
+ */
+export const BUILD_TTL_MS = 55_000;
 /** How long a receipt waits for a cold route check before answering with what it knows. */
 const ROUTE_CHECK_WAIT_MS = 1_500;
 const TAKE_CACHE_MS = 15_000;
-/** How often a take's positions are rescanned from program accounts (see #positionsOf). */
-const POSITION_SCAN_MS = 30_000;
+/**
+ * How often a take's positions are rescanned from program accounts (see #positionsOf): every few
+ * minutes, or every 30 s for a while after a trade on that take. Each scan is a getProgramAccounts
+ * that Surfpool forwards to its mainnet datasource (Helius credits).
+ */
+const POSITION_SCAN_MS = 5 * 60_000;
+const POSITION_SCAN_BUSY_MS = 30_000;
+const BUSY_AFTER_TRADE_MS = 5 * 60_000;
+/** Blockhashes remembered with their last valid block height, so a send confirms against its own. */
+const BLOCKHASHES_KEPT = 500;
+
+/**
+ * `connection`, remembering each blockhash it hands out with its last valid block height, so a
+ * transaction built on one confirms against that height instead of a fresher blockhash's.
+ */
+function trackBlockhashes<C extends ServiceOpts["connection"]>(connection: C, seen: Map<string, number>): C {
+  return new Proxy(connection, {
+    get(target, prop) {
+      if (prop === "getLatestBlockhash") {
+        return async (...args: Parameters<C["getLatestBlockhash"]>) => {
+          const r = await target.getLatestBlockhash(...args);
+          seen.set(r.blockhash, r.lastValidBlockHeight);
+          if (seen.size > BLOCKHASHES_KEPT) seen.delete(seen.keys().next().value!);
+          return r;
+        };
+      }
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  });
+}
 
 export class ForkService {
   #o: ServiceOpts;
@@ -133,8 +178,11 @@ export class ForkService {
   #inFlight = new Set<string>();
   #blinkCheckouts = new Map<string, BlinkCheckout>();
   #log: (m: string) => void;
+  /** Blockhash → its last valid block height, from every blockhash this service fetched. */
+  #blockhashes = new Map<string, number>();
 
-  constructor(o: ServiceOpts) {
+  constructor(opts: ServiceOpts) {
+    const o: ServiceOpts = { ...opts, connection: trackBlockhashes(opts.connection, this.#blockhashes) };
     this.#o = o;
     this.#program = thesisProgram(o.connection);
     this.#log = o.log ?? (() => {});
@@ -143,16 +191,19 @@ export class ForkService {
     this.#router = new Router(o);
     this.#phoenix = o.phoenix ? new PhoenixDesk(o, o.phoenix, this.#store, this.#program) : null;
     this.#router.phoenix = this.#phoenix;
-    this.#history = new PortfolioHistory(this.#store, o.connection, (addr, opts) => this.portfolio(addr, opts));
+    // The chart doesn't show badges: its snapshots skip reading them.
+    this.#history = new PortfolioHistory(this.#store, o.connection, (addr, opts) => this.portfolio(addr, { ...opts, badges: false }), (addr) => this.#holds(addr));
     this.#wallets = new Wallets(o, this.#store, this.#program, (addr) => this.#history.snapshot(addr));
     this.#fees = new CreatorFees(
       o,
       this.#program,
       () => new Map(Object.entries(this.#state.takes).filter(([, m]) => !m.demoAuthorKey).map(([id, m]) => [m.address, id])),
       (takeId) => this.#appTake(takeId).then((t) => t.claim).catch(() => null),
+      // Takes the author posted through this API (on-chain addresses).
+      (author) => Object.values(this.#state.takes).filter((m) => m.author === author && !m.demoAuthorKey).map((m) => m.address),
     );
     // Warm each mirrored take's position scan (it can take ~10 s on Surfpool), so the first
-    // receipt someone opens doesn't wait for it.
+    // receipt someone opens doesn't wait for it. It also fills the owner index (see #holds).
     for (const m of Object.values(this.#store.state.takes)) void this.#positionsOf(new PublicKey(m.address)).catch(() => {});
   }
 
@@ -162,6 +213,11 @@ export class ForkService {
 
   #save() {
     this.#store.save();
+  }
+
+  /** Writes the state file now (it's otherwise written a few seconds after a change; see StateStore). */
+  flush() {
+    this.#store.flush();
   }
 
   /** The app's take from Supabase, cached briefly: a receipt and the build after it read it once. */
@@ -376,18 +432,14 @@ export class ForkService {
 
   /**
    * A take's open positions. Scanning program accounts can take ~10 s on Surfpool (it consults
-   * mainnet), so the scan runs once per take and then at most every 30 s in the background;
-   * reads in between fetch the known addresses in one getMultipleAccounts call. Positions this
-   * service submits are added as soon as they land.
+   * mainnet), so the scan runs once per take and then in the background every few minutes (every
+   * 30 s for a while after a trade on it); reads in between fetch the known addresses in one
+   * getMultipleAccounts call. Positions this service submits are added as soon as they land.
+   * Each read also updates the owner index (see #holds).
    */
   async #positionsOf(take: PublicKey, strict = false) {
     const key = take.toBase58();
-    let entry = this.#positions.get(key);
-    if (!entry) {
-      entry = { keys: new Set(), scannedAt: 0, scan: null };
-      this.#positions.set(key, entry);
-    }
-    const e = entry;
+    const e = this.#positionEntry(key);
     const scan = () =>
       (e.scan ??= this.#program.account.position
         .all([{ memcmp: { offset: 8 + 32, bytes: key } }])
@@ -403,26 +455,65 @@ export class ForkService {
         if (strict) throw err;
         this.#log(`position scan for ${key} failed (${err instanceof Error ? err.message.slice(0, 80) : err}); using known positions`);
       });
-    } else if (Date.now() - e.scannedAt > POSITION_SCAN_MS) void scan().catch(() => {});
+    } else {
+      const now = Date.now();
+      const every = now - e.tradedAt < BUSY_AFTER_TRADE_MS ? POSITION_SCAN_BUSY_MS : POSITION_SCAN_MS;
+      if (now - e.scannedAt > every) void scan().catch(() => {});
+    }
     const keys = [...e.keys].map((k) => new PublicKey(k));
     const accounts = keys.length ? await this.#program.account.position.fetchMultiple(keys) : [];
     const out: { publicKey: PublicKey; account: NonNullable<(typeof accounts)[number]> }[] = [];
     accounts.forEach((account, i) => {
+      const k = keys[i].toBase58();
       if (account) out.push({ publicKey: keys[i], account });
-      else e.keys.delete(keys[i].toBase58()); // settled and closed
+      else e.keys.delete(k); // settled and closed
+      if (account && !account.exited) e.owners.set(k, account.owner.toBase58());
+      else e.owners.delete(k);
     });
     return out;
   }
-  #positions = new Map<string, { keys: Set<string>; scannedAt: number; scan: Promise<void> | null }>();
+  #positions = new Map<string, PositionEntry>();
+
+  #positionEntry(take: string): PositionEntry {
+    let e = this.#positions.get(take);
+    if (!e) {
+      e = { keys: new Set(), owners: new Map(), scannedAt: 0, tradedAt: 0, scan: null };
+      this.#positions.set(take, e);
+    }
+    return e;
+  }
 
   /**
    * A position this service just opened. On a take it just created (`isNew`), that's every
    * position there is, so the take needs no cold scan.
    */
-  #notePosition(take: PublicKey, position: PublicKey, isNew = false) {
+  #notePosition(take: PublicKey, position: PublicKey, owner: string, isNew = false) {
     const key = take.toBase58();
-    if (isNew && !this.#positions.has(key)) this.#positions.set(key, { keys: new Set(), scannedAt: Date.now(), scan: null });
-    this.#positions.get(key)?.keys.add(position.toBase58());
+    // A take never read here gets its first scan when it's read, which finds this position too.
+    if (!isNew && !this.#positions.has(key)) return;
+    const fresh = !this.#positions.has(key);
+    const e = this.#positionEntry(key);
+    if (isNew && fresh) e.scannedAt = Date.now();
+    e.keys.add(position.toBase58());
+    e.owners.set(position.toBase58(), owner);
+    e.tradedAt = Date.now();
+  }
+
+  /** Whether `owner` holds an open position on any take this API knows, as last read (no RPC). */
+  #holds(owner: string): boolean {
+    for (const e of this.#positions.values()) for (const o of e.owners.values()) if (o === owner) return true;
+    return false;
+  }
+
+  /**
+   * Takes whose positions `owner` may hold: those the owner index says it holds, and those whose
+   * positions haven't been scanned yet (nothing is known about them).
+   */
+  #takesHeldBy(owner: string): string[] {
+    return Object.entries(this.#state.takes).filter(([, m]) => {
+      const e = this.#positions.get(m.address);
+      return !e?.scannedAt || [...e.owners.values()].includes(owner);
+    }).map(([id]) => id);
   }
 
   async #config() {
@@ -557,12 +648,13 @@ export class ForkService {
       legsMask: holding.legsMask,
     };
     // Redeeming jlUSDC has no slippage: it's worth its shares at the vault's rate, read exactly
-    // from Jupiter Lend (totalAssets / totalSupply), with Jupiter's token price as a fallback.
+    // from Jupiter Lend (totalAssets / totalSupply), with Jupiter's token price as a fallback. Each
+    // read is tried twice, then the last value known stands in (it only sizes the proceeds shown).
     const redeems = inventory.filter((l) => l.isYield);
     const redeemValue = async () => {
       let usd = 0;
       for (const { mint, amount } of redeems) {
-        const perShare = await this.#valuation.lendShareValue(mint);
+        const perShare = await this.#valuation.lendShareValue(mint, { retry: true });
         if (perShare === null) return this.#valuation.tokensUsd(redeems.map((l) => [l.mint, l.amount]));
         usd += (Number(amount) / 1e6) * perShare; // vault shares have USDC's 6 decimals
       }
@@ -717,7 +809,7 @@ export class ForkService {
       if (result.value.err) throw new ApiError(409, "transaction_failed", "The fork rejected this transaction.");
       this.#valuation.recordOpening(checkout.position.address, [signature]);
       this.#save();
-      this.#notePosition(checkout.position.take, checkout.position.address);
+      this.#notePosition(checkout.position.take, checkout.position.address, owner);
       this.#wallets.forgetActivity(owner);
       void this.#history.snapshot(owner).catch(() => {});
       return signature;
@@ -936,7 +1028,7 @@ export class ForkService {
         for (const tx of txs) signatures.push(...(await this.#send([tx], [])));
       });
     } finally {
-      this.#fees.forget(build.claims ?? []);
+      this.#fees.forget(build.owner, build.claims ?? []);
       this.#wallets.forgetActivity(build.owner);
     }
     // The claimed USDC is in the wallet now: a fresh chart point, as after a trade.
@@ -948,10 +1040,13 @@ export class ForkService {
   async buildPublish(takeId: string, author: string, usd: number) {
     const authorKey = parseKey(author);
     checkAmount(usd);
-    await this.#checkFunds(authorKey, usd);
     if (this.#state.takes[takeId]) throw new ApiError(409, "already_on_chain");
     const app = await this.#appTake(takeId, { fresh: true });
+    // Only the take's author can put it on-chain: with someone else's wallet, the take, its creator
+    // fees and its score would be theirs (posting take ids aren't secret: a feed can show one).
+    if (app.author_wallet !== author) throw new ApiError(403, "not_author", "Only the take's author can post it.");
     if (app.status === "live") throw new ApiError(409, "already_live");
+    await this.#checkFunds(authorKey, usd);
     const [{ venue, included, excluded }, config] = await Promise.all([this.#router.venueLegs(this.#mapLegs(app.legs), authorKey, usd), this.#config()]);
     const { ix, address } = await this.#createIx(app, authorKey, usd, included);
     const position = { take: address, address: positionAddress(address, authorKey, 0n), publishTakeId: takeId };
@@ -1016,7 +1111,15 @@ export class ForkService {
         byTake[build.position.address.toBase58()] = { ...build.position.exit, exitedAt: Math.floor(Date.now() / 1000) };
         this.#save();
       }
-      this.#notePosition(build.position.take, build.position.address, build.kind === "publish");
+      this.#notePosition(build.position.take, build.position.address, build.owner, build.kind === "publish");
+      // A sold position is no longer held (the next read of the take confirms it).
+      if (build.position.exit) this.#positions.get(build.position.take.toBase58())?.owners.delete(positionKey);
+      // A back or fade paid the take's author a creator share: their fee summary is out of date.
+      if (build.kind === "back") {
+        const takeAddress = build.position.take.toBase58();
+        const author = Object.values(this.#state.takes).find((m) => m.address === takeAddress)?.author;
+        if (author) this.#fees.forget(author);
+      }
       if (build.kind !== "exit") this.#valuation.recordOpening(build.position.address, confirmed);
       const { publishTakeId, take } = build.position;
       if (publishTakeId) {
@@ -1105,6 +1208,8 @@ export class ForkService {
     /** A sale that may take several transactions (Phoenix closes first, the exit last). */
     splitExit = false,
   ) {
+    // The blockhash is fetched during composing: the build's lifetime counts from before that.
+    const started = Date.now();
     const txs = await composeTransactions({
       payer: this.#o.appPayer.publicKey,
       legs: venue,
@@ -1126,7 +1231,7 @@ export class ForkService {
       }
     }
     const buildId = randomUUID();
-    const expires = Math.min(Date.now() + BUILD_TTL_MS, (position.exit?.horizonEnd ?? Infinity) * 1_000);
+    const expires = Math.min(started + BUILD_TTL_MS, (position.exit?.horizonEnd ?? Infinity) * 1_000);
     this.#builds.set(buildId, {
       owner: owner.toBase58(),
       messages: txs.map((t) => Buffer.from(t.tx.message.serialize())),
@@ -1157,7 +1262,11 @@ export class ForkService {
         throw new ApiError(502, "send_failed", errorText(e));
       });
       const confirming = Date.now();
-      const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
+      // Confirm against the transaction's own blockhash: once its last valid block passes, it can't
+      // land any more. (A fresh blockhash would keep waiting ~60 s past that.)
+      const own = tx.message.recentBlockhash;
+      const lastValid = this.#blockhashes.get(own);
+      const { blockhash, lastValidBlockHeight } = lastValid !== undefined ? { blockhash: own, lastValidBlockHeight: lastValid } : await conn.getLatestBlockhash("confirmed");
       const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
       if (res.value.err) throw new ApiError(502, "transaction_failed", `${sig}: ${JSON.stringify(res.value.err)}`);
       times[`send ${i + 1}`] = confirming - sent;
@@ -1202,7 +1311,7 @@ export class ForkService {
     }
     this.#state.takes[takeId] = { address: address.toBase58(), author: author.toBase58(), mirroredAt: new Date().toISOString() };
     this.#save();
-    this.#notePosition(address, positionAddress(address, author, 0n));
+    this.#notePosition(address, positionAddress(address, author, 0n), author.toBase58());
     this.#log(`found take ${takeId} on-chain at ${address.toBase58()} (its author's); recorded it`);
     return { address, take };
   }
@@ -1280,7 +1389,7 @@ export class ForkService {
         this.#log(`mirroring ${takeId} failed (${e instanceof Error ? e.message.slice(0, 120) : e}); trying again`);
       }
     }
-    this.#notePosition(address, positionAddress(address, author.publicKey, 0n), true);
+    this.#notePosition(address, positionAddress(address, author.publicKey, 0n), author.publicKey.toBase58(), true);
     this.#state.takes[takeId] = { address: address.toBase58(), author: author.publicKey.toBase58(), demoAuthorKey: [...author.secretKey], mirroredAt: new Date().toISOString(), v: MIRROR_VERSION };
     this.#save();
     this.#log(`mirrored take ${takeId} as ${address.toBase58()} (${app.author?.handle ?? "demo author"})`);
@@ -1306,11 +1415,13 @@ export class ForkService {
 
   /**
    * A wallet's open positions across the takes this service knows (posted or mirrored here), each
-   * as its take's receipt shows it, plus the "called it" badges the wallet holds on-chain.
+   * as its take's receipt shows it, plus the "called it" badges the wallet holds on-chain (unless
+   * `badges: false`). Only takes the wallet holds are read (see #takesHeldBy): building a receipt
+   * for every take, for every wallet, every few minutes, didn't scale.
    */
-  async portfolio(addr: string, { strict = false } = {}) {
+  async portfolio(addr: string, { strict = false, badges: withBadges = true } = {}) {
     const owner = parseKey(addr);
-    const takeIds = Object.keys(this.#state.takes);
+    const takeIds = this.#takesHeldBy(addr);
     const [perTake, badgeInfos] = await Promise.all([
       Promise.all(
         takeIds.map(async (takeId) => {
@@ -1332,7 +1443,9 @@ export class ForkService {
           }));
         }),
       ),
-      this.#o.connection.getMultipleAccountsInfo(BADGES.map((b) => badgeMintAddress(owner, BADGE_KIND_INDEX[b.kind], this.#program.programId))),
+      withBadges
+        ? this.#o.connection.getMultipleAccountsInfo(BADGES.map((b) => badgeMintAddress(owner, BADGE_KIND_INDEX[b.kind], this.#program.programId)))
+        : BADGES.map(() => null),
     ]);
     const positions = perTake.flat().sort((a, b) => b.openedAt - a.openedAt);
     const held = BADGES.filter((_, i) => badgeInfos[i]);

@@ -25,7 +25,14 @@ import { LiveContracts } from "./api/gemini-live.ts";
 import { Guard, parseMode, parseServiceKeys } from "./api/guard.ts";
 import { forkApiServer } from "./api/server.ts";
 import { DEFAULT_STATE_PATH, ForkService, type AppTake, type TakeSource } from "./api/service.ts";
-import { DATA_DIR, FORK_DEXES, HOST, PATHS, addUsdc, connection, deployedElf, loadKeypair, main, refreshMarkets, requireSurfpool, setUsdc, thesisLookupTable } from "./lib.ts";
+import { DATA_DIR, FORK_DEXES, HOST, PATHS, addUsdc, connection, deployedElf, loadKeypair, main, refreshMarkets, requireSurfpool, setUsdc, thesisLookupTable, topUpSol } from "./lib.ts";
+import { fetchConfig, thesisProgram } from "@thesis/chain";
+
+/** Longest wait for one Supabase, Gemini (proxy) or Alpaca read before it's abandoned. */
+const HTTP_TIMEOUT_MS = 10_000;
+
+/** `fetch` that gives up after HTTP_TIMEOUT_MS (unless the caller passed its own signal). */
+const fetchWithTimeout: typeof fetch = (input, init) => fetch(input, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS), ...init });
 
 /** Supabase's public client settings (repo-root .env), required to read app takes. */
 function supabaseSettings(): { url: string; key: string } {
@@ -46,6 +53,7 @@ export const supabaseTakes: TakeSource = async (id) => {
       method: "POST",
       headers: { apikey: key, "content-type": "application/json" },
       body: JSON.stringify({ p_id: id }),
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
     });
   let r = await read("take_for_chain");
   if (r.status === 404) r = await read("take");
@@ -63,7 +71,7 @@ function takeBuilderCatalog() {
 function liveGemini(log: (m: string) => void): LiveContracts | null {
   try {
     const proxy = geminiProxy(envVar);
-    return new LiveContracts((ticker) => fetchGeminiEvent(proxy, ticker), { log });
+    return new LiveContracts((ticker) => fetchGeminiEvent(proxy, ticker, fetchWithTimeout), { log });
   } catch (e) {
     log(`prediction legs use the asset bank's prices only: ${e instanceof Error ? e.message : e}`);
     return null;
@@ -103,7 +111,7 @@ export async function startForkService(log: (m: string) => void, o: { takes?: Ta
     lookupTable: thesisLookupTable(),
     bank: () => bank,
     takes: o.takes ?? supabaseTakes,
-    stocks: alpacaId && alpacaSecret ? new AlpacaStocks(alpacaId, alpacaSecret) : null,
+    stocks: alpacaId && alpacaSecret ? new AlpacaStocks(alpacaId, alpacaSecret, fetchWithTimeout) : null,
     // The settler's audit log (same default as SETTLER_AUDIT_FILE there): each leg's entry basis.
     bases: new AuditBases(envVar("SETTLER_AUDIT_FILE") ?? join(DATA_DIR, "..", "settler", "audit.jsonl")),
     gemini: liveGemini(log),
@@ -221,6 +229,26 @@ async function serve(): Promise<void> {
   setInterval(() => {
     sendLiquidationAlerts(service, log).catch((e) => log(`liquidation check failed: ${e instanceof Error ? e.message : e}`));
   }, LIQUIDATION_CHECK_MS).unref();
+  // The app fee payer and the settler pay every trade's fees and rent: keep them in fake SOL.
+  const topUp = () => keepFeePayersFunded(log).catch((e) => log(`SOL top-up failed: ${e instanceof Error ? e.message : e}`));
+  void topUp();
+  setInterval(topUp, TOPUP_CHECK_MS).unref();
+  // The state file is written a few seconds after a change: write what's pending before stopping.
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.once(signal, () => {
+      service.flush();
+      process.exit(0);
+    });
+  }
+}
+
+/** How often the fee-paying keys' SOL is checked. */
+const TOPUP_CHECK_MS = 10 * 60_000;
+
+/** Tops up the app fee payer and the settler key (the config's) on this fork (see `topUpSol`). */
+async function keepFeePayersFunded(log: (m: string) => void) {
+  const settler = (await fetchConfig(thesisProgram(connection()))).settler;
+  return topUpSol([{ name: "app fee payer", key: loadKeypair(PATHS.appPayer).publicKey }, { name: "settler", key: settler }], log);
 }
 
 if (import.meta.main) await main(serve);

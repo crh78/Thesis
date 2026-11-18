@@ -11,6 +11,12 @@ import type { MappedLeg } from "./legs.ts";
 import type { StateStore } from "./store.ts";
 
 const PRICE_CACHE_MS = 10_000;
+/** Longest wait for a Jupiter price read; past it, the cache or the asset bank's price stands in. */
+const PRICE_TIMEOUT_MS = 10_000;
+/** Alpaca latest trades: reused this long, waited for at most STOCK_TIMEOUT_MS, and a stale one used up to STOCK_STALE_MS. */
+const STOCK_CACHE_MS = 15_000;
+const STOCK_TIMEOUT_MS = 10_000;
+const STOCK_STALE_MS = 5 * 60_000;
 /** How old an asset-bank price can be and still stand in for a missing Jupiter read (display only). */
 const BANK_PRICE_MAX_AGE_MS = 30 * 60_000;
 
@@ -86,12 +92,14 @@ export class Valuation {
     const first = await this.#tokensUsdOnce(held);
     if (first !== null) return first;
     await new Promise((r) => setTimeout(r, 500));
-    return this.#tokensUsdOnce(held);
+    // Still nothing: the last price known for each token, however old. It only sizes the sale's
+    // expected proceeds (the swap itself is quoted live), so one failed read doesn't block a sale.
+    return (await this.#tokensUsdOnce(held)) ?? this.#tokensUsdOnce(held, true);
   }
 
-  async #tokensUsdOnce(held: [string, bigint][]): Promise<number | null> {
+  async #tokensUsdOnce(held: [string, bigint][], lastKnown = false): Promise<number | null> {
     const mints = held.map(([mint]) => mint);
-    const [prices, decimals] = await Promise.all([this.tokenPrices(mints), this.decimals(mints)]);
+    const [prices, decimals] = await Promise.all([lastKnown ? this.#lastKnownPrices(mints) : this.tokenPrices(mints), this.decimals(mints)]);
     const tokens = this.#o.bank().tokens;
     const nowSec = Math.floor(Date.now() / 1000);
     let usd = 0;
@@ -173,10 +181,9 @@ export class Valuation {
     // Phoenix's mid, else the asset bank's (when Phoenix's API is rate-limiting this address).
     const bankMid = (s: string) => this.#o.bank().venues.phoenix?.markets.find((m) => m.symbol === s)?.mid ?? null;
     const perpMid = new Map(await Promise.all(perps.map(async (s) => [s, (venue ? await venue.mid(s).catch(() => null) : null) ?? bankMid(s)] as const)));
-    const stocks = this.#o.stocks;
     const [tokenUsd, stockUsd] = await Promise.all([
       this.tokenPrices(mints),
-      Promise.all(symbols.map(async (sym) => [sym, (await stocks?.latestTrade(sym).catch(() => null))?.price ?? null] as const)).then((e) => new Map(e)),
+      Promise.all(symbols.map(async (sym) => [sym, await this.#stockPrice(sym)] as const)).then((e) => new Map(e)),
     ]);
     const toUnits = (usd: number | null | undefined) => (usd && usd > 0 ? BigInt(Math.round(usd * 1e8)) : null);
     const bankTokens = this.#o.bank().tokens;
@@ -211,15 +218,67 @@ export class Valuation {
     return out;
   }
 
-  /** One Jupiter Lend vault share's value in USDC (`jupiterLendShareValue`), cached for 60 s. */
-  async lendShareValue(shareMint: string): Promise<number | null> {
+  /**
+   * One Jupiter Lend vault share's value in USDC (`jupiterLendShareValue`), cached for 60 s. When
+   * a read fails, the last value read stands, however old (a share moves a few millionths a day).
+   * `retry`: a failed read is tried once more first (a sale, which can't go ahead without a value).
+   */
+  async lendShareValue(shareMint: string, { retry = false } = {}): Promise<number | null> {
     const hit = this.#shareCache.get(shareMint);
     if (hit && hit.at > Date.now() - 60_000) return hit.usd;
-    const v = await jupiterLendShareValue(shareMint, { apiKey: this.#o.jupiterApiKey }).catch(() => null);
+    const read = () => jupiterLendShareValue(shareMint, { apiKey: this.#o.jupiterApiKey }).catch(() => null);
+    let v = await read();
+    if (!v && retry) {
+      await new Promise((r) => setTimeout(r, 500));
+      v = await read();
+    }
     if (v) this.#shareCache.set(shareMint, { usd: v.usdcPerShare, at: Date.now() });
     return v?.usdcPerShare ?? hit?.usd ?? null;
   }
   #shareCache = new Map<string, { usd: number; at: number }>();
+
+  /**
+   * A stock's latest trade price (Alpaca), cached STOCK_CACHE_MS, one read per symbol at a time:
+   * every receipt with a stock leg marks it, and a burst of receipts made one read each. A read
+   * that fails or takes longer than STOCK_TIMEOUT_MS gives the last price seen in the last few
+   * minutes, else none.
+   */
+  #stockPrice(symbol: string): Promise<number | null> {
+    const stocks = this.#o.stocks;
+    if (!stocks) return Promise.resolve(null);
+    const hit = this.#stockCache.get(symbol);
+    if (hit && hit.at > Date.now() - STOCK_CACHE_MS) return Promise.resolve(hit.usd);
+    const pending = this.#stockReads.get(symbol);
+    if (pending) return pending;
+    const stale = () => (hit && hit.at > Date.now() - STOCK_STALE_MS ? hit.usd : null);
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<null>((r) => (timer = setTimeout(() => r(null), STOCK_TIMEOUT_MS).unref()));
+    const read = Promise.race([stocks.latestTrade(symbol).then((o) => o?.price ?? null), timeout])
+      .catch(() => null)
+      .then((usd) => {
+        if (usd != null) this.#stockCache.set(symbol, { usd, at: Date.now() });
+        return usd ?? stale();
+      })
+      .finally(() => {
+        clearTimeout(timer);
+        this.#stockReads.delete(symbol);
+      });
+    this.#stockReads.set(symbol, read);
+    return read;
+  }
+  #stockCache = new Map<string, { usd: number; at: number }>();
+  #stockReads = new Map<string, Promise<number | null>>();
+
+  /** The last price known for each mint, however old: this API's last Jupiter read, else the asset bank's. */
+  async #lastKnownPrices(mints: string[]): Promise<Map<string, number>> {
+    const tokens = this.#o.bank().tokens;
+    const out = new Map<string, number>();
+    for (const m of mints) {
+      const usd = this.#priceCache.get(m)?.usd ?? tokens[m]?.price?.usd;
+      if (usd && usd > 0) out.set(m, usd);
+    }
+    return out;
+  }
 
   /** USD per UI token (after any scaled-UI multiplier) from Jupiter Price v3, cached for 10 s. */
   async tokenPrices(mints: string[]): Promise<Map<string, number>> {
@@ -228,8 +287,11 @@ export class Valuation {
     const key = this.#o.jupiterApiKey;
     for (let i = 0; i < stale.length; i += 50) {
       const ids = stale.slice(i, i + 50).join(",");
-      const r = await fetch(`${key ? "https://api.jup.ag" : "https://lite-api.jup.ag"}/price/v3?ids=${ids}`, { headers: key ? { "x-api-key": key } : {} }).catch(() => null);
-      const j = r?.ok ? ((await r.json()) as Record<string, { usdPrice?: number }>) : {};
+      const r = await fetch(`${key ? "https://api.jup.ag" : "https://lite-api.jup.ag"}/price/v3?ids=${ids}`, {
+        headers: key ? { "x-api-key": key } : {},
+        signal: AbortSignal.timeout(PRICE_TIMEOUT_MS),
+      }).catch(() => null);
+      const j = r?.ok ? ((await r.json().catch(() => ({}))) as Record<string, { usdPrice?: number }>) : {};
       for (const [mint, v] of Object.entries(j)) if (typeof v?.usdPrice === "number") this.#priceCache.set(mint, { usd: v.usdPrice, at: now });
     }
     const out = new Map<string, number>();

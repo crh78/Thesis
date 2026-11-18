@@ -16,7 +16,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
   type AddressLookupTableAccount,
-  type PublicKey,
+  PublicKey,
   type TransactionInstruction,
 } from "@solana/web3.js";
 import { THESIS_COMPUTE_UNITS, USDC_MINT_MAINNET, claimCreatorFeesIx, thesisTransactionEvents, type ThesisProgram } from "@thesis/chain";
@@ -30,6 +30,11 @@ const ATA_CU = 14_000;
 /** How long a signed read stays valid. */
 const AUTH_WINDOW_S = 300;
 const HISTORY_CACHE_MS = 60_000;
+/** How long an author's summary is reused, and how often their takes are found by a program-account scan. */
+const SUMMARY_CACHE_MS = 60_000;
+const TAKE_SCAN_MS = 10 * 60_000;
+/** Cache size past which expired entries are dropped. */
+const CACHE_SWEEP_AT = 1_000;
 /**
  * Per claim. Like the price records, a claim costs more on a take with more legs (it reads the
  * whole take): 10,871 CU on a 4-leg take on the fork before its event became a self-CPI (about
@@ -49,6 +54,16 @@ type CreatorFeeTake = {
   earnedUsd: number;
   claimedUsd: number;
   unclaimedUsd: number;
+};
+
+type FeeSummary = {
+  earned: string;
+  claimed: string;
+  unclaimed: string;
+  earnedUsd: number;
+  claimedUsd: number;
+  unclaimedUsd: number;
+  takes: CreatorFeeTake[];
 };
 
 /** What the wallet signs (Privy's signMessage) to read its own creator fees. */
@@ -92,22 +107,49 @@ export class CreatorFees {
   #claimText: (takeId: string) => Promise<string | null>;
   #history = new Map<string, { at: number; value: { claimed: bigint } }>();
   #lut: Promise<AddressLookupTableAccount | null> | null = null;
+  /** On-chain take addresses the author posted through this API. */
+  #knownTakes: (author: string) => string[];
+  /** Per author: the take addresses the last program-account scan found, and when. */
+  #scans = new Map<string, { at: number; addresses: string[] }>();
+  /** Per author: the last summary, reused SUMMARY_CACHE_MS (a trade on their takes or a claim clears it). */
+  #summaries = new Map<string, { at: number; value: Promise<FeeSummary> }>();
 
   constructor(
     o: ServiceOpts,
     program: ThesisProgram,
     appTakes: () => Map<string, string>,
     claimText: (takeId: string) => Promise<string | null>,
+    knownTakes: (author: string) => string[] = () => [],
   ) {
     this.#o = o;
     this.#program = program;
     this.#appTakes = appTakes;
     this.#claimText = claimText;
+    this.#knownTakes = knownTakes;
   }
 
-  /** The author's takes on this fork. Take accounts start with the author's key, after the discriminator. */
+  /**
+   * The author's takes on this fork. Scanning program accounts (take accounts start with the
+   * author's key, after the discriminator) costs mainnet-datasource credits on Surfpool, so it runs
+   * at most every TAKE_SCAN_MS per author; in between, the takes it found and the ones the author
+   * posted through this API since are read in one getMultipleAccounts call.
+   */
   async #takes(author: PublicKey) {
-    return this.#program.account.take.all([{ memcmp: { offset: 8, bytes: author.toBase58() } }]);
+    const key = author.toBase58();
+    const now = Date.now();
+    const scanned = this.#scans.get(key);
+    if (!scanned || scanned.at <= now - TAKE_SCAN_MS) {
+      const all = await this.#program.account.take.all([{ memcmp: { offset: 8, bytes: key } }]);
+      if (this.#scans.size >= CACHE_SWEEP_AT) for (const [k, v] of this.#scans) if (v.at <= now - TAKE_SCAN_MS) this.#scans.delete(k);
+      this.#scans.set(key, { at: now, addresses: all.map((t) => t.publicKey.toBase58()) });
+      return all;
+    }
+    const addresses = [...new Set([...scanned.addresses, ...this.#knownTakes(key)])].map((a) => new PublicKey(a));
+    const accounts = addresses.length ? await this.#program.account.take.fetchMultiple(addresses) : [];
+    return addresses.flatMap((publicKey, i) => {
+      const account = accounts[i];
+      return account && account.author.equals(author) ? [{ publicKey, account }] : [];
+    });
   }
 
   /** Claimed on one take, from its claim transactions' events (cached a minute; a claim clears it). */
@@ -132,12 +174,32 @@ export class CreatorFees {
     return value;
   }
 
-  forget(takes: string[]) {
+  /** Clears the author's cached summary, and the claim history of `takes` (after a claim or a trade). */
+  forget(author: string, takes: string[] = []) {
+    this.#summaries.delete(author);
     for (const t of takes) this.#history.delete(t);
   }
 
-  /** Every take of the author's that earned a creator share, most left to claim first, with totals. */
-  async summary(author: string) {
+  /**
+   * Every take of the author's that earned a creator share, most left to claim first, with totals.
+   * Cached SUMMARY_CACHE_MS per author, one read at a time (the app reads it on every profile load).
+   */
+  summary(author: string): Promise<FeeSummary> {
+    parseKey(author);
+    const now = Date.now();
+    const hit = this.#summaries.get(author);
+    if (hit && hit.at > now - SUMMARY_CACHE_MS) return hit.value;
+    if (this.#summaries.size >= CACHE_SWEEP_AT) for (const [k, v] of this.#summaries) if (v.at <= now - SUMMARY_CACHE_MS) this.#summaries.delete(k);
+    const value = this.#summary(author);
+    const entry = { at: now, value };
+    this.#summaries.set(author, entry);
+    value.catch(() => {
+      if (this.#summaries.get(author) === entry) this.#summaries.delete(author);
+    });
+    return value;
+  }
+
+  async #summary(author: string): Promise<FeeSummary> {
     const authorKey = parseKey(author);
     const appTakes = this.#appTakes();
     const rows: CreatorFeeTake[] = [];

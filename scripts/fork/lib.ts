@@ -161,6 +161,33 @@ export async function addSol(wallet: PublicKey, sol: number): Promise<number> {
   return lamports;
 }
 
+/** A fork key with less than this much fake SOL is topped up to TOPUP_TO_SOL (see `topUpSol`). */
+export const TOPUP_BELOW_SOL = 5;
+export const TOPUP_TO_SOL = 10;
+
+/**
+ * Tops up fork keys that pay fees and rent (the app fee payer, the settler) with fake SOL when
+ * they drop below TOPUP_BELOW_SOL, so trades and price records don't start failing once the
+ * fork's rent adds up. Runs only against Surfpool (it answers getVersion with a surfnet version):
+ * never against mainnet, where the cheatcode doesn't exist anyway. Returns the names topped up.
+ */
+export async function topUpSol(keys: { name: string; key: PublicKey }[], log: (m: string) => void): Promise<string[]> {
+  if (!(await surfpoolVersion())) {
+    log(`SOL top-up skipped: ${RPC_URL} isn't a Surfpool fork`);
+    return [];
+  }
+  const conn = connection();
+  const done: string[] = [];
+  for (const { name, key } of keys) {
+    const lamports = await conn.getBalance(key);
+    if (lamports >= TOPUP_BELOW_SOL * LAMPORTS_PER_SOL) continue;
+    await rpc("surfnet_setAccount", [key.toBase58(), { lamports: TOPUP_TO_SOL * LAMPORTS_PER_SOL }]);
+    log(`topped up the ${name} ${key.toBase58()} from ${(lamports / LAMPORTS_PER_SOL).toFixed(3)} to ${TOPUP_TO_SOL} fake SOL`);
+    done.push(name);
+  }
+  return done;
+}
+
 /** Sets the wallet's USDC balance to exactly `baseUnits` (6 decimals). */
 export async function setUsdc(wallet: PublicKey, baseUnits: bigint): Promise<void> {
   await rpc("surfnet_setTokenAccount", [wallet.toBase58(), USDC_MINT_MAINNET.toBase58(), { amount: Number(baseUnits), state: "initialized" }]);
