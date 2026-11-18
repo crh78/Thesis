@@ -1,4 +1,5 @@
--- Checks ingest_chain_events() and take_json()'s network header (migrations/*_chain_events.sql).
+-- Checks ingest_chain_events() and take_json()'s network header (migrations/*_chain_events.sql), and
+-- takeClosed / settled_at (migrations/*_author_sale_closes.sql).
 -- Run against a scratch database with the migrations applied (it rolls back):
 --   psql "$SCRATCH_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/chain_events.sql
 -- Each check raises if it fails. Events are shaped like functions/quicknode-stream sends them.
@@ -8,7 +9,9 @@ insert into public.profiles (id, handle, display_name, solana_address) values ('
 insert into public.profiles (id, handle, display_name, is_demo) values ('00000000-0000-4000-8000-0000000000ad', 'demo', 'Demo', true);
 insert into public.takes (id, author_id, claim, risk, horizon, settles_at) values
   ('00000000-0000-4000-8000-0000000000bb', '00000000-0000-4000-8000-0000000000aa', 'Chip stocks keep leading', 'medium', '3mo', now() + interval '90 days'),
-  ('00000000-0000-4000-8000-0000000000bd', '00000000-0000-4000-8000-0000000000ad', 'Demo copper call', 'medium', '3mo', now() + interval '90 days');
+  ('00000000-0000-4000-8000-0000000000bd', '00000000-0000-4000-8000-0000000000ad', 'Demo copper call', 'medium', '3mo', now() + interval '90 days'),
+  ('00000000-0000-4000-8000-0000000000bc', '00000000-0000-4000-8000-0000000000aa', 'Copper closes early', 'high', '12mo', now() + interval '365 days');
+insert into public.take_legs (take_id, idx, name, kind, weight, slot) values ('00000000-0000-4000-8000-0000000000bc', 0, 'Copper', 'Commodity', 100, 0);
 -- A newer demo take with the tester's claim: the tester's own take must still win T1.
 insert into public.takes (id, author_id, claim, risk, horizon, settles_at, created_at) values
   ('00000000-0000-4000-8000-0000000000be', '00000000-0000-4000-8000-0000000000ad', 'Chip stocks keep leading', 'medium', '3mo', now() + interval '90 days', now() + interval '1 minute');
@@ -56,6 +59,52 @@ begin
   select public.take_json(t) into j from public.takes t where t.id = '00000000-0000-4000-8000-0000000000bb';
   if (j->>'backs')::int <> 2 or (j->>'fades')::int <> 1 or (j->>'money_in')::numeric <> 55 or (j->>'ret')::numeric <> 12.5 or j->>'on_chain' <> 'T1' then
     raise exception 'with the header the chain numbers must show: %', j;
+  end if;
+  -- Settled on-chain: settled and its date show; it never closed (no author's sale).
+  if (j->>'settled')::boolean is not true or (j->>'settled_at')::timestamptz <> to_timestamp(1800003600) or j->>'closed_at' is not null then
+    raise exception 'settled take: %', j;
+  end if;
+  if (select settled_at from public.chain_takes where network = 'solana-mainnet-fork' and address = 'T1') <> to_timestamp(1800003600) then
+    raise exception 'takeSettled must set settled_at';
+  end if;
+
+  -- The author's sale closes a take (migrations/*_author_sale_closes.sql): takeClosed sets
+  -- closed_at, and its return stops following the marks while open positions keep theirs.
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature', 'c1', 'ordinal', 0, 'slot', 20, 'block_time', 1800010000, 'name', 'takeCreated',
+      'data', jsonb_build_object('take', 'TC', 'author', 'A1', 'claimHash',
+        (select to_jsonb(array_agg(get_byte(sha256(convert_to('Copper closes early', 'UTF8')), i) order by i)) from generate_series(0, 31) i))),
+    jsonb_build_object('signature', 'c2', 'ordinal', 0, 'slot', 21, 'block_time', 1800010060, 'name', 'positionOpened',
+      'data', jsonb_build_object('take', 'TC', 'position', 'PC_B', 'owner', 'B1', 'side', 'back', 'stake', '25000000'))));
+  select public.take_json(t) into j from public.takes t where t.id = '00000000-0000-4000-8000-0000000000bc';
+  if j->>'on_chain' <> 'TC' or j->>'closed_at' is not null or (j->>'settled')::boolean then raise exception 'open take: %', j; end if;
+  if public.apply_marks('{"takes":[{"take_id":"00000000-0000-4000-8000-0000000000bc","ret_pct":3}]}') ->> 'takes' <> '1' then
+    raise exception 'an open take follows the marks';
+  end if;
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature', 'c3', 'ordinal', 0, 'slot', 22, 'block_time', 1800020000, 'name', 'takeClosed',
+      'data', jsonb_build_object('take', 'TC', 'author', 'A1', 'closedAt', '1800019999')),
+    -- A replay with another time changes nothing.
+    jsonb_build_object('signature', 'c4', 'ordinal', 0, 'slot', 23, 'block_time', 1800030000, 'name', 'takeClosed',
+      'data', jsonb_build_object('take', 'TC', 'author', 'A1'))));
+  select public.take_json(t) into j from public.takes t where t.id = '00000000-0000-4000-8000-0000000000bc';
+  if (j->>'closed_at')::timestamptz <> to_timestamp(1800019999) or (j->>'settled')::boolean or j->>'settled_at' is not null then
+    raise exception 'closed take: %', j;
+  end if;
+  if public.apply_marks('{"takes":[{"take_id":"00000000-0000-4000-8000-0000000000bc","ret_pct":9}],
+                          "legs":[{"take_id":"00000000-0000-4000-8000-0000000000bc","idx":0,"mark_price":2,"ret_pct":9,"base_price":1}],
+                          "positions":[{"network":"solana-mainnet-fork","address":"PC_B","live_return_bps":900}]}')
+     is distinct from '{"legs":0,"takes":0,"positions":1}'::jsonb then
+    raise exception 'a closed take''s return must freeze; its open positions still move';
+  end if;
+  select public.take_json(t) into j from public.takes t where t.id = '00000000-0000-4000-8000-0000000000bc';
+  if (j->>'ret')::numeric <> 3 then raise exception 'closed take''s return moved: %', j; end if;
+  -- A takeClosed for a take ingestion never saw still records it.
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature', 'c5', 'ordinal', 0, 'slot', 24, 'block_time', 1800040000, 'name', 'takeClosed',
+      'data', jsonb_build_object('take', 'TU', 'author', 'A9'))));
+  if (select closed_at from public.chain_takes where network = 'solana-mainnet-fork' and address = 'TU') <> to_timestamp(1800040000) then
+    raise exception 'takeClosed without closedAt uses the block time';
   end if;
   raise notice 'chain_events: all checks passed';
 end $$;

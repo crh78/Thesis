@@ -25,6 +25,14 @@ begin
   live := public.create_take('00000000-0000-4000-8000-0000000000a1', 'Copper is the new oil', 'topic-coin', 'high', '1mo', '{}', legs);
 
   if (select status from public.takes where id = live) <> 'live' then raise exception 'takes are live by default'; end if;
+  -- No horizon to pick (migrations/*_author_sale_closes.sql): whatever is sent, or nothing, every
+  -- take auto-settles 365 days after posting, and reads as '12mo' to older clients.
+  if exists (select 1 from public.takes where id in (posting, other, live)
+             and (horizon <> '12mo' or settles_at <> now() + interval '365 days')) then
+    raise exception 'a take''s horizon must be ignored: %', (select jsonb_agg(jsonb_build_object('horizon', horizon, 'settles_at', settles_at)) from public.takes where id in (posting, other, live));
+  end if;
+  perform public.discard_posting_take('00000000-0000-4000-8000-0000000000a1',
+    public.create_take('00000000-0000-4000-8000-0000000000a1', 'No horizon at all', 'topic-coin', 'medium', null, '{}', legs, 'posting'));
   if (select status from public.takes where id = posting) <> 'posting' then raise exception 'posting take not posting'; end if;
   if exists (select 1 from public.notifications where kind = 'new_take' and take_id = posting) then
     raise exception 'followers must not hear about a posting take';
@@ -125,7 +133,8 @@ begin
   if not public.discard_posting_take('00000000-0000-4000-8000-0000000000a1', other) then raise exception 'the author can discard'; end if;
   if exists (select 1 from public.takes where id = other) then raise exception 'discard left the take'; end if;
 
-  -- Go-live by take (migrations/*_go_live_by_take.sql): the event's horizonEnd pins the row.
+  -- Go-live by take (migrations/*_go_live_by_take.sql): the event's horizonEnd pins the row
+  -- (posting + 365 days, as the fork API passes it on-chain).
   -- One posting take per author and claim: a twin is refused.
   posting := public.create_take('00000000-0000-4000-8000-0000000000a1', 'Gold to 3k', 'topic-coin', 'medium', '3mo', '{}', legs, 'posting');
   begin
