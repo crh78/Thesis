@@ -131,7 +131,7 @@ test("Alpaca asks for the first trade at or after the moment, bounded by the del
 test("Jupiter prices carry liquidity and the fetch time", async () => {
   const fake = (async () =>
     new Response(JSON.stringify({ M: { usdPrice: 184.29, liquidity: 1_981_373.9, decimals: 8 } }))) as unknown as typeof fetch;
-  const j = new JupiterPrices(null, fake, () => 42);
+  const j = new JupiterPrices("k", fake, () => 42);
   assert.deepEqual(await j.price("M"), { mint: "M", usdPrice: 184.29, liquidityUsd: 1_981_373.9, at: 42, scaledUi: null, raw: { mint: "M", response: { usdPrice: 184.29, liquidity: 1_981_373.9, decimals: 8 } } });
   assert.equal(await j.price("missing"), null);
 });
@@ -139,6 +139,6 @@ test("Jupiter prices carry liquidity and the fetch time", async () => {
 test("Jupiter prices carry the mint's ScaledUiAmount config (xStocks), in the shape Jupiter returns it", async () => {
   const cfg = { multiplier: 1.005010474242, newMultiplier: 1.0091704440395326, newMultiplierEffectiveAt: "2026-12-20T23:30:00Z", usdPricePrescaled: 39.546373222096726 };
   const fake = (async () => new Response(JSON.stringify({ X: { usdPrice: 39.187, liquidity: 113.3, decimals: 8, scaledUiConfig: cfg } }))) as unknown as typeof fetch;
-  const p = await new JupiterPrices(null, fake, () => 42).price("X");
+  const p = await new JupiterPrices("k", fake, () => 42).price("X");
   assert.deepEqual(p?.scaledUi, { multiplier: 1.005010474242, newMultiplier: 1.0091704440395326, newMultiplierEffectiveAt: Date.parse("2026-12-20T23:30:00Z") / 1000 });
 });

@@ -59,6 +59,7 @@ async function e2e(): Promise<void> {
   const appPayer = loadKeypair(PATHS.appPayer);
   const state = await loadBankState();
   const apiKey = envVar("JUPITER_API_KEY");
+  if (!apiKey) throw new Error("JUPITER_API_KEY is not set (environment or repo-root .env): the settler prices tokens on api.jup.ag");
 
   const author = Keypair.generate();
   const backer = Keypair.generate();

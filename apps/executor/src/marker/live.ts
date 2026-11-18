@@ -1,23 +1,18 @@
 // Live marks, the I/O part: what's open (public reads with the publishable key), and the prices
 // the marking rules in mark.ts read, fetched once per run and paced for each source.
-import type { ScaledUi } from "@thesis/venues/bank";
 import { fetchGeminiEvent, type GeminiContract, type GeminiProxy } from "@thesis/venues/gemini";
 import { jupiterLendShareValue } from "@thesis/venues/jupiter";
 import type { PhoenixVenue } from "@thesis/venues/phoenix";
-import type { StockSource } from "../settler/sources.ts";
+import { parseScaledUiConfig, type StockSource } from "../settler/sources.ts";
 import { effectiveMultiplier } from "@thesis/venues/bank";
+import { getJson as getJsonOnce, timedFetch } from "../http.ts";
 import type { Base, BankLookup, Leg, PickAsset, Security, Snapshot } from "./mark.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function getJson(url: string, headers: Record<string, string> = {}, tries = 5): Promise<any> {
-  for (let i = 0; ; i++) {
-    const r = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) }).catch(() => null);
-    if (r?.ok) return r.json();
-    if (r && r.status !== 429 && r.status < 500) throw new Error(`${new URL(url).host}${new URL(url).pathname}: HTTP ${r.status} ${await r.text().catch(() => "")}`.slice(0, 300));
-    if (i >= tries) throw new Error(`${new URL(url).host}${new URL(url).pathname}: ${r ? `HTTP ${r.status}` : "unreachable"}`);
-    await sleep(Math.min(20_000, 1_000 * 2 ** i));
-  }
+/** The marker's reads: 20 s timeout, up to 5 retries on 429, 5xx or no answer (1 s, 2 s, … 20 s). */
+export function getJson(url: string, headers: Record<string, string> = {}): Promise<any> {
+  return getJsonOnce(url, { headers, tries: 5, timeoutMs: 20_000, baseDelayMs: 1_000, retryNetwork: true });
 }
 
 // --- What's open -------------------------------------------------------------------------------
@@ -103,19 +98,11 @@ export class Db {
 
 // --- Prices ------------------------------------------------------------------------------------
 
-/** Jupiter Price v3's `scaledUiConfig` as a ScaledUi; null when it has none. */
-export function parseScaledUi(cfg: any): ScaledUi | null {
-  if (!cfg || typeof cfg !== "object") return null;
-  const multiplier = Number(cfg.multiplier);
-  if (!(multiplier > 0)) return null;
-  const next = Number(cfg.newMultiplier ?? multiplier);
-  const at = typeof cfg.newMultiplierEffectiveAt === "string" ? Math.floor(Date.parse(cfg.newMultiplierEffectiveAt) / 1000) : Number(cfg.newMultiplierEffectiveAt ?? 0);
-  return { multiplier, newMultiplier: next > 0 ? next : multiplier, newMultiplierEffectiveAt: Number.isFinite(at) ? at : 0 };
-}
-
 export type LiveDeps = {
+  /** JUPITER_API_KEY: prices and Jupiter Lend on api.jup.ag (the keyless lite-api is being retired). */
+  jupiterApiKey: string;
+  /** Default https://api.jup.ag. */
   jupiterBase?: string;
-  jupiterHeaders?: Record<string, string>;
   alpacaHeaders: Record<string, string>;
   phoenix: Pick<PhoenixVenue, "mid" | "markAtOrAfter">;
   gemini: GeminiProxy | null;
@@ -129,13 +116,14 @@ export async function snapshot(assets: PickAsset[], d: LiveDeps, extraPerps: str
   const nowSec = Math.floor(Date.now() / 1000);
   const snap: Snapshot = { nowSec, tokens: new Map(), stocks: new Map(), perps: new Map(), events: new Map(), lend: null, cards: d.cards ?? new Map() };
   const mints = [...new Set(assets.flatMap((a) => (a.type === "spot" ? [a.mint] : [])))];
-  const jup = d.jupiterBase ?? "https://lite-api.jup.ag";
+  const jup = d.jupiterBase ?? "https://api.jup.ag";
+  const jupHeaders = { "x-api-key": d.jupiterApiKey };
   for (let i = 0; i < mints.length; i += 50) {
     const batch = mints.slice(i, i + 50);
-    const j = await getJson(`${jup}/price/v3?ids=${batch.join(",")}`, d.jupiterHeaders ?? {}).catch((e) => (d.log?.(`jupiter: ${e}`), {}));
+    const j = await getJson(`${jup}/price/v3?ids=${batch.join(",")}`, jupHeaders).catch((e) => (d.log?.(`jupiter: ${e}`), {}));
     for (const m of batch) {
       const p = j?.[m];
-      if (p && typeof p.usdPrice === "number") snap.tokens.set(m, { usdPrice: p.usdPrice, liquidityUsd: typeof p.liquidity === "number" ? p.liquidity : 0, scaledUi: "scaledUiConfig" in p ? parseScaledUi(p.scaledUiConfig) : null });
+      if (p && typeof p.usdPrice === "number") snap.tokens.set(m, { usdPrice: p.usdPrice, liquidityUsd: typeof p.liquidity === "number" ? p.liquidity : 0, scaledUi: parseScaledUiConfig(p.scaledUiConfig) });
     }
     if (i + 50 < mints.length) await sleep(1_200);
   }
@@ -159,15 +147,15 @@ export async function snapshot(assets: PickAsset[], d: LiveDeps, extraPerps: str
   if (d.gemini) {
     const tickersG = [...new Set(assets.flatMap((a) => (a.type === "prediction" ? [a.eventTicker] : [])))];
     for (const t of tickersG) {
-      const cs: GeminiContract[] | null = await fetchGeminiEvent(d.gemini, t).catch((e) => (d.log?.(`gemini ${t}: ${e}`), null));
+      const cs: GeminiContract[] | null = await fetchGeminiEvent(d.gemini, t, timedFetch(20_000)).catch((e) => (d.log?.(`gemini ${t}: ${e}`), null));
       if (cs) snap.events.set(t, cs);
       await sleep(1_100);
     }
   }
   if (assets.some((a) => a.type === "yield")) {
-    const list: any[] = await getJson("https://lite-api.jup.ag/lend/v1/earn/tokens").catch(() => []);
+    const list: any[] = await getJson(`${jup}/lend/v1/earn/tokens`, jupHeaders).catch(() => []);
     const jl = list.find((x) => x.asset?.symbol === "USDC");
-    const v = jl ? await jupiterLendShareValue(jl.address, {}).catch(() => null) : null;
+    const v = jl ? await jupiterLendShareValue(jl.address, { apiKey: d.jupiterApiKey, fetchFn: timedFetch(20_000) }).catch(() => null) : null;
     snap.lend = v?.usdcPerShare ?? null;
   }
   return snap;

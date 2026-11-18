@@ -72,7 +72,8 @@ async function e2e(): Promise<void> {
   if (!lookupTable) throw new Error("No Thesis lookup table on this fork. Rerun `pnpm fork:up`.");
   const state = await loadBankState();
   const bank = bankIndex(state);
-  const apiKey = envVar("JUPITER_API_KEY") ?? null;
+  const apiKey = envVar("JUPITER_API_KEY");
+  if (!apiKey) throw new Error("JUPITER_API_KEY is not set (environment or repo-root .env): the settler prices tokens on api.jup.ag");
 
   const [author, backer, cheater, fader, faker] = [Keypair.generate(), Keypair.generate(), Keypair.generate(), Keypair.generate(), Keypair.generate()];
   for (const kp of [author, backer, cheater, fader, faker]) {

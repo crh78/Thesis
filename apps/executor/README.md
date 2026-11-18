@@ -71,7 +71,7 @@ Environment or the repo-root `.env`; keys are never printed.
 | `SOLANA_RPC_URL` | `http://127.0.0.1:18899` (the fork) | |
 | `SETTLER_KEYPAIR` | `.data/fork/settler.json` | Must be the config's settler |
 | `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY` | required | Free Alpaca account, market data |
-| `JUPITER_API_KEY` | keyless lite-api | |
+| `JUPITER_API_KEY` | required | Token prices (Price v3, read in batches of 50 per tick, resting 30 s to 2 min after a 429) and yield legs, on api.jup.ag |
 | `SETTLER_MIN_LIQUIDITY_USD` | 50000 (`PRICEABLE_MIN_POOLED_USD`) | The router's floor too |
 | `SETTLER_LIVE_WINDOW_SEC` | 300 | |
 | `SETTLER_MIN_RECEIVED_RATIO` | 0.9 | A spot leg's tokens at entry must be worth this share of its part of the stake |

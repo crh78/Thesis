@@ -47,6 +47,7 @@ const target = rest.join(" ");
 
 const SUPABASE_URL = envVar("SUPABASE_URL")!;
 const SUPABASE_KEY = envVar("SUPABASE_PUBLISHABLE_KEY")!;
+const JUP_H = { "x-api-key": envVar("JUPITER_API_KEY") ?? "" }; // api.jup.ag: the keyless lite-api is being retired
 const ALPACA_H = { "APCA-API-KEY-ID": envVar("ALPACA_API_KEY_ID") ?? "", "APCA-API-SECRET-KEY": envVar("ALPACA_API_SECRET_KEY") ?? "" };
 const MIN_LIQ = 50_000; // PRICEABLE_MIN_POOLED_USD
 const fnSecret = (() => {
@@ -87,7 +88,7 @@ function table(rows: Record<string, unknown>[]) {
 // --- Price sources ---------------------------------------------------------------------------------
 async function jup(mints: string[]) {
   if (!mints.length) return {} as Record<string, any>;
-  return getJson(`https://lite-api.jup.ag/price/v3?ids=${[...new Set(mints)].join(",")}`);
+  return getJson(`https://api.jup.ag/price/v3?ids=${[...new Set(mints)].join(",")}`, JUP_H);
 }
 async function alpaca(symbols: string[]): Promise<Record<string, { p: number; t: string }>> {
   if (!symbols.length || !ALPACA_H["APCA-API-KEY-ID"]) return {};
@@ -139,9 +140,9 @@ async function livePrice(s: Sec, side: "yes" | "no" = "yes", held: "back" | "fad
     }
   }
   if (s.kind === "yield") {
-    const list = await getJson("https://lite-api.jup.ag/lend/v1/earn/tokens");
+    const list = await getJson("https://api.jup.ag/lend/v1/earn/tokens", JUP_H);
     const jl = list.find((x: any) => x.asset?.symbol === "USDC");
-    const v = jl ? await jupiterLendShareValue(jl.address, {}) : null;
+    const v = jl ? await jupiterLendShareValue(jl.address, { apiKey: JUP_H["x-api-key"] }) : null;
     return { price: v?.usdcPerShare ?? null, source: "jlUSDC share value (every yield pick is a jlUSDC deposit)", ref: null, refName: "" };
   }
   if (!s.mint) return { price: null, source: "no mint", ref: null, refName: "" };
