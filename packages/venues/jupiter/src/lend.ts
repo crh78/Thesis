@@ -6,7 +6,7 @@
 // Earn's `deposit-instructions` expects the user's jlUSDC account to exist, so this adds an
 // idempotent create for it, paid by `payer` (the app for Privy users) like the swap legs.
 import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
-import { ASSOCIATED_TOKEN_PROGRAM, TOKEN_PROGRAM, USDC_MINT, associatedTokenAddress, jupiterPost, toInstruction, type FetchFn, type VenueLeg } from "./index.ts";
+import { ASSOCIATED_TOKEN_PROGRAM, JUPITER_TIMEOUT_MS, TOKEN_PROGRAM, USDC_MINT, associatedTokenAddress, jupiterPost, toInstruction, type FetchFn, type VenueLeg } from "./index.ts";
 
 /** jlUSDC, Jupiter Lend's USDC vault share (SPL Token). */
 export const JL_USDC_MINT = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
@@ -115,7 +115,7 @@ export type ShareValue = { shareMint: string; usdcPerShare: number; raw: { total
  */
 export async function jupiterLendShareValue(shareMint: string, o: { apiKey?: string | null; fetchFn?: FetchFn } = {}): Promise<ShareValue | null> {
   const base = o.apiKey ? "https://api.jup.ag" : "https://lite-api.jup.ag";
-  const r = await (o.fetchFn ?? fetch)(`${base}/lend/v1/earn/tokens`, { headers: o.apiKey ? { "x-api-key": o.apiKey } : {} });
+  const r = await (o.fetchFn ?? fetch)(`${base}/lend/v1/earn/tokens`, { headers: o.apiKey ? { "x-api-key": o.apiKey } : {}, signal: AbortSignal.timeout(JUPITER_TIMEOUT_MS) });
   if (!r.ok) throw new Error(`Jupiter Lend tokens: HTTP ${r.status}`);
   const list = (await r.json()) as { address?: string; totalAssets?: string; totalSupply?: string; convertToAssets?: string }[];
   const t = list.find((x) => x.address === shareMint);

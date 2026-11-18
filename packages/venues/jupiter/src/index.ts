@@ -126,21 +126,34 @@ export type FetchFn = typeof fetch;
  * POSTs JSON to a Jupiter endpoint. On a 429 it waits until the window resets
  * (`x-ratelimit-reset`, unix seconds) rather than backing off blindly, so parallel legs that hit
  * the limit together all go again as soon as they can.
+ *
+ * Each request gives up after JUPITER_TIMEOUT_MS, and the waits on 429s add up to at most
+ * JUPITER_MAX_429_WAIT_MS: past that the 429 is returned, so a build fails instead of hanging.
  */
 export async function jupiterPost(url: string, body: unknown, apiKey: string | null | undefined, fetchFn: FetchFn = fetch): Promise<{ status: number; ok: boolean; json: any }> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (apiKey) headers["x-api-key"] = apiKey;
+  let waited = 0;
   for (let attempt = 0; ; attempt++) {
-    const r = await fetchFn(url, { method: "POST", headers, body: JSON.stringify(body) });
+    const r = await fetchFn(url, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(JUPITER_TIMEOUT_MS) });
     if (r.status === 429 && attempt < 5) {
       const reset = Number(r.headers?.get?.("x-ratelimit-reset"));
       const untilReset = Number.isFinite(reset) && reset > 0 ? reset * 1000 - Date.now() + 250 : 0;
-      await new Promise((res) => setTimeout(res, untilReset > 0 ? Math.min(untilReset, 15_000) : 1_000 * 2 ** attempt));
-      continue;
+      const wait = untilReset > 0 ? Math.min(untilReset, 15_000) : 1_000 * 2 ** attempt;
+      if (waited + wait <= JUPITER_MAX_429_WAIT_MS) {
+        waited += wait;
+        await new Promise((res) => setTimeout(res, wait));
+        continue;
+      }
     }
-    return { status: r.status, ok: r.ok, json: await r.json() };
+    return { status: r.status, ok: r.ok, json: await r.json().catch(() => null) };
   }
 }
+
+/** How long one Jupiter request may take before it's abandoned. */
+export const JUPITER_TIMEOUT_MS = 15_000;
+/** The most one Jupiter call waits out 429s in total before giving up. */
+export const JUPITER_MAX_429_WAIT_MS = 20_000;
 
 /** Calls `/swap/v1/swap-instructions` for a quote and returns the leg's instructions. */
 export async function jupiterBuy(o: {
