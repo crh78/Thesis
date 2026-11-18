@@ -706,4 +706,17 @@ export class JupiterBudget {
 }
 
 /** The process's Jupiter budget: routing and the guard share it, as every request shares the key. */
-export const jupiterBudget = new JupiterBudget();
+/**
+ * The fork API's requests a minute: FORK_API_JUPITER_RPM, else JUPITER_BUDGET's 30 (sized for a
+ * key shared with the asset bank and the settler). With its own key (JUPITER_TRADE_API_KEY) the
+ * fork API can take most of Jupiter's 60 a minute.
+ */
+export function budgetFromEnv(env: Record<string, string | undefined> = process.env): Partial<BudgetLimits> {
+  const raw = env.FORK_API_JUPITER_RPM?.trim();
+  if (!raw) return {};
+  const perMinute = Number(raw);
+  if (!Number.isInteger(perMinute) || perMinute < 1 || perMinute > 600) throw new Error(`FORK_API_JUPITER_RPM must be a whole number of requests a minute (1–600), not "${raw}"`);
+  return { perMinute };
+}
+
+export const jupiterBudget = new JupiterBudget(budgetFromEnv());
