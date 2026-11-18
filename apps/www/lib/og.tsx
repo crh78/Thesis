@@ -34,6 +34,10 @@ export async function ogAvatar(person: Pick<Person, "avatar_url">): Promise<{ sr
   return /^https:\/\//.test(a.src) ? a : { src: null, bg: a.bg };
 }
 
+/** Lets Vercel's CDN keep a preview for `seconds` and serve it stale while it redraws: next/og's
+ *  default (max-age=0, must-revalidate) redrew every crawler hit. */
+export const ogCache = (seconds: number) => ({ "cache-control": `public, max-age=${seconds}, s-maxage=${seconds}, stale-while-revalidate=600` });
+
 export const INK = { bg: "#07080B", text: "#F2F3F5", muted: "#9AA0AA", up: "#A6E3B8", down: "#F2A9C2", hairline: "rgba(255,255,255,0.12)" };
 
 export function OgAvatar({ a, letter, size }: { a: { src: string | null; bg: string }; letter: string; size: number }) {

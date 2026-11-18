@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { getReceipt, getTake, HORIZON, pct, SERIES } from "@/lib/data";
+import { ogCache } from "@/lib/og";
 
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
@@ -45,6 +46,6 @@ export default async function Image({ params }: { params: Promise<{ id: string }
         </div>
       </div>
     ),
-    { ...size, fonts: [{ name: "GeistSerif", data: serif }, { name: "Geist", data: sans }] },
+    { ...size, fonts: [{ name: "GeistSerif", data: serif }, { name: "Geist", data: sans }], headers: ogCache(revalidate) },
   );
 }

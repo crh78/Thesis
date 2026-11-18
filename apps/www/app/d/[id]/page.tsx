@@ -11,6 +11,13 @@ import { getDraft, HORIZON } from "@/lib/data";
 
 export const revalidate = 10;
 
+// No pages at build time; each one renders on its first visit and is then cached and refreshed
+// every `revalidate` seconds (ISR). Next 16 needs this export for `revalidate` to apply to a
+// dynamic segment (docs: generate-static-params, "All paths at runtime").
+export function generateStaticParams() {
+  return [];
+}
+
 type Props = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
