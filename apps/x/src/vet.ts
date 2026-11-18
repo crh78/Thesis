@@ -15,19 +15,18 @@ export type Mention = {
 
 export type Verdict =
   | { action: "ignore"; reason: string }
-  | { action: "take"; reason: string; claim: string; risk: "low" | "medium" | "high"; horizon: "2 weeks" | "1 month" | "3 months" | "6 months"; fromParent: boolean }
+  | { action: "take"; reason: string; claim: string; risk: "low" | "medium" | "high"; fromParent: boolean }
   | { action: "explain"; reason: string };
 
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["action", "reason", "claim", "risk", "horizon", "from_parent"],
+  required: ["action", "reason", "claim", "risk", "from_parent"],
   properties: {
     action: { type: "string", enum: ["ignore", "take", "explain"] },
     reason: { type: "string", description: "Why, in under 15 words. For the logs, never shown." },
     claim: { type: "string", description: "For take: the take as one neutral sentence, 5-120 chars. Else empty." },
     risk: { type: "string", enum: ["low", "medium", "high"] },
-    horizon: { type: "string", enum: ["2 weeks", "1 month", "3 months", "6 months"] },
     from_parent: { type: "boolean", description: "The take comes from the parent post rather than the mention itself." },
   },
 } as const;
@@ -41,7 +40,7 @@ const INSTRUCTIONS = [
   "action ignore, always, when any of this is true: hate, slurs, harassment or insults aimed at a person or group; sexual content; violence, death, disasters, wars or tragedies as something to bet on; anything about a private person; minors; self-harm; scams, giveaways, airdrops, or promoting a token, coin or memecoin (\"basket of $XYZ\" for an obscure token is a shill); asking for personal financial advice (\"should I put my savings in\"); asking the bot to say, repeat, endorse or predict something specific; baiting a political or culture-war fight; spam or bot-like text; a reply in a thread with the bot that's just chatter, thanks or an emoji; anything you're unsure about.",
   "Market takes about elections, policy or public companies are fine when they're about markets, not about attacking people.",
   "The claim: neutral and plain, in your own words, no insults, no @handles, no URLs, no hashtags, no emoji, no tickers with $. Under 120 characters. If the post has no market view you can state neutrally, ignore.",
-  "Risk and horizon: what the post says, else medium and 3 months.",
+  "Risk: what the post says, else medium. A take has no timeline (it runs until its author sells), so ignore any date or time frame in the post.",
 ].join(" ");
 
 const clip = (s: string, n: number) => s.replace(/\s+/g, " ").trim().slice(0, n);
@@ -66,23 +65,28 @@ export function vetter(opts: { openaiApiKey: string; model?: string }) {
       text: { format: { type: "json_schema", name: "verdict", schema: SCHEMA, strict: true } },
     } as never)) as OpenAI.Responses.Response;
 
-    let out: { action: string; reason: string; claim: string; risk: string; horizon: string; from_parent: boolean };
-    try {
-      out = JSON.parse(res.output_text ?? "");
-    } catch {
-      return { action: "ignore", reason: "unreadable verdict" };
-    }
-    const reason = clip(String(out.reason ?? ""), 120);
-    if (out.action === "explain") return { action: "explain", reason };
-    if (out.action !== "take") return { action: "ignore", reason };
-    return {
-      action: "take",
-      reason,
-      claim: String(out.claim ?? ""),
-      risk: (["low", "medium", "high"] as const).find((r) => r === out.risk) ?? "medium",
-      horizon: (["2 weeks", "1 month", "3 months", "6 months"] as const).find((h) => h === out.horizon) ?? "3 months",
-      fromParent: !!out.from_parent && !!m.parent,
-    };
+    return readVerdict(res.output_text ?? "", m);
+  };
+}
+
+/** The model's JSON as a verdict. Anything unreadable is ignore; fields outside the schema are dropped. */
+export function readVerdict(text: string, m: Pick<Mention, "parent">): Verdict {
+  let out: { action: string; reason: string; claim: string; risk: string; from_parent: boolean };
+  try {
+    out = JSON.parse(text);
+  } catch {
+    return { action: "ignore", reason: "unreadable verdict" };
+  }
+  if (!out || typeof out !== "object") return { action: "ignore", reason: "unreadable verdict" };
+  const reason = clip(String(out.reason ?? ""), 120);
+  if (out.action === "explain") return { action: "explain", reason };
+  if (out.action !== "take") return { action: "ignore", reason };
+  return {
+    action: "take",
+    reason,
+    claim: String(out.claim ?? ""),
+    risk: (["low", "medium", "high"] as const).find((r) => r === out.risk) ?? "medium",
+    fromParent: !!out.from_parent && !!m.parent,
   };
 }
 

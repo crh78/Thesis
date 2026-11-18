@@ -5,7 +5,7 @@ Design principles and tokens for the Thesis apps. `assets/` holds the exported i
 ## Screens
 
 - **Feed (For you / Following)**
-- **New take: claim, risk, horizon**
+- **New take: claim, risk**
 - **AI building the basket (thinking orb + border beam)**
 - **Basket donut, risk dial, per-pick explanations, buy in**
 - **Take page: chart, basket, traders vs faders, comments (full scroll)**
