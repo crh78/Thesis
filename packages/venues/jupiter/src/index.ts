@@ -7,7 +7,7 @@
 //   users never need SOL. The account and its owner don't change; only who pays the rent.
 // - The user's USDC account is never created here: they already hold USDC to spend.
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
-import type { JupQuote } from "../../bank/src/jupiter.ts";
+import type { JupQuote, QuoteFn } from "../../bank/src/jupiter.ts";
 
 // Public mainnet addresses, not secrets.
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"; // ggignore
@@ -123,24 +123,32 @@ export function buyInstructions(
 export type FetchFn = typeof fetch;
 
 /**
- * POSTs JSON to a Jupiter endpoint. On a 429 it waits until the window resets
+ * Calls a Jupiter endpoint and returns its JSON. On a 429 it waits until the window resets
  * (`x-ratelimit-reset`, unix seconds) rather than backing off blindly, so parallel legs that hit
  * the limit together all go again as soon as they can.
  *
  * Each request gives up after JUPITER_TIMEOUT_MS, and the waits on 429s add up to at most
- * JUPITER_MAX_429_WAIT_MS: past that the 429 is returned, so a build fails instead of hanging.
+ * `max429WaitMs` (default JUPITER_MAX_429_WAIT_MS): past that the 429 is returned, so a build
+ * fails instead of hanging. 0 returns the first 429 at once (callers that would rather fail fast).
  */
-export async function jupiterPost(url: string, body: unknown, apiKey: string | null | undefined, fetchFn: FetchFn = fetch): Promise<{ status: number; ok: boolean; json: any }> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+export async function jupiterRequest(
+  url: string,
+  init: { method: "GET" } | { method: "POST"; body: unknown },
+  apiKey: string | null | undefined,
+  fetchFn: FetchFn = fetch,
+  max429WaitMs = JUPITER_MAX_429_WAIT_MS,
+): Promise<{ status: number; ok: boolean; json: any }> {
+  const headers: Record<string, string> = init.method === "POST" ? { "content-type": "application/json" } : {};
   if (apiKey) headers["x-api-key"] = apiKey;
+  const body = init.method === "POST" ? JSON.stringify(init.body) : undefined;
   let waited = 0;
   for (let attempt = 0; ; attempt++) {
-    const r = await fetchFn(url, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(JUPITER_TIMEOUT_MS) });
+    const r = await fetchFn(url, { method: init.method, headers, body, signal: AbortSignal.timeout(JUPITER_TIMEOUT_MS) });
     if (r.status === 429 && attempt < 5) {
       const reset = Number(r.headers?.get?.("x-ratelimit-reset"));
       const untilReset = Number.isFinite(reset) && reset > 0 ? reset * 1000 - Date.now() + 250 : 0;
       const wait = untilReset > 0 ? Math.min(untilReset, 15_000) : 1_000 * 2 ** attempt;
-      if (waited + wait <= JUPITER_MAX_429_WAIT_MS) {
+      if (waited + wait <= max429WaitMs) {
         waited += wait;
         await new Promise((res) => setTimeout(res, wait));
         continue;
@@ -150,30 +158,62 @@ export async function jupiterPost(url: string, body: unknown, apiKey: string | n
   }
 }
 
+/** POSTs JSON to a Jupiter endpoint (jupiterRequest). */
+export function jupiterPost(url: string, body: unknown, apiKey: string | null | undefined, fetchFn: FetchFn = fetch, max429WaitMs = JUPITER_MAX_429_WAIT_MS) {
+  return jupiterRequest(url, { method: "POST", body }, apiKey, fetchFn, max429WaitMs);
+}
+
 /** How long one Jupiter request may take before it's abandoned. */
 export const JUPITER_TIMEOUT_MS = 15_000;
-/** The most one Jupiter call waits out 429s in total before giving up. */
+/** The most one Jupiter call waits out 429s in total before giving up (by default). */
 export const JUPITER_MAX_429_WAIT_MS = 20_000;
 
-/** Calls `/swap/v1/swap-instructions` for a quote and returns the leg's instructions. */
-export async function jupiterBuy(o: {
-  quote: JupQuote;
-  user: PublicKey;
-  payer: PublicKey;
-  label: string;
-  apiKey?: string | null;
-  fetchFn?: FetchFn;
-}): Promise<JupiterBuy> {
-  const base = o.apiKey ? "https://api.jup.ag" : "https://lite-api.jup.ag";
+const jupiterBase = (apiKey: string | null | undefined) => (apiKey ? "https://api.jup.ag" : "https://lite-api.jup.ag");
+
+/** How a caller reaches Jupiter: its key, the fetch to use (a rate budget's) and how long it may wait out 429s. */
+export type JupiterAccess = { apiKey?: string | null; fetchFn?: FetchFn; max429WaitMs?: number };
+
+/**
+ * An exact-in `/swap/v1/quote`, answered like the bank's JupiterClient.quoteExactIn: a quote, or
+ * null with Jupiter's reason (no route: its error code; Jupiter failing, a 429 or a 5xx:
+ * `HTTP <status>`). Throws only when the request itself fails (timeout, no connection, a budget
+ * that refuses it).
+ */
+export async function jupiterQuote(
+  o: JupiterAccess & { inputMint?: string; outputMint: string; amount: bigint; maxAccounts: number; slippageBps?: number; dexes?: string[] },
+): Promise<{ quote: JupQuote | null; error: string | null }> {
+  let qs = `inputMint=${o.inputMint ?? USDC_MINT}&outputMint=${o.outputMint}&amount=${o.amount}&slippageBps=${o.slippageBps ?? 100}&maxAccounts=${o.maxAccounts}`;
+  if (o.dexes?.length) qs += `&dexes=${encodeURIComponent(o.dexes.join(","))}`;
+  const r = await jupiterRequest(`${jupiterBase(o.apiKey)}/swap/v1/quote?${qs}`, { method: "GET" }, o.apiKey, o.fetchFn, o.max429WaitMs);
+  const j = r.json;
+  if (r.status === 200 && j?.outAmount && j.routePlan?.length) return { quote: j as JupQuote, error: null };
+  // Jupiter says "no route" with a 400 or 404 (or an empty 200); anything else is it failing.
+  const noRoute = r.status === 200 || r.status === 400 || r.status === 404;
+  return { quote: null, error: noRoute ? String(j?.errorCode ?? j?.error ?? (r.status === 200 ? "empty route" : `HTTP ${r.status}`)) : `HTTP ${r.status}` };
+}
+
+/** A USDC-in quote function for bestIssuer (its `quote` option), through `access`. */
+export function quoteFn(access: JupiterAccess): QuoteFn {
+  return (outputMint, usd, o) => jupiterQuote({ ...access, outputMint, amount: BigInt(Math.round(usd * 1e6)), ...o });
+}
+
+/** Calls `/swap/v1/swap-instructions` for a quote: Jupiter's raw answer, for buyInstructions or a swap template. */
+export async function jupiterSwapInstructions(o: JupiterAccess & { quote: JupQuote; user: PublicKey }): Promise<JupSwapInstructions> {
   const body = {
     quoteResponse: o.quote,
     userPublicKey: o.user.toBase58(),
     wrapAndUnwrapSol: false, // the input is USDC
     dynamicComputeUnitLimit: false, // the composer sets one limit per transaction
   };
-  const r = await jupiterPost(`${base}/swap/v1/swap-instructions`, body, o.apiKey, o.fetchFn);
+  const r = await jupiterPost(`${jupiterBase(o.apiKey)}/swap/v1/swap-instructions`, body, o.apiKey, o.fetchFn, o.max429WaitMs);
   if (!r.ok) throw new Error(`Jupiter swap-instructions HTTP ${r.status}: ${JSON.stringify(r.json).slice(0, 300)}`);
-  return buyInstructions(r.json as JupSwapInstructions, o.quote as JupQuote & { outputMint: string; inputMint?: string }, o.user, o.payer, o.label);
+  return r.json as JupSwapInstructions;
+}
+
+/** Calls `/swap/v1/swap-instructions` for a quote and returns the leg's instructions. */
+export async function jupiterBuy(o: JupiterAccess & { quote: JupQuote; user: PublicKey; payer: PublicKey; label: string }): Promise<JupiterBuy> {
+  const res = await jupiterSwapInstructions(o);
+  return buyInstructions(res, o.quote as JupQuote & { outputMint: string; inputMint?: string }, o.user, o.payer, o.label);
 }
 
 /**
@@ -191,3 +231,4 @@ export function splitStake(stake: bigint, weightsBps: number[]): bigint[] {
 }
 
 export * from "./lend.ts";
+export * from "./template.ts";

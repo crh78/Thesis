@@ -109,17 +109,46 @@ const budget = (units: number, microLamports: number) => [
   ...(microLamports > 0 ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports })] : []),
 ];
 
-export async function loadLookupTables(conn: Connection, keys: PublicKey[]): Promise<Map<string, AddressLookupTableAccount>> {
+/** How long a loaded lookup table is reused without reading it again. */
+export const LOOKUP_TABLE_TTL_MS = 10 * 60_000;
+/** Loaded lookup tables per connection: address → the table and when it was read. */
+const tableCache = new WeakMap<Connection, Map<string, { at: number; table: AddressLookupTableAccount }>>();
+
+/**
+ * The lookup tables `keys` name, read in one call per 100 and each reused for `maxAgeMs` (per
+ * connection). A table only grows, so an older copy still resolves every address it holds: at
+ * worst a transaction carries an address the table gained since as a full key. Tables that
+ * aren't found throw and aren't cached. `maxAgeMs` 0 reads every table afresh.
+ */
+export async function loadLookupTables(
+  conn: Connection,
+  keys: PublicKey[],
+  o: { maxAgeMs?: number; now?: number } = {},
+): Promise<Map<string, AddressLookupTableAccount>> {
+  const maxAge = o.maxAgeMs ?? LOOKUP_TABLE_TTL_MS;
+  const now = o.now ?? Date.now();
+  let cache = tableCache.get(conn);
+  if (!cache) tableCache.set(conn, (cache = new Map()));
   const out = new Map<string, AddressLookupTableAccount>();
   const unique = [...new Map(keys.map((k) => [k.toBase58(), k])).values()];
-  for (let i = 0; i < unique.length; i += 100) {
-    const chunk = unique.slice(i, i + 100);
+  const toRead: PublicKey[] = [];
+  for (const k of unique) {
+    const hit = cache.get(k.toBase58());
+    if (hit && hit.at > now - maxAge) out.set(k.toBase58(), hit.table);
+    else toRead.push(k);
+  }
+  for (let i = 0; i < toRead.length; i += 100) {
+    const chunk = toRead.slice(i, i + 100);
     const infos = await conn.getMultipleAccountsInfo(chunk, "confirmed");
     infos.forEach((info, j) => {
       if (!info) throw new Error(`lookup table ${chunk[j].toBase58()} not found`);
-      out.set(chunk[j].toBase58(), new AddressLookupTableAccount({ key: chunk[j], state: AddressLookupTableAccount.deserialize(info.data) }));
+      const table = new AddressLookupTableAccount({ key: chunk[j], state: AddressLookupTableAccount.deserialize(info.data) });
+      out.set(chunk[j].toBase58(), table);
+      cache.set(chunk[j].toBase58(), { at: now, table });
     });
   }
+  // Drop what's past its age now and then, so the cache stays the size of what's in use.
+  if (cache.size > 256) for (const [k, v] of cache) if (v.at <= now - maxAge) cache.delete(k);
   return out;
 }
 

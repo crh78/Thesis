@@ -58,9 +58,9 @@ export function depositInstructions(res: { instructions: JupIx[] }, user: Public
 }
 
 /** Calls `/lend/v1/earn/deposit-instructions` for a USDC deposit from `user`. Needs an API key. */
-export async function jupiterLendDeposit(o: { user: PublicKey; payer: PublicKey; amount: bigint; label: string; apiKey: string; fetchFn?: FetchFn }): Promise<LendDeposit> {
+export async function jupiterLendDeposit(o: { user: PublicKey; payer: PublicKey; amount: bigint; label: string; apiKey: string; fetchFn?: FetchFn; max429WaitMs?: number }): Promise<LendDeposit> {
   const body = { asset: USDC_MINT, amount: o.amount.toString(), signer: o.user.toBase58() };
-  const r = await jupiterPost("https://api.jup.ag/lend/v1/earn/deposit-instructions", body, o.apiKey, o.fetchFn);
+  const r = await jupiterPost("https://api.jup.ag/lend/v1/earn/deposit-instructions", body, o.apiKey, o.fetchFn, o.max429WaitMs);
   if (!r.ok) throw new Error(`Jupiter Lend deposit-instructions HTTP ${r.status}: ${JSON.stringify(r.json).slice(0, 300)}`);
   return depositInstructions(r.json as { instructions: JupIx[] }, o.user, o.payer, o.amount, o.label);
 }
@@ -80,9 +80,9 @@ export function redeemInstructions(res: { instructions: JupIx[] }, user: PublicK
 }
 
 /** Calls `/lend/v1/earn/redeem-instructions` to turn `user`'s jlUSDC shares back into USDC. Needs an API key. */
-export async function jupiterLendRedeem(o: { user: PublicKey; payer: PublicKey; shares: bigint; label: string; apiKey: string; fetchFn?: FetchFn }): Promise<LendDeposit> {
+export async function jupiterLendRedeem(o: { user: PublicKey; payer: PublicKey; shares: bigint; label: string; apiKey: string; fetchFn?: FetchFn; max429WaitMs?: number }): Promise<LendDeposit> {
   const body = { asset: USDC_MINT, shares: o.shares.toString(), signer: o.user.toBase58() };
-  const r = await jupiterPost("https://api.jup.ag/lend/v1/earn/redeem-instructions", body, o.apiKey, o.fetchFn);
+  const r = await jupiterPost("https://api.jup.ag/lend/v1/earn/redeem-instructions", body, o.apiKey, o.fetchFn, o.max429WaitMs);
   if (!r.ok) throw new Error(`Jupiter Lend redeem-instructions HTTP ${r.status}: ${JSON.stringify(r.json).slice(0, 300)}`);
   return redeemInstructions(r.json as { instructions: JupIx[] }, o.user, o.payer, o.shares, o.label);
 }

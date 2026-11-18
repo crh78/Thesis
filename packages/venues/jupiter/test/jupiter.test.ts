@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Keypair } from "@solana/web3.js";
-import { ASSOCIATED_TOKEN_PROGRAM, TOKEN_2022_PROGRAM, USDC_MINT, associatedTokenAddress, buyInstructions, jupiterBuy, splitStake, type JupSwapInstructions } from "../src/index.ts";
+import { ASSOCIATED_TOKEN_PROGRAM, TOKEN_2022_PROGRAM, USDC_MINT, associatedTokenAddress, buyInstructions, jupiterBuy, jupiterQuote, quoteFn, splitStake, type JupSwapInstructions } from "../src/index.ts";
 
 const user = Keypair.generate().publicKey;
 const payer = Keypair.generate().publicKey;
@@ -91,4 +91,34 @@ test("stake splits by weight and always adds up", () => {
   assert.equal(parts.reduce((a, b) => a + b, 0n), 10_000_001n);
   assert.throws(() => splitStake(1n, [0]));
 
+});
+
+test("a caller that won't wait gets Jupiter's 429 back at once", async () => {
+  let calls = 0;
+  const fake = (async () => {
+    calls++;
+    return new Response("{}", { status: 429 });
+  }) as typeof fetch;
+  const started = Date.now();
+  await assert.rejects(jupiterBuy({ quote: quote as any, user, payer, label: "x", fetchFn: fake, max429WaitMs: 0 }), /HTTP 429/);
+  assert.equal(calls, 1);
+  assert.ok(Date.now() - started < 500);
+});
+
+test("quotes: a route, Jupiter's no-route code, or the HTTP status of anything else", async () => {
+  let url = "";
+  const answer = (status: number, body: unknown) =>
+    (async (u: string) => {
+      url = u;
+      return new Response(JSON.stringify(body), { status });
+    }) as unknown as typeof fetch;
+  const routed = { inAmount: "15000000", outAmount: "8190000", otherAmountThreshold: "8111706", priceImpactPct: "0", slippageBps: 100, routePlan: [{ swapInfo: {}, percent: 100 }] };
+  const q = await quoteFn({ fetchFn: answer(200, routed) })(NVDAX, 15, { maxAccounts: 30, dexes: ["Whirlpool", "Raydium CLMM"] });
+  assert.equal(q.quote?.outAmount, "8190000");
+  assert.match(url, /^https:\/\/lite-api\.jup\.ag\/swap\/v1\/quote\?inputMint=EPjF\w+&outputMint=Xsc9\w+&amount=15000000&slippageBps=100&maxAccounts=30&dexes=Whirlpool%2CRaydium%20CLMM$/);
+  assert.deepEqual(await quoteFn({ fetchFn: answer(400, { errorCode: "COULD_NOT_FIND_ANY_ROUTE" }) })(NVDAX, 15, { maxAccounts: 30 }), { quote: null, error: "COULD_NOT_FIND_ANY_ROUTE" });
+  assert.deepEqual(await quoteFn({ fetchFn: answer(429, {}), max429WaitMs: 0 })(NVDAX, 15, { maxAccounts: 30 }), { quote: null, error: "HTTP 429" });
+  const sale = await jupiterQuote({ apiKey: "k", fetchFn: answer(200, routed), inputMint: NVDAX, outputMint: USDC_MINT, amount: 5n, maxAccounts: 20 });
+  assert.ok(sale.quote);
+  assert.match(url, /^https:\/\/api\.jup\.ag\/swap\/v1\/quote\?inputMint=Xsc9\w+&outputMint=EPjF\w+&amount=5&/);
 });

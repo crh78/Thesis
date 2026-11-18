@@ -2,7 +2,7 @@
 export { underlyingId, underlyingIdHex, underlyingIdBase58, isUnderlyingKey, parseUnderlyingKey, spotUnderlyingKey, phoenixUnderlyingKey, normalizeTicker, UNDERLYING_ID_PREFIX, ETF_TICKERS, type UnderlyingClass } from "./identity.ts";
 export { ratioFor, usPersonsFor, effectiveMultiplier, underlyingUnits, readScaledUi, ISSUER_POLICY, type RatioInfo, type ScaledUi, type UsPersons } from "./ratios.ts";
 export { getAssetBank, viewAssetBank, loadBankState, type AssetBank, type UnderlyingView, type IssuerView, type GetAssetBankOpts } from "./read.ts";
-export { bestIssuer, issuerPool, PRICEABLE_MIN_POOLED_USD, type BestIssuerOpts, type BestIssuerResult, type Candidate } from "./route.ts";
+export { bestIssuer, cachedMintReads, issuerPool, MINT_READ_TTL_MS, PRICEABLE_MIN_POOLED_USD, type BestIssuerOpts, type BestIssuerResult, type Candidate, type ReadMints } from "./route.ts";
 export { AssetBankPoller, RequestCounter, TIERS, type TierName } from "./poller.ts";
 export { loadBankConfig, CONFIG_ENV, FRESHNESS_ENV, type BankConfig } from "./config.ts";
 export { FileSink, SupabaseSink, defaultSink, type BankSink, type Dirty } from "./sinks.ts";
