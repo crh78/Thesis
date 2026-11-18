@@ -144,6 +144,17 @@ test("Jupiter: a cached price expires before the next tick, and the next prefetc
   assert.equal(api.calls.length, 4, "the prefetch cleared A");
 });
 
+test("Jupiter: a prefetch with no mints still empties the cache, without a request", async () => {
+  const api = priceApi();
+  const now = 1_000;
+  const j = new JupiterPrices("k", api.fetchFn, () => now, { cacheSecs: 60 });
+  await j.prefetch(["A"]);
+  await j.prefetch([]);
+  assert.equal(api.calls.length, 1, "no request for an empty tick");
+  await j.price("A");
+  assert.equal(api.calls.length, 2, "A from the earlier tick isn't reused, however long cacheSecs is");
+});
+
 test("Jupiter: a 429 isn't retried; the source rests and makes no calls until it's over", async () => {
   const api = priceApi();
   let now = 1_000;

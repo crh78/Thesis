@@ -187,8 +187,11 @@ async function postPayload(url: string | undefined, payload: unknown): Promise<P
   }
 }
 
-/** A 4xx other than 408 and 429 won't change on a retry. */
-const permanent = (status: number | null) => status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429;
+/**
+ * Only a payload the webhook can't take (malformed, too large, unprocessable) won't change on a
+ * retry. 401/403/404 can (a rotated token, a JWT setting, a function mid-redeploy): retried.
+ */
+export const permanent = (status: number | null) => status === 400 || status === 413 || status === 422;
 
 /**
  * Posts one payload with a few quick retries (1 s apart). For `relayTransactions`, whose callers
@@ -260,11 +263,17 @@ export async function signaturesSince(rpc: RpcCall, address: string, until: stri
 /** Where the relay keeps the last transaction it handled, so a restart back-fills from there. */
 export type RelayState = { last(): string | null; save(signature: string): void };
 
-/** The state in a JSON file, rewritten atomically after each transaction. */
-export function fileRelayState(path: string): RelayState {
+/**
+ * The state in a JSON file, rewritten atomically after each transaction, tied to one fork by
+ * `forkId` (the fork's lookup-table address, as the fork API's state file is): a file from
+ * another fork (before a reset) is ignored, so the relay starts afresh.
+ */
+export function fileRelayState(path: string, forkId: string | null, log: (line: string) => void = (l) => console.error(l)): RelayState {
   let last: string | null = null;
   try {
-    last = (JSON.parse(readFileSync(path, "utf8")) as { lastSignature?: string }).lastSignature ?? null;
+    const saved = JSON.parse(readFileSync(path, "utf8")) as { lastSignature?: string; forkId?: string | null };
+    if ((saved.forkId ?? null) === forkId) last = saved.lastSignature ?? null;
+    else log(`Relay state in ${path} is from another fork (${saved.forkId ?? "unknown"}, this one is ${forkId ?? "unknown"}): ignored`);
   } catch {
     // No file yet: the first start sets a starting point.
   }
@@ -274,10 +283,19 @@ export function fileRelayState(path: string): RelayState {
       last = signature;
       mkdirSync(dirname(path), { recursive: true });
       const tmp = `${path}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ lastSignature: signature, savedAt: new Date().toISOString() }));
+      writeFileSync(tmp, JSON.stringify({ lastSignature: signature, forkId, savedAt: new Date().toISOString() }));
       renameSync(tmp, path);
     },
   };
+}
+
+/** The fork's id: its Thesis lookup table's address, from `.data/fork/thesis-alt.json` (written by fork:up). */
+export function forkIdFrom(path: string): string | null {
+  try {
+    return (JSON.parse(readFileSync(path, "utf8")) as { address?: string }).address ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export type RelayOptions = {
@@ -296,7 +314,10 @@ export type RelayOptions = {
   maxQueue?: number;
   /** Transactions read per back-fill at most. */
   maxBackfill?: number;
-  /** How long one delivery is retried before it's skipped, loudly. */
+  /**
+   * How long a back-filled transaction that `getTransaction` keeps returning nothing for is
+   * retried before it's given up, loudly (default 5 minutes). Webhook failures never give up.
+   */
   giveUpMs?: number;
   /** The longest wait between retries. */
   maxDelayMs?: number;
@@ -313,9 +334,12 @@ type Job = { kind: "tx"; signature: string; slot: number; failed: boolean; note?
  *   last one it handled (`getSignaturesForAddress(program, { until })`, kept in `state`) and
  *   delivers them first, oldest first, so restarts and dropped sockets lose nothing. With no
  *   state yet, it starts from the newest transaction and doesn't replay older history.
- * - **Retries.** A failed delivery is retried with backoff (1 s doubling to a minute), not dropped
- *   after 3 tries, and stays at the head of the queue so order holds. A 4xx other than 408/429 is
- *   skipped at once; anything else is skipped after `giveUpMs`, with a loud log naming it.
+ * - **Retries.** A failed delivery is retried with backoff (1 s doubling to a minute) for as long
+ *   as it takes, and stays at the head of the queue so order holds. Only a payload the webhook
+ *   can't take (400, 413, 422), a back-filled transaction the RPC never returns (`giveUpMs`), or a
+ *   relaying bug is given up, loudly, naming the signature.
+ * - **Position.** The saved position never passes a transaction that wasn't delivered: after one,
+ *   later transactions are still delivered but the position holds, so a restart retries it.
  * - **Cap.** Past `maxQueue` queued transactions new ones are dropped (loudly) and back-filled from
  *   the state once the queue drains.
  *
@@ -328,6 +352,7 @@ export class Relay {
   #recent = new Set<string>();
   #recentOrder: string[] = [];
   #overflow = false;
+  #held: string | null = null;
   #running: Promise<void> | null = null;
 
   constructor(o: RelayOptions) {
@@ -339,7 +364,7 @@ export class Relay {
       now: Date.now,
       maxQueue: 10_000,
       maxBackfill: 5_000,
-      giveUpMs: 60 * 60_000,
+      giveUpMs: 5 * 60_000,
       maxDelayMs: 60_000,
       ...o,
     };
@@ -394,15 +419,35 @@ export class Relay {
         await this.#backfill();
         continue;
       }
-      await this.#handle(job);
+      let outcome: "done" | "undelivered";
+      try {
+        outcome = await this.#handle(job);
+      } catch (e) {
+        // A bug (a decode error, say) mustn't let later saves move past this transaction.
+        this.#o.error(`✗ ${job.signature}: relaying it failed (${(e as Error).message}): not delivered`);
+        outcome = "undelivered";
+      }
       this.#pending.delete(job.signature);
       this.#remember(job.signature);
+      if (outcome === "undelivered" && !this.#held) {
+        this.#held = job.signature;
+        this.#o.error(
+          `✗ relay position held at ${this.#o.state.last() ?? "the start"}: ${job.signature} wasn't delivered. Later transactions are still delivered; a restart back-fills from the held position and retries it.`,
+        );
+      }
+      // The saved position never passes a transaction that wasn't delivered.
+      if (this.#held) continue;
       try {
         this.#o.state.save(job.signature);
       } catch (e) {
         this.#o.error(`✗ relay state not saved (${(e as Error).message}): a restart would back-fill from an older transaction`);
       }
     }
+  }
+
+  /** The first transaction this process couldn't deliver: the saved position stays before it. */
+  get held(): string | null {
+    return this.#held;
   }
 
   #remember(signature: string) {
@@ -451,13 +496,20 @@ export class Relay {
     }
   }
 
-  async #handle(job: Extract<Job, { kind: "tx" }>) {
+  /**
+   * Delivers one transaction. "done": delivered, or nothing to deliver (failed on chain, no Thesis
+   * events). "undelivered": the webhook can't take the payload (400/413/422), or the RPC never
+   * returned a back-filled transaction within `giveUpMs`. Anything transient (5xx, 401/403/404,
+   * 408/429, no answer) is retried with capped backoff for as long as it takes: the queue cap and
+   * the back-fill cover what piles up meanwhile.
+   */
+  async #handle(job: Extract<Job, { kind: "tx" }>): Promise<"done" | "undelivered"> {
     const { signature } = job;
     if (job.failed) {
       this.#o.log(`· skipped failed tx ${signature}`);
-      return;
+      return "done";
     }
-    const started = this.#o.now();
+    let missingSince: number | null = null;
     let tx: RpcTransaction | null = null;
     let announced = false;
     for (let attempt = 0; ; attempt++) {
@@ -466,7 +518,7 @@ export class Relay {
       if (attempt === 0 && job.note) this.#o.record?.(job.note, tx);
       if (tx?.meta?.err) {
         this.#o.log(`· skipped failed tx ${signature}`);
-        return;
+        return "done";
       }
       // A live notification's logs stand in for a transaction the RPC can't return; a
       // back-filled one has no logs, so it waits for the RPC.
@@ -474,29 +526,31 @@ export class Relay {
         job.note ?? (tx ? { context: { slot: tx.slot }, value: { signature, err: null, logs: tx.meta?.logMessages ?? [] } } : null);
       if (note) {
         const payload = relayPayload(this.#o.filter, note, tx);
-        if (!payload) return;
+        if (!payload) return "done";
         if (!announced) {
           const ixs = (payload as { transactions: { instructions: string[] }[] }).transactions.flatMap((t) => t.instructions);
           this.#o.log(`· ${signature} slot ${tx?.slot ?? job.slot} [${ixs.join(", ")}]`);
           announced = true;
         }
         const r = await this.#o.post(payload);
-        if (r.ok) return;
+        if (r.ok) return "done";
         if (permanent(r.status)) {
-          this.#o.error(`✗ ${signature}: the webhook rejected it (HTTP ${r.status}): skipped. ${r.detail}`);
-          return;
+          this.#o.error(`✗ ${signature}: the webhook can't take it (HTTP ${r.status}): not delivered. ${r.detail}`);
+          return "undelivered";
         }
         why = `${r.status ? `HTTP ${r.status}` : "no answer"}${r.detail ? `: ${r.detail}` : ""}`;
       } else {
+        missingSince ??= this.#o.now();
+        if (this.#o.now() - missingSince >= this.#o.giveUpMs) {
+          this.#o.error(`✗ ${signature}: getTransaction returned nothing for ${Math.round(this.#o.giveUpMs / 60_000)} min: not delivered. Replay it with relayTransactions once the RPC has it.`);
+          return "undelivered";
+        }
         why = "getTransaction returned nothing";
-      }
-      if (this.#o.now() - started >= this.#o.giveUpMs) {
-        this.#o.error(`✗ ${signature}: not delivered after ${Math.round(this.#o.giveUpMs / 60_000)} min (${why}): skipped. Replay it with relayTransactions once the webhook is back.`);
-        return;
       }
       const delay = this.#delay(attempt);
       const line = `✗ ${signature}: ${why}; retry ${attempt + 1} in ${delay / 1000}s (${this.#queue.length} queued behind it)`;
-      (attempt >= 2 ? this.#o.error : this.#o.log)(line);
+      // Loud on the third retry and every tenth after it; quiet otherwise.
+      (attempt === 2 || (attempt > 2 && attempt % 10 === 0) ? this.#o.error : this.#o.log)(line);
       await this.#o.sleep(delay);
     }
   }
@@ -515,7 +569,8 @@ export function runRelay(): void {
     rpc: httpRpc(rpcUrl),
     post: (payload) => postPayload(url, payload),
     // Printing only: nothing to catch up on, and no state file.
-    state: url ? fileRelayState(statePath) : { last: () => memory, save: (s) => void (memory = s) },
+    // The position belongs to this fork: a state file from before a reset is ignored.
+    state: url ? fileRelayState(statePath, forkIdFrom(join(REPO_ROOT, ".data/fork/thesis-alt.json"))) : { last: () => memory, save: (s) => void (memory = s) },
     backfill: Boolean(url),
     record: process.env.FORK_RELAY_RECORD
       ? (notification, transaction) => appendFileSync(process.env.FORK_RELAY_RECORD!, JSON.stringify({ notification, transaction }) + "\n")

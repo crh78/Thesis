@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   Relay,
+  fileRelayState,
+  permanent,
   loadFilter,
   signaturesSince,
   type LogsNotification,
@@ -108,6 +110,9 @@ test("a failing webhook is retried with backoff, in order, not dropped after thr
     { ok: false, status: null, detail: "timeout" },
     { ok: false, status: 500, detail: "" },
     { ok: false, status: 429, detail: "" },
+    { ok: false, status: 401, detail: "rotated token" },
+    { ok: false, status: 403, detail: "" },
+    { ok: false, status: 404, detail: "mid-redeploy" },
     { ok: true },
   ];
   const posts: string[] = [];
@@ -124,32 +129,114 @@ test("a failing webhook is retried with backoff, in order, not dropped after thr
   relay.notify(note("a", 100));
   relay.notify(note("b", 101));
   await relay.drained();
-  assert.deepEqual(posts, ["a", "a", "a", "a", "a", "b"]);
-  assert.deepEqual(waits, [1000, 2000, 4000, 8000]);
-  assert.ok(errors.some((l) => /a: HTTP 500; retry 3/.test(l)), "loud from the third retry on");
+  assert.deepEqual(posts, ["a", "a", "a", "a", "a", "a", "a", "a", "b"]);
+  assert.deepEqual(waits, [1000, 2000, 4000, 8000, 16000, 32000, 60000]);
+  assert.ok(errors.some((l) => /a: HTTP 500; retry 3/.test(l)), "loud on the third retry");
   assert.deepEqual(saved, ["a", "b"]);
 });
 
-test("a permanent rejection is skipped at once; anything else after giveUpMs, loudly", async () => {
-  const { rpc } = chain(["a", "b"]);
+test("a webhook that stays down is retried for as long as it takes, never skipped", async () => {
+  const { rpc } = chain(["a"]);
   let now = 0;
-  const errors: string[] = [];
-  const posts: string[] = [];
+  let fails = 500; // over 8 hours at the 60 s cap
+  const { saved, state } = memoryState("x");
   const relay = new Relay({
-    filter, rpc, state: memoryState("x").state,
-    post: async (p) => (posts.push(signatureOf(p)), signatureOf(p) === "a" ? { ok: false, status: 400, detail: "bad payload" } : { ok: false, status: 502, detail: "" }),
+    filter, rpc, state,
+    post: async () => (fails-- > 0 ? { ok: false, status: 502, detail: "" } : { ok: true }),
     sleep: async (ms) => void (now += ms),
     now: () => now,
-    giveUpMs: 10_000,
+    ...quiet,
+  });
+  relay.notify(note("a", 100));
+  await relay.drained();
+  assert.ok(now > 8 * 3600_000);
+  assert.deepEqual(saved, ["a"], "delivered in the end, and saved");
+  assert.equal(relay.held, null);
+});
+
+test("a payload the webhook can't take is given up at once, and the position holds before it", async () => {
+  const { rpc } = chain(["a", "b", "c"]);
+  const errors: string[] = [];
+  const posts: string[] = [];
+  const { saved, state } = memoryState("x");
+  const relay = new Relay({
+    filter, rpc, state,
+    post: async (p) => (posts.push(signatureOf(p)), signatureOf(p) === "b" ? { ok: false, status: 422, detail: "bad payload" } : { ok: true }),
+    sleep: async () => {},
     log: () => {},
     error: (l) => errors.push(l),
   });
   relay.notify(note("a", 100));
   relay.notify(note("b", 101));
+  relay.notify(note("c", 102));
   await relay.drained();
-  assert.equal(posts.filter((s) => s === "a").length, 1);
-  assert.match(errors[0], /a: the webhook rejected it \(HTTP 400\): skipped/);
-  assert.ok(errors.some((l) => /b: not delivered after 0 min \(HTTP 502\): skipped/.test(l)));
+  assert.deepEqual(posts, ["a", "b", "c"], "later transactions are still delivered");
+  assert.match(errors[0], /b: the webhook can't take it \(HTTP 422\): not delivered/);
+  assert.ok(errors.some((l) => /position held at a: b wasn't delivered/.test(l)));
+  assert.deepEqual(saved, ["a"], "never saved past b, so a restart retries it");
+  assert.equal(relay.held, "b");
+});
+
+test("a back-filled transaction the RPC never returns is given up after giveUpMs, loudly; the position holds", async () => {
+  const { rpc, txs } = chain(["a", "b", "c"]);
+  txs.delete("b");
+  let now = 0;
+  const errors: string[] = [];
+  const delivered: string[] = [];
+  const { saved, state } = memoryState("a");
+  const relay = new Relay({
+    filter, rpc, state,
+    post: async (p) => (delivered.push(signatureOf(p)), { ok: true }),
+    sleep: async (ms) => void (now += ms),
+    now: () => now,
+    giveUpMs: 5 * 60_000,
+    log: () => {},
+    error: (l) => errors.push(l),
+  });
+  relay.backfill();
+  await relay.drained();
+  assert.deepEqual(delivered, ["c"]);
+  assert.ok(errors.some((l) => /b: getTransaction returned nothing for 5 min: not delivered/.test(l)));
+  assert.deepEqual(saved, []);
+  assert.equal(relay.held, "b");
+});
+
+test("a relaying bug doesn't let the position move past the transaction", async () => {
+  const { rpc } = chain(["a", "b", "c"]);
+  const errors: string[] = [];
+  const { saved, state } = memoryState("x");
+  const relay = new Relay({
+    filter, rpc, state,
+    post: async (p) => {
+      if (signatureOf(p) === "b") throw new Error("decode failed");
+      return { ok: true };
+    },
+    sleep: async () => {},
+    log: () => {},
+    error: (l) => errors.push(l),
+  });
+  relay.notify(note("a", 100));
+  relay.notify(note("b", 101));
+  relay.notify(note("c", 102));
+  await relay.drained();
+  assert.ok(errors.some((l) => /b: relaying it failed \(decode failed\): not delivered/.test(l)));
+  assert.deepEqual(saved, ["a"]);
+});
+
+test("a state file from another fork is ignored", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = join(mkdtempSync(join(tmpdir(), "relay-state-")), "relay-state.json");
+  const lines: string[] = [];
+  fileRelayState(path, "ALT1").save("sig1");
+  assert.equal(fileRelayState(path, "ALT1").last(), "sig1");
+  assert.equal(fileRelayState(path, "ALT2", (l) => lines.push(l)).last(), null);
+  assert.match(lines[0], /from another fork \(ALT1, this one is ALT2\): ignored/);
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).forkId, "ALT1");
+});
+
+test("only 400, 413 and 422 are permanent", () => {
+  assert.deepEqual([400, 401, 403, 404, 408, 413, 422, 429, 500, null].filter(permanent), [400, 413, 422]);
 });
 
 test("past the queue cap new transactions are dropped, then back-filled once it drains", async () => {

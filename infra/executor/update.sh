@@ -47,6 +47,8 @@ gpasswd -d thesis docker >/dev/null 2>&1 && echo "• removed thesis from the do
 if [ "$FRESH" = 1 ]; then
   [ -f "$APP/anchor/target/deploy/thesis.so" ] || { echo "no $APP/anchor/target/deploy/thesis.so"; exit 1; }
   echo "• fresh fork (state and fake balances reset)"
+  # The relay's position belongs to the old fork (it would also ignore it: another fork id).
+  rm -f "$APP/.data/fork/relay-state.json"
   systemctl restart thesis-surfpool
   systemctl restart thesis-fork-up
 fi

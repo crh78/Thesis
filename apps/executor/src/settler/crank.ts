@@ -424,15 +424,12 @@ export class Settler {
   }
 
   /**
-   * The position's proof of trade, cached once read; null for a receipt with no TradeProved
-   * event; undefined (try again next tick) while the receipt can't be read.
-   */
-  /**
    * Reads, in batches, the issuer token of every spot leg this tick may price live (its moment
    * passed within the live window), after the chain's clock was read, so the legs below answer
    * from the source's per-tick cache. Only how the calls are made changes: each leg is still
    * priced by the same rules, at or after its own moment. A failed read is logged, and the legs
-   * then ask one mint at a time (or wait, while the source rests after a 429).
+   * then ask one mint at a time (or wait, while the source rests after a 429). Called every tick,
+   * even with no mints, so the cache never carries a price from before this tick's clock.
    */
   async #prefetchTokens(
     positions: { publicKey: PublicKey; account: PositionAccount }[],
@@ -464,14 +461,18 @@ export class Settler {
         }
       }
     }
-    if (!mints.size) return;
     try {
+      // With no mints this only clears the cache (no request).
       await tokens.prefetch([...mints]);
     } catch (e) {
       this.#log(`token prices (${mints.size} mints): ${e instanceof Error ? e.message : e}`);
     }
   }
 
+  /**
+   * The position's proof of trade, cached once read; null for a receipt with no TradeProved
+   * event; undefined (try again next tick) while the receipt can't be read.
+   */
   async #proofFor(position: PublicKey): Promise<TradeProof | null | undefined> {
     const key = position.toBase58();
     if (!this.#proofs.has(key)) {
