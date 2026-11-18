@@ -20,6 +20,17 @@ struct ForkExitSheet: View {
                      ? "Sells the whole position for fork USDC, including money held for prediction legs. It's scored at today's prices and settles right away."
                      : "Sells the whole position for fork USDC. It's scored at today's prices and settles right away.")
                     .foregroundStyle(Palette.muted)
+                // The author's own buy-in: selling it closes the take for everyone.
+                if quotes?.contains(where: { $0.closesTake == true }) == true {
+                    Label("Selling closes this take: no new trades, and its result is final at today's prices. Others keep their positions.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.geist(14, .medium))
+                        .foregroundStyle(Palette.text)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                        .accessibilityIdentifier("fork-exit-closes-take")
+                }
                 if let quotes {
                     let expected = quotes.reduce(0) { $0 + ($1.expectedUsd ?? 0) }
                     let minimum = quotes.reduce(0) { $0 + ($1.minimumUsd ?? 0) }

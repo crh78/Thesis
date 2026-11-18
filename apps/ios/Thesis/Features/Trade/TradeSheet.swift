@@ -55,6 +55,8 @@ struct TradeSheet: View {
         return Dictionary(receipt.leftOut.map { ($0.name, $0.blocked ?? "Can't be traded on the fork yet") }, uniquingKeysWith: { a, _ in a })
     }
     private var forkBlocked: Bool { app.isOnFork && (receipt == nil || (side == .back ? !receipt!.canBack : !receipt!.canFade)) }
+    /// The take as the chain sees it now: closed once its author sold (the feed's copy can be older).
+    private var current: Take { take.updated(with: app.isOnFork ? receipt : nil) }
     private var legs: [Leg] {
         // On the fork the receipt says what can be faded; off it, the take's own fade notes do.
         let base = side == .back || app.isOnFork ? take.legs : take.legs.filter(\.canFade)
@@ -216,7 +218,11 @@ struct TradeSheet: View {
                         .font(.geist(13, .medium))
                         .foregroundStyle(Palette.down)
                 }
-                if forkBlocked {
+                if !current.isOpen {
+                    SidePill(side: side, title: "Closed", height: 56, expand: true) {}
+                        .disabled(true)
+                        .opacity(0.5)
+                } else if forkBlocked {
                     SidePill(side: side, title: receipt == nil ? "Checking the fork…" : "Not on the fork yet", height: 56, expand: true) {}
                         .disabled(true)
                         .opacity(0.5)
@@ -234,7 +240,9 @@ struct TradeSheet: View {
                              height: 56, expand: true, action: place)
                         .disabled(placing)
                 }
-                Text(forkBlocked
+                Text(!current.isOpen
+                     ? current.closedReason
+                     : forkBlocked
                      ? receipt?.missing ?? (side == .fade ? receipt?.fadeBlocked ?? "Loading what the fork can trade…" : "None of these legs can be traded on the fork yet.")
                      : tooSmall
                      ? "The smallest \(side.title.lowercased()) is \(Fmt.usd(app.minTrade))."
@@ -271,6 +279,8 @@ struct TradeSheet: View {
                 dismiss()
             } catch {
                 failure = CashErrorText.message(for: error)
+                // Its author sold while the sheet was open: show it closed.
+                if (error as? ForkAPIError)?.code == "take_closed" { receipt = await app.receipt(for: take) }
             }
             placing = false
         }

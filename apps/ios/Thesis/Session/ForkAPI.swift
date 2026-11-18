@@ -190,6 +190,8 @@ struct ForkAPIError: Error, Decodable, LocalizedError {
         case "wrong_wallet": "This wallet isn't the one you're signed in with. Sign in again."
         case "invalid_amount": message ?? "That amount doesn't work."
         case "build_expired": "That took too long. Try again."
+        // A back or fade on a take whose author sold their buy-in.
+        case "take_closed": "This take is closed: its author sold, so it takes no new trades or fades."
         default: message ?? "The fork didn't take that (\(code))."
         }
     }
@@ -215,6 +217,9 @@ struct ForkBuild: Decodable {
     let phoenixCashOut: Bool?
     /// Legs this trade or post leaves out, and why (a name the fork can't buy right now).
     let excluded: [LeftOut]?
+    /// A sale of the author's own buy-in on an open take: it closes the take (no new trades, and
+    /// its result is final at today's prices). Missing on older forks and on other builds.
+    var closesTake: Bool? = nil
 
     struct LeftOut: Decodable, Equatable {
         let name: String
@@ -323,7 +328,13 @@ struct ForkReceipt: Decodable, Equatable {
 
     let onChain: Bool
     let address: String?
+    /// "open", "closed" (the author sold their buy-in: no new trades) or "settled". Older forks
+    /// say only "open" or "settled".
     let status: String?
+    /// Unix seconds: when the author's sale closed it (nil while open; missing on older forks).
+    let closedAt: Double?
+    /// Unix seconds: when it settles by itself if the author never sells (a year after posting).
+    let horizonEnd: Double?
     let backers: Int?
     let faders: Int?
     let totalBackedUsd: Double?

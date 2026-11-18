@@ -255,7 +255,7 @@ private struct CallRow: View {
                     .padding(.leading, 10)
                     .overlay(alignment: .leading) { Capsule().fill(Palette.muted.opacity(0.35)).frame(width: 2) }
                 HStack {
-                    Text([call.risk.map { "\($0.capitalized) risk" }, call.horizon].compactMap { $0 }.joined(separator: " · "))
+                    Text(call.risk.map { "\($0.capitalized) risk" } ?? "")
                         .font(.mono(11)).foregroundStyle(Palette.muted)
                     Spacer()
                     Button(action: onCopy) {

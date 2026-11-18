@@ -40,7 +40,11 @@ struct ForkReceiptView: View {
     private var statusText: String {
         guard let receipt else { return "LOADING" }
         guard receipt.onChain else { return "FORK · NOT POSTED" }
-        return receipt.status == "settled" ? "FORK · SETTLED" : "FORK · LIVE"
+        switch receipt.status {
+        case "settled": return "FORK · SETTLED"
+        case "closed": return "FORK · CLOSED"
+        default: return "FORK · OPEN"
+        }
     }
 
     private func stats(_ r: ForkReceipt) -> some View {

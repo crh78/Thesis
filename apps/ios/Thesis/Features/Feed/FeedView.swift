@@ -269,10 +269,19 @@ struct TakeRow: View {
         // Pills on the left; comments / save / share as one evenly
         // spaced group on the right.
         HStack(spacing: 8) {
-            CompactSidePill(side: .back, count: take.backs) { onTrade(.back) }
-            // You can't fade your own take.
-            if !app.isMe(take.author) {
-                CompactSidePill(side: .fade, count: take.fades) { onTrade(.fade) }
+            if take.isOpen {
+                CompactSidePill(side: .back, count: take.backs) { onTrade(.back) }
+                // You can't fade your own take.
+                if !app.isMe(take.author) {
+                    CompactSidePill(side: .fade, count: take.fades) { onTrade(.fade) }
+                }
+            } else {
+                // Its author sold: no new trades or fades.
+                Text(take.closedReason)
+                    .font(.geist(13, .medium))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+                    .frame(minHeight: 34)
             }
             Spacer(minLength: 4)
             HStack(spacing: 6) {

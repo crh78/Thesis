@@ -542,6 +542,8 @@ final class AppState {
     private func applyReceipt(_ r: ForkReceipt, to id: String) {
         guard r.onChain, let backers = r.backers else { return }
         updateTake(id) {
+            // Closed once its author sold: the feed stops offering Trade / Fade on it too.
+            $0 = $0.updated(with: r)
             $0.backs = backers
             $0.fades = r.faders ?? 0
             $0.moneyIn = (r.totalBackedUsd ?? 0) + (r.totalFadedUsd ?? 0)
@@ -658,21 +660,20 @@ final class AppState {
             }
             return BuiltBasket(legs: legs, summary: nil, noExposureReason: nil)
         }
-        return try await api.buildBasket(claim: draft.claim, risk: draft.risk, horizon: draft.horizon,
-                                         include: draft.seed.map { [$0.id] } ?? [])
+        return try await api.buildBasket(claim: draft.claim, risk: draft.risk, include: draft.seed.map { [$0.id] } ?? [])
     }
 
     /// Changes the draft's basket the way `ask` says ("add AMD", "less crypto"). Offline: "add X" /
     /// "remove X" against the mock assets.
     func editBasket(_ draft: TakeDraft, legs: [Leg], ask: String) async throws -> BuiltBasket {
         guard let api else { return MockData.edit(legs, ask: ask) }
-        return try await api.editBasket(claim: draft.claim, risk: draft.risk, horizon: draft.horizon, legs: legs, ask: ask)
+        return try await api.editBasket(claim: draft.claim, risk: draft.risk, legs: legs, ask: ask)
     }
 
     /// The same picks at the draft's (new) risk: only the cash or leveraged pick changes.
     func adjustRisk(_ draft: TakeDraft, legs: [Leg]) async throws -> BuiltBasket {
         guard let api else { return BuiltBasket(legs: MockData.adjust(legs, risk: draft.risk), summary: nil, noExposureReason: nil) }
-        return try await api.adjustBasketRisk(claim: draft.claim, risk: draft.risk, horizon: draft.horizon, legs: legs)
+        return try await api.adjustBasketRisk(claim: draft.claim, risk: draft.risk, legs: legs)
     }
 
     // MARK: Assets
@@ -802,8 +803,7 @@ final class AppState {
         } else {
             take = Take(id: UUID().uuidString, author: me, claim: draft.claim.trimmingCharacters(in: .whitespacesAndNewlines),
                         topic: TopicGuess(claim: draft.claim, legs: legs).topic, risk: draft.risk,
-                        horizon: draft.horizon.serverValue, age: "now", since: Date.now.formatted(.dateTime.month(.abbreviated).day()),
-                        settles: "", ret: 0, legs: legs, backs: 0, fades: 0, comments: 0, moneyIn: 0,
+                        age: "now", since: Date.now.formatted(.dateTime.month(.abbreviated).day()), ret: 0, legs: legs, backs: 0, fades: 0, comments: 0, moneyIn: 0,
                         history: [0, 0], tags: [])
         }
         forYou.insert(take, at: 0)
@@ -853,7 +853,6 @@ final class AppState {
             let d = try await api.draftTake(from: request)
             out.claim = d.claim
             out.risk = Risk.allCases.first { $0.rawValue.lowercased() == d.risk } ?? out.risk
-            out.horizon = Horizon.allCases.first { $0.long == d.horizon } ?? out.horizon
             out.source = d.takeSource
         } catch {
             log.error("draft from source failed: \(error.localizedDescription, privacy: .public)")

@@ -43,7 +43,6 @@ extension SocialAPI {
 struct SourceDraft: Decodable {
     let claim: String
     let risk: String
-    let horizon: String
     /// The source itself makes a market call (false for plain news).
     let isCall: Bool
     let source: Info
@@ -79,12 +78,11 @@ struct XCall: Identifiable, Hashable, Decodable {
     let postedAt: Date
     let claim: String
     let risk: String?
-    let horizon: String?
 
     var id: String { postId }
 
     func link(from account: XAccount) -> TakeLink {
-        TakeLink(claim: claim, risk: risk, horizon: horizon,
+        TakeLink(claim: claim, risk: risk,
                  source: TakeSource(url: url, label: "@\(account.username) on X", kind: "x"))
     }
 }

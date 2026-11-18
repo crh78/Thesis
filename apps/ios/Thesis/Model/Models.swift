@@ -62,35 +62,15 @@ enum Risk: String, CaseIterable, Identifiable, Hashable, Codable {
         switch self {
         case .low: "Plain basket, plus interest on cash that isn't invested yet."
         case .medium: "Stocks and a prediction. No leverage."
-        case .high: "Adds leverage, up to 5x, on picks that support it: more for short takes, less for long ones."
+        case .high: "Adds leverage, up to 5x, on picks that support it: more on names that are the take, less on looser fits."
         }
     }
 }
 
-enum Horizon: String, CaseIterable, Identifiable, Hashable, Codable {
-    case twoWeeks = "2 wks", oneMonth = "1 mo", threeMonths = "3 mo", sixMonths = "6 mo"
-
-    var id: String { rawValue }
-    var long: String {
-        switch self {
-        case .twoWeeks: "2 weeks"
-        case .oneMonth: "1 month"
-        case .threeMonths: "3 months"
-        case .sixMonths: "6 months"
-        }
-    }
-
-    /// When a take posted at `start` settles: calendar weeks or months, as the server's
-    /// `post_take` sets `settles_at`.
-    func settleDate(from start: Date = .now, calendar: Calendar = .current) -> Date {
-        let (unit, n): (Calendar.Component, Int) = switch self {
-        case .twoWeeks: (.weekOfYear, 2)
-        case .oneMonth: (.month, 1)
-        case .threeMonths: (.month, 3)
-        case .sixMonths: (.month, 6)
-        }
-        return calendar.date(byAdding: unit, value: n, to: start) ?? start
-    }
+/// How long a take runs. There's no horizon to pick: it runs until its author sells their buy-in,
+/// or a year after posting at most (then it settles at that day's prices).
+enum TakeLifetime {
+    static let note = "Your take runs until you sell your buy-in, or a year at most."
 }
 
 struct Leg: Identifiable, Hashable, Codable {
@@ -190,10 +170,8 @@ struct Take: Identifiable, Hashable {
     let claim: String
     let topic: String
     let risk: Risk
-    let horizon: String
     let age: String
     let since: String
-    let settles: String
     let ret: Double
     let legs: [Leg]
     // Counts change as people trade, fade and comment.
@@ -207,9 +185,61 @@ struct Take: Identifiable, Hashable {
     var posting = false
     /// Where it came from (an article shared into Thesis, an X post), shown as "via …".
     var source: TakeSource? = nil
+    /// Open until its author sells their buy-in; then closed to new trades and fades.
+    var status: TakeStatus = .open
+    /// When the author sold their buy-in, which closed it. Nil while open, and for a take that
+    /// settled by itself a year after posting.
+    var closedAt: Date? = nil
+    /// When its result became final.
+    var settledAt: Date? = nil
 
-    var tag: String { "\(risk.short) · \(horizon.uppercased())" }
+    var tag: String { "\(risk.short) · \(isOpen ? "OPEN" : "CLOSED")" }
     var backingShare: Double { Double(backs) / Double(max(1, backs + fades)) }
+
+    /// Trades and fades are taken only while it's open.
+    var isOpen: Bool { status == .open }
+    /// The day it closed: the author's sale, else the day it settled.
+    var closedOn: Date? { closedAt ?? settledAt }
+    /// "@priya", or "the author" for a deleted account.
+    private var authorName: String { author.handle.isEmpty ? "the author" : author.handle }
+
+    /// "Open · until @priya sells", or "Closed Nov 18 · +4.2%" with its result (`ret`, unless
+    /// the chain's is passed in).
+    func statusLine(result: Double? = nil) -> String {
+        guard !isOpen else { return "Open · until \(authorName) sells" }
+        let day = closedOn.map { " " + $0.formatted(.dateTime.month(.abbreviated).day()) } ?? ""
+        return "Closed\(day) · \(Fmt.pct(result ?? ret))"
+    }
+
+    /// Why it can't be traded: "Closed: @priya sold", or "Closed: settled" for one that ran its year.
+    var closedReason: String {
+        status == .closed || closedAt != nil ? "Closed: \(authorName) sold" : "Closed: settled"
+    }
+
+    /// The take with its status from the on-chain receipt (fork mode), which is fresher than the
+    /// feed's copy. Older receipts say only "open" or "settled", and have no `closedAt`.
+    func updated(with receipt: ForkReceipt?) -> Take {
+        guard let receipt, receipt.onChain, let status = receipt.status.flatMap(TakeStatus.init(rawValue:)) else { return self }
+        var t = self
+        t.status = status
+        if let at = receipt.closedAt { t.closedAt = Date(timeIntervalSince1970: at) }
+        // Settled with no sale: it ran its year, and settled at the end of it.
+        if status == .settled, t.closedOn == nil, let end = receipt.horizonEnd {
+            t.settledAt = Date(timeIntervalSince1970: end)
+        }
+        return t
+    }
+}
+
+/// Where a take is in its life.
+enum TakeStatus: String, Hashable {
+    /// Takes trades and fades.
+    case open
+    /// Its author sold their buy-in: no new trades or fades, and its result is final at that
+    /// day's prices. Positions still held keep running until their owners sell.
+    case closed
+    /// Its result is recorded on-chain.
+    case settled
 }
 
 /// Where a take came from: an article shared into Thesis, or an X post (copying an X account).
@@ -314,7 +344,6 @@ struct AppNotification: Identifiable, Hashable, Decodable {
     struct NotificationData: Hashable, Decodable {
         let claim: String?
         let risk: String?
-        let horizon: String?
         let sourceUrl: String?
         let sourceLabel: String?
         let post: String?
@@ -324,7 +353,7 @@ struct AppNotification: Identifiable, Hashable, Decodable {
     var copyLink: TakeLink? {
         guard kind == "x_call", let d = data, let claim = d.claim else { return nil }
         let source = d.sourceUrl.flatMap(URL.init(string:)).map { TakeSource(url: $0, label: d.sourceLabel ?? "X", kind: "x") }
-        return TakeLink(claim: claim, risk: d.risk, horizon: d.horizon, source: source)
+        return TakeLink(claim: claim, risk: d.risk, source: source)
     }
 
     /// SF Symbol for the row.

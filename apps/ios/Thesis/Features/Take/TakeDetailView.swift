@@ -59,16 +59,29 @@ struct TakeDetailView: View {
             }
         }
         .safeAreaBar(edge: .bottom) {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    // You can't fade your own take.
-                    if !app.isMe(take.author) {
-                        SidePill(side: .fade, height: 54) { trade = TradeIntent(take: take, side: .fade) }
-                            .frame(width: 118)
+            Group {
+                if current.isOpen {
+                    GlassEffectContainer(spacing: 8) {
+                        HStack(spacing: 8) {
+                            // You can't fade your own take.
+                            if !app.isMe(take.author) {
+                                SidePill(side: .fade, height: 54) { trade = TradeIntent(take: current, side: .fade) }
+                                    .frame(width: 118)
+                            }
+                            SidePill(side: .back, title: "Trade this take", height: 54, expand: true) {
+                                trade = TradeIntent(take: current, side: .back)
+                            }
+                        }
                     }
-                    SidePill(side: .back, title: "Trade this take", height: 54, expand: true) {
-                        trade = TradeIntent(take: take, side: .back)
-                    }
+                } else {
+                    // The author sold their buy-in (or it ran its year): no new trades or fades.
+                    // Positions still held sell from the receipt.
+                    Text(current.closedReason)
+                        .font(.geist(15, .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                        .glassEffect(.regular, in: .capsule)
+                        .accessibilityIdentifier("take-closed")
                 }
             }
             .padding(.horizontal, 16)
@@ -170,9 +183,16 @@ struct TakeDetailView: View {
                 TopicTile(image: take.topic, size: 64, corner: 20)
             }
 
-            Text("\(take.risk.rawValue.uppercased()) RISK · \(take.horizon.uppercased()) · SETTLES \(take.settles.uppercased()) · \(take.comments) COMMENTS")
-                .font(.mono(11))
-                .foregroundStyle(Palette.muted)
+            VStack(alignment: .leading, spacing: 4) {
+                // "Open · until @priya sells", or "Closed Nov 18 · +4.2%".
+                Text(current.statusLine(result: chainReturnPct))
+                    .font(.geist(14, .semibold))
+                    .foregroundStyle(current.isOpen ? Palette.text : Palette.muted)
+                    .accessibilityIdentifier("take-status")
+                Text("\(take.risk.rawValue.uppercased()) RISK · \(take.comments) COMMENTS")
+                    .font(.mono(11))
+                    .foregroundStyle(Palette.muted)
+            }
 
             if let source = take.source {
                 Link(destination: source.url) {
@@ -225,6 +245,10 @@ struct TakeDetailView: View {
                 .padding(.horizontal, 4)
         }
     }
+
+    /// The take with its status from the on-chain receipt once it's loaded (fork mode): open,
+    /// or closed since its author sold.
+    private var current: Take { take.updated(with: app.isOnFork ? receipt : nil) }
 
     /// The take's return from its on-chain receipt (fork mode), once the author's prices are in.
     private var chainReturnPct: Double? {

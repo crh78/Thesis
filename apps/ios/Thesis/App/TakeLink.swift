@@ -2,7 +2,7 @@ import Foundation
 
 /// A take to start, from outside the composer:
 ///
-/// - From chat: `yourthesis(-dev)://take/new?claim=…&risk=medium&horizon=3%20months`. The iMessage
+/// - From chat: `yourthesis(-dev)://take/new?claim=…&risk=medium`. The iMessage
 ///   agent links to `functions/v1/open`, which 302s here. Opening one skips the composer and goes
 ///   straight to building the basket.
 /// - Copying an X call: the same, plus `source_url` and `source_label`, so the take is credited
@@ -13,7 +13,6 @@ struct TakeLink: Identifiable, Hashable {
     let id = UUID()
     let claim: String
     let risk: Risk
-    let horizon: Horizon
     var source: TakeSource? = nil
     /// Share sheet: the page to read before there's a take.
     var read: ReadRequest? = nil
@@ -29,9 +28,9 @@ struct TakeLink: Identifiable, Hashable {
         guard url.host() == "take", url.path() == "/new",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return nil }
         let value = { (name: String) in items.first { $0.name == name }?.value }
-        // risk: low|medium|high; horizon: the take builder's "2 weeks" … "6 months".
+        // risk: low|medium|high. Older links also carry a horizon ("3 months"); takes have none
+        // now (they run until the author sells, a year at most), so it's ignored.
         risk = Risk.allCases.first { $0.rawValue.lowercased() == value("risk")?.lowercased() } ?? .medium
-        horizon = Horizon.allCases.first { $0.long == value("horizon") } ?? .threeMonths
 
         if let raw = value("read"), let page = URL(string: raw), ["http", "https"].contains(page.scheme?.lowercased()) {
             claim = ""
@@ -46,10 +45,9 @@ struct TakeLink: Identifiable, Hashable {
     }
 
     /// A take drafted elsewhere (an X call in the app): straight to building, credited.
-    init(claim: String, risk: String?, horizon: String?, source: TakeSource?) {
+    init(claim: String, risk: String?, source: TakeSource?) {
         self.claim = claim
         self.risk = Risk.allCases.first { $0.rawValue.lowercased() == risk?.lowercased() } ?? .medium
-        self.horizon = Horizon.allCases.first { $0.long == horizon } ?? .threeMonths
         self.source = source
     }
 
@@ -59,8 +57,7 @@ struct TakeLink: Identifiable, Hashable {
         c.scheme = AppConfig.urlScheme
         c.host = "take"
         c.path = "/new"
-        var items = [URLQueryItem(name: "claim", value: claim), URLQueryItem(name: "risk", value: risk.rawValue.lowercased()),
-                     URLQueryItem(name: "horizon", value: horizon.long)]
+        var items = [URLQueryItem(name: "claim", value: claim), URLQueryItem(name: "risk", value: risk.rawValue.lowercased())]
         if let source {
             items += [URLQueryItem(name: "source_url", value: source.url.absoluteString), URLQueryItem(name: "source_label", value: source.label)]
         }
