@@ -4,7 +4,7 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM, TOKEN_2022_PROGRAM, USDC_MINT, associatedTokenAddress, legDiff, type JupiterBuy } from "@thesis/venues/jupiter";
 import { emptyState } from "../../../packages/venues/bank/src/state.ts";
 import { ApiError } from "../api/common.ts";
-import { Guard, JupiterBudget, newUse } from "../api/guard.ts";
+import { Guard, JupiterBudget, budgetFromEnv, newUse } from "../api/guard.ts";
 import type { MappedLeg } from "../api/legs.ts";
 import { Router, TEMPLATE_TTL_MS } from "../api/routing.ts";
 
@@ -14,6 +14,13 @@ import { Router, TEMPLATE_TTL_MS } from "../api/routing.ts";
 
 const isBusy = (e: unknown) => e instanceof ApiError && e.status === 503 && e.code === "busy" && Number(e.headers?.["retry-after"]) >= 1;
 const ok = () => Promise.resolve("ok");
+
+test("FORK_API_JUPITER_RPM sets the budget's rate; unset keeps 30; a bad value fails clearly", () => {
+  assert.deepEqual(budgetFromEnv({}), {});
+  assert.deepEqual(budgetFromEnv({ FORK_API_JUPITER_RPM: " 50 " }), { perMinute: 50 });
+  assert.equal(new JupiterBudget(budgetFromEnv({})).limits.perMinute, 30);
+  for (const bad of ["0", "-5", "1.5", "lots", "601"]) assert.throws(() => budgetFromEnv({ FORK_API_JUPITER_RPM: bad }), /FORK_API_JUPITER_RPM/);
+});
 
 test("prebuilds and route checks leave the last 6 requests to taps; taps may use them all", async () => {
   const t = 1_000_000;
