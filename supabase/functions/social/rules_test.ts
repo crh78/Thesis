@@ -1,11 +1,6 @@
 // deno test --allow-env .
 import { assertEquals } from "jsr:@std/assert@1";
-import { takeStatus, validHorizon } from "./rules.ts";
-
-Deno.test("horizons: 1 week up to 60 months", () => {
-  for (const ok of ["1wk", "2wk", "99wk", "1mo", "3mo", "6mo", "60mo"]) assertEquals(validHorizon(ok), true, ok);
-  for (const bad of ["0wk", "0mo", "61mo", "99mo", "100wk", "3m", "mo", "", "3mo ", "-1mo", "1yr"]) assertEquals(validHorizon(bad), false, bad);
-});
+import { takeStatus } from "./rules.ts";
 
 Deno.test("a take is posting unless the project allows live posts", () => {
   // Fork mode (the default): whatever the client sends.

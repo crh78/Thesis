@@ -15,8 +15,10 @@
 //   PUT    /follows/:profileId        follow someone
 //   DELETE /follows/:profileId
 //   GET    /takes/posting             → { takes } your takes still waiting for the chain
-//   POST   /takes                     { claim, topic, risk, horizon, tags, legs, await_chain? } → { take }
-//                                      (each leg may carry asset_id, its securities row). It's
+//   POST   /takes                     { claim, topic, risk, tags, legs, await_chain? } → { take }
+//                                      (each leg may carry asset_id, its securities row). There's
+//                                      no horizon: a take runs until its author sells their buy-in,
+//                                      or 365 days at most (an old client's horizon is ignored). It's
 //                                      posting, seen by you only, until its on-chain takeCreated
 //                                      makes it live. Only a project with
 //                                      TAKES_LIVE_WITHOUT_CHAIN=on lets a client post it live at
@@ -44,7 +46,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { privyDid } from "../_shared/privy.ts";
-import { takeStatus, validHorizon } from "./rules.ts";
+import { takeStatus } from "./rules.ts";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -155,8 +157,6 @@ async function createTake(me: string, body: Record<string, unknown>) {
   const topic = typeof body.topic === "string" && TOPIC_RE.test(body.topic) ? body.topic : "topic-coin";
   const risk = String(body.risk ?? "").toLowerCase();
   check(RISKS.has(risk), "invalid_risk");
-  const horizon = String(body.horizon ?? "");
-  check(validHorizon(horizon), "invalid_horizon");
 
   const tags = Array.isArray(body.tags) ? body.tags : [];
   check(tags.length <= 5, "invalid_tags");
@@ -196,7 +196,8 @@ async function createTake(me: string, body: Record<string, unknown>) {
     p_claim: claim,
     p_topic: topic,
     p_risk: risk,
-    p_horizon: horizon,
+    // Ignored: create_take sets the 365-day lifetime (migrations/*_author_sale_closes.sql).
+    p_horizon: null,
     p_tags: cleanTags,
     p_legs: legs,
     // The server decides, not the client: the take stays hidden from everyone but its author

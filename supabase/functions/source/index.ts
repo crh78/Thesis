@@ -1,7 +1,9 @@
 // source: takes from what you read, and copying X accounts.
 //
 //   POST   /source                 { url, title?, text?, html? } → { claim, risk, horizon, is_call,
-//                                  source } an article or X post → a take to edit. title/text/html:
+//                                  source } an article or X post → a take to edit (horizon is a
+//                                  fixed "3 months" that older apps decode; takes have none now:
+//                                  they run until the author sells, a year at most). title/text/html:
 //                                  what the phone already has (Safari's page text, a selection, the
 //                                  page fetched on the phone: many news sites turn servers away).
 //                                  source: { url, label, kind, title }.
@@ -10,7 +12,7 @@
 //                                  (shown on it as "via …"); once per take → { attached }
 //   GET    /source/x               → { accounts } the X accounts you copy, each with its recent
 //                                  calls as drafted takes: { post_id, url, text, posted_at, claim,
-//                                  risk, horizon }
+//                                  risk }
 //   PUT    /source/x/:handle       copy an X account → { account }. The first person to copy one
 //                                  reads its last three weeks, so there's something to copy now;
 //                                  404 x_account_not_found when it has no recent posts; 403
@@ -21,7 +23,7 @@
 //                                  takes → x_call notifications (pg_cron, every 15 minutes).
 //                                  502 { error: x_fetch_failed, reason, detail } when Apify can't
 //                                  answer (503 with reason no_token); the next run reads the same window
-//   POST   /source/drafts          header x-bot-secret: a chat bot's take { claim, risk, horizon,
+//   POST   /source/drafts          header x-bot-secret: a chat bot's take { claim, risk,
 //                                  source?: { text, url, label }, origin: imessage|x, context?,
 //                                  origin_ref? } → the take builder's basket, saved as a draft:
 //                                  { verdict: "basket", id, summary, legs, existing } or
@@ -138,7 +140,7 @@ async function draft(b: Record<string, unknown>) {
   try {
     const source = await readSource(b.url as string, given);
     const d = await draftTake(source);
-    return json(200, { ...d, source: { url: source.url, label: source.label, kind: source.kind, title: source.title }, ms: Date.now() - started });
+    return json(200, { ...d, horizon: LEGACY_HORIZON.long, source: { url: source.url, label: source.label, kind: source.kind, title: source.title }, ms: Date.now() - started });
   } catch (err) {
     if (err instanceof SourceError) throw new HttpError(err.message === "post_unavailable" ? 404 : 400, err.message);
     throw err;
@@ -166,9 +168,12 @@ async function attach(profile: string, b: Record<string, unknown>) {
 // Draft takes from the chat bots ------------------------------------------------------------------
 
 const DRAFT_ID_RE = /^[A-Za-z0-9]{8}$/;
-const DRAFT_HORIZON: Record<string, string> = {
-  "2wk": "2wk", "2 weeks": "2wk", "1mo": "1mo", "1 month": "1mo", "3mo": "3mo", "3 months": "3mo", "6mo": "6mo", "6 months": "6mo",
-};
+/**
+ * Takes have no horizon (they run until the author sells, a year at most), so a bot's horizon is
+ * ignored. Drafts still store one, and POST /source still answers one, because older web and iOS
+ * builds read it (take_drafts.horizon is 2wk…6mo). Nothing acts on it.
+ */
+const LEGACY_HORIZON = { key: "3mo", long: "3 months" } as const;
 
 function draftId(): string {
   const abc = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
@@ -178,7 +183,6 @@ function draftId(): string {
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
-const LONG_HORIZON: Record<string, string> = { "2wk": "2 weeks", "1mo": "1 month", "3mo": "3 months", "6mo": "6 months" };
 type BuiltLeg = { name: string; weight: number; side?: string | null; kind?: string; why?: string };
 const DRAFT_COLUMNS = "id, summary, legs";
 const drafted = (d: { id: string; summary: string | null; legs: unknown }, existing: boolean) =>
@@ -194,7 +198,6 @@ async function buildDraft(b: Record<string, unknown>) {
   const claim = str(b.claim, 140).replace(/\s+/g, " ");
   check(claim.length >= 5, "invalid_claim");
   const risk = ["low", "medium", "high"].includes(String(b.risk)) ? String(b.risk) : "medium";
-  const horizon = DRAFT_HORIZON[String(b.horizon)] ?? "3mo";
   const origin = b.origin === "x" ? "x" : b.origin === "imessage" ? "imessage" : null;
   check(origin, "invalid_origin");
   const src = (b.source ?? null) as Record<string, unknown> | null;
@@ -213,7 +216,7 @@ async function buildDraft(b: Record<string, unknown>) {
     method: "POST",
     headers: { "content-type": "application/json", "x-index-secret": Deno.env.get("SECURITIES_INDEX_SECRET") ?? "" },
     body: JSON.stringify({
-      claim, risk, horizon: LONG_HORIZON[horizon],
+      claim, risk,
       ...(sourceText.length >= 3 ? { source: { text: sourceText, label: str(src!.label, 60) || null, kind: "post" } } : {}),
     }),
     signal: AbortSignal.timeout(25_000),
@@ -226,7 +229,7 @@ async function buildDraft(b: Record<string, unknown>) {
   }
 
   const row = {
-    claim, risk, horizon, legs, origin,
+    claim, risk, horizon: LEGACY_HORIZON.key, legs, origin,
     summary: str(built.summary, 400) || null,
     context: str(b.context, 80) || null,
     origin_ref: ref,

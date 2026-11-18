@@ -93,7 +93,7 @@ import { applyHouseRules, MAX_PERP_WEIGHT } from "./rules.ts";
 
 Deno.test("with the house rules (rules.ts): the perp cap's excess never lifts the card past 20%", () => {
   type P = { s: { kind: string }; key: string; weight: number; leverage: number };
-  const house = (xs: P[]) => applyHouseRules(xs, "1 month", (p) => ({ kind: p.s.kind, key: p.key, weight: p.weight, leverage: p.leverage }), (p, weight, leverage) => ({ ...p, weight, leverage }));
+  const house = (xs: P[]) => applyHouseRules(xs, (p) => ({ kind: p.s.kind, key: p.key, weight: p.weight, leverage: p.leverage }), (p, weight, leverage) => ({ ...p, weight, leverage }));
   // The same loop as finalize() in index.ts.
   const finalize = (ps: P[]) => {
     let out = capCards(house(ps));

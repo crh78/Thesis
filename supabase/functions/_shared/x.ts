@@ -156,7 +156,8 @@ export async function ingest(db: SupabaseClient, posts: XPost[]): Promise<{ stor
       posted_at: p.postedAt.toISOString(),
       claim: call ? d!.claim : null,
       risk: call ? d!.risk : null,
-      horizon: call ? d!.horizon : null,
+      // Takes have no horizon any more; the column stays for older calls.
+      horizon: null,
     };
   });
   if (rows.length) {
@@ -178,7 +179,7 @@ export async function ingest(db: SupabaseClient, posts: XPost[]): Promise<{ stor
 export async function recentCalls(db: SupabaseClient, handles: string[], perAccount = 6) {
   if (!handles.length) return new Map<string, unknown[]>();
   const { data, error } = await db.from("x_calls")
-    .select("post_id, handle, url, text, posted_at, claim, risk, horizon")
+    .select("post_id, handle, url, text, posted_at, claim, risk")
     .in("handle", handles)
     .not("claim", "is", null)
     .order("posted_at", { ascending: false })
