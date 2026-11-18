@@ -97,12 +97,12 @@ function stepFor(s: Snapshot): Step | null {
   return "location";
 }
 
-/** X's picture URLs end in `_normal` (48px); `_400x400` is the full-size one. */
 /** The Privy-made Solana wallet the fork trades from (lib/fork.ts useForkWallet reads the same one). */
 const hasEmbeddedSolana = (user: { linkedAccounts?: unknown[] }) =>
   ((user.linkedAccounts ?? []) as Array<{ type: string; chainType?: string; walletClientType?: string }>)
     .some((a) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy");
 
+/** X's picture URLs end in `_normal` (48px); `_400x400` is the full-size one. */
 const bigXPhoto = (url: string | null | undefined) => (url ? url.replace(/_normal(\.\w+)$/, "_400x400$1") : null);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
@@ -160,7 +160,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       // didn't make one for web sign-ups (X and Google accounts had none, so Add cash did nothing).
       // Not fatal: the session function picks the address up on a later load.
       if (!hasEmbeddedSolana(user)) {
-        await createWalletRef.current().catch((e) => console.warn("wallet creation failed", e));
+        // Never wait on it for long: a stuck Privy iframe mustn't hold sign-in on "setting up".
+        await Promise.race([
+          createWalletRef.current(),
+          new Promise((resolve) => setTimeout(resolve, 15_000)),
+        ]).catch((e) => console.warn("wallet creation failed", e));
       }
       try {
         const r = await fetch("/api/session", { headers: { "privy-token": await token() }, cache: "no-store" });
