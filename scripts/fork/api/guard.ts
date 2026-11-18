@@ -506,11 +506,18 @@ export type JupiterUse = {
   /** Underlyings quoted against the issuer that last won (one quote) / against every issuer. */
   winnerHits: number;
   winnerMisses: number;
+  /**
+   * The shared routing (api/routing.ts): "hit" reused another build's, "wait" waited for one in
+   * flight, "miss" routed its own. Unset when the trade has no traded legs.
+   */
+  template?: "hit" | "wait" | "miss";
+  /** Swap legs built from another wallet's template (no Jupiter call each). */
+  templatedLegs: number;
   /** The first call the budget refused (lanes 2 and 3, or a full queue): routing answers 503 busy with it. */
   refused?: ApiError;
 };
 
-export const newUse = (lane: Lane = 1): JupiterUse => ({ lane, calls: 0, quotes: 0, instructions: 0, waitedMs: 0, rateLimited: 0, winnerHits: 0, winnerMisses: 0 });
+export const newUse = (lane: Lane = 1): JupiterUse => ({ lane, calls: 0, quotes: 0, instructions: 0, waitedMs: 0, rateLimited: 0, winnerHits: 0, winnerMisses: 0, templatedLegs: 0 });
 
 /**
  * The fork API's Jupiter budget: a token bucket (BudgetLimits) with lanes, behind a concurrency

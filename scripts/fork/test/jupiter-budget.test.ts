@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { ASSOCIATED_TOKEN_PROGRAM, TOKEN_2022_PROGRAM, USDC_MINT, associatedTokenAddress } from "@thesis/venues/jupiter";
+import { ASSOCIATED_TOKEN_PROGRAM, TOKEN_2022_PROGRAM, USDC_MINT, associatedTokenAddress, legDiff, type JupiterBuy } from "@thesis/venues/jupiter";
 import { emptyState } from "../../../packages/venues/bank/src/state.ts";
 import { ApiError } from "../api/common.ts";
 import { Guard, JupiterBudget, newUse } from "../api/guard.ts";
 import type { MappedLeg } from "../api/legs.ts";
-import { Router } from "../api/routing.ts";
+import { Router, TEMPLATE_TTL_MS } from "../api/routing.ts";
 
 // The fork API's Jupiter budget (api/guard.ts) and how routing uses its lanes (api/routing.ts):
 // taps wait their turn, prebuilds and route checks fail fast and never wait out a 429, and a
@@ -106,12 +106,12 @@ function bank() {
 const leg: MappedLeg = { index: 0, name: "NVIDIA", key: KEY, how: "swap", spec: { weightBps: 10_000, leverage: 1, fadeVia: { none: {} } } as any, blocked: null };
 
 /** A Jupiter that answers quotes with `quote` (status, body) and swap instructions for whoever asks. */
-function jupiter(t: { mock: { method: Function } }, quote: () => [number, unknown]) {
+function jupiter(t: { mock: { method: Function } }, quote: (url: string) => [number, unknown]) {
   const calls: string[] = [];
   t.mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
     calls.push(url);
     if (url.includes("/swap/v1/quote?")) {
-      const [status, body] = quote();
+      const [status, body] = quote(url);
       return new Response(JSON.stringify(body), { status });
     }
     const user = new PublicKey(JSON.parse(String(init!.body)).userPublicKey);
@@ -126,19 +126,24 @@ function jupiter(t: { mock: { method: Function } }, quote: () => [number, unknow
   return calls;
 }
 const routed = { inAmount: "20000000", outAmount: "11000000", otherAmountThreshold: "10890000", priceImpactPct: "0", slippageBps: 100, outputMint: NVDAX, routePlan: [{ swapInfo: { label: "Whirlpool" }, percent: 100 }] };
+/** Quotes for whatever amount is asked, at ~$182 a share (NVDAx has 8 decimals). */
+const routes = (url: string): [number, unknown] => {
+  const amount = BigInt(new URL(url).searchParams.get("amount")!);
+  return [200, { ...routed, inAmount: String(amount), outAmount: String((amount * 11n) / 20n), otherAmountThreshold: String((amount * 11n * 99n) / 2000n) }];
+};
 
 const routerWith = (budget = new JupiterBudget()) =>
   new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null } as any, { budget, readMints: null });
 
 test("a build counts its Jupiter calls, and the next one quotes just the issuer that won", async (t) => {
-  jupiter(t, () => [200, routed]);
+  jupiter(t, routes);
   const router = routerWith();
   const user = Keypair.generate().publicKey;
   const first = await router.venueLegs([leg], user, 20);
   assert.equal(first.venue.length, 1);
   assert.equal(first.venue[0].output.account.toBase58(), associatedTokenAddress(user, NVDAX, TOKEN_2022_PROGRAM));
   assert.deepEqual([first.jupiter.lane, first.jupiter.calls, first.jupiter.quotes, first.jupiter.instructions, first.jupiter.winnerMisses], [1, 2, 1, 1, 1]);
-  const second = await router.venueLegs([leg], user, 20, undefined, undefined, { lane: 2 });
+  const second = await router.venueLegs([leg], user, 25, undefined, undefined, { lane: 2 });
   assert.deepEqual([second.jupiter.lane, second.jupiter.winnerHits, second.jupiter.winnerMisses], [2, 1, 0]);
 });
 
@@ -164,7 +169,7 @@ test("at tap time a failed quote leaves the leg out of this build only; a real n
 });
 
 test("a prebuild the budget refuses makes no Jupiter call and answers busy", async (t) => {
-  const calls = jupiter(t, () => [200, routed]);
+  const calls = jupiter(t, routes);
   const budget = new JupiterBudget({ reserve: 10 });
   const router = routerWith(budget);
   const use = newUse(2);
@@ -178,9 +183,88 @@ test("a prebuild the budget refuses makes no Jupiter call and answers busy", asy
 });
 
 test("route checks are lane 3: refused or failed checks remember nothing", async (t) => {
-  const calls = jupiter(t, () => [200, routed]);
+  const calls = jupiter(t, routes);
   const router = routerWith(new JupiterBudget({ reserve: 10 }));
   await router.checkRoutes([leg]);
   assert.equal(calls.length, 0, "refused: below the reserve");
   assert.equal(router.leftOut(leg), null);
+});
+
+// Shared routing: the same trade by another wallet reuses the winners, the split and a template
+// of the swap instructions, retargeted to it.
+test("the same trade by a second wallet makes no Jupiter call, and its legs are its own", async (t) => {
+  const calls = jupiter(t, routes);
+  const router = routerWith();
+  const [a, b, payer] = [Keypair.generate().publicKey, Keypair.generate().publicKey, Keypair.generate().publicKey];
+  const first = await router.venueLegs([leg], a, 20, payer, undefined, { lane: 2 });
+  assert.equal(first.jupiter.template, "miss");
+  assert.equal(calls.length, 2);
+  const second = await router.venueLegs([leg], b, 20, payer);
+  assert.deepEqual([second.jupiter.template, second.jupiter.calls, second.jupiter.templatedLegs], ["hit", 0, 1]);
+  assert.equal(calls.length, 2, "no Jupiter call");
+  // Byte for byte what a fresh build for the second wallet makes.
+  const fresh = await routerWith().venueLegs([leg], b, 20, payer);
+  assert.equal(legDiff(second.venue[0] as unknown as JupiterBuy, fresh.venue[0] as unknown as JupiterBuy), null);
+  assert.equal(second.venue[0].output.account.toBase58(), associatedTokenAddress(b, NVDAX, TOKEN_2022_PROGRAM));
+  assert.equal((second.venue[0] as unknown as JupiterBuy).inUsdc, 20_000_000n);
+  assert.deepEqual(router.jupiterStats().templates, { size: 1, hits: 1, waits: 0, misses: 1, templatedLegs: 1 });
+});
+
+test("a different stake routes on its own; the same wallet again reuses its own answer", async (t) => {
+  const calls = jupiter(t, routes);
+  const router = routerWith();
+  const a = Keypair.generate().publicKey;
+  await router.venueLegs([leg], a, 20);
+  const other = await router.venueLegs([leg], Keypair.generate().publicKey, 20.01);
+  assert.equal(other.jupiter.template, "miss");
+  assert.equal((other.venue[0] as unknown as JupiterBuy).inUsdc, 20_010_000n);
+  const before = calls.length;
+  const again = await router.venueLegs([leg], a, 20);
+  assert.deepEqual([again.jupiter.template, again.jupiter.calls, again.jupiter.templatedLegs], ["hit", 0, 0]);
+  assert.equal(calls.length, before);
+});
+
+test("builds of the same trade at once wait for one routing", async (t) => {
+  const calls = jupiter(t, routes);
+  const router = routerWith();
+  const [x, y] = await Promise.all([router.venueLegs([leg], Keypair.generate().publicKey, 20), router.venueLegs([leg], Keypair.generate().publicKey, 20)]);
+  assert.deepEqual([x.jupiter.template, y.jupiter.template], ["miss", "wait"]);
+  assert.equal(calls.length, 2, "one quote, one swap-instructions");
+});
+
+test("routing that left a leg out on a failed quote isn't shared", async (t) => {
+  // $12 and $8 of $20; the $8 quote fails at first.
+  const two: MappedLeg[] = [{ ...leg, spec: { ...leg.spec, weightBps: 6_000 } as any }, { ...leg, index: 1, name: "NVIDIA again", spec: { ...leg.spec, weightBps: 4_000 } as any }];
+  let fail = true;
+  jupiter(t, (url) => (fail && new URL(url).searchParams.get("amount") === "8000000" ? [500, {}] : routes(url)));
+  const router = routerWith();
+  const first = await router.venueLegs(two, Keypair.generate().publicKey, 20);
+  assert.deepEqual(first.included, [0], "at tap time the failed leg is left out of this build");
+  fail = false;
+  const next = await router.venueLegs(two, Keypair.generate().publicKey, 20);
+  assert.equal(next.jupiter.template, "miss");
+  assert.deepEqual(next.included, [0, 1]);
+});
+
+test("after 20 seconds a trade routes afresh", async (t) => {
+  jupiter(t, routes);
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const router = routerWith(new JupiterBudget({}, () => Date.now()));
+  await router.venueLegs([leg], Keypair.generate().publicKey, 20);
+  t.mock.timers.tick(TEMPLATE_TTL_MS - 1);
+  assert.equal((await router.venueLegs([leg], Keypair.generate().publicKey, 20)).jupiter.template, "hit");
+  t.mock.timers.tick(1);
+  assert.equal((await router.venueLegs([leg], Keypair.generate().publicKey, 20)).jupiter.template, "miss");
+});
+
+test("a prebuild refused after routing still leaves the routing to the tap, which makes its own swap call", async (t) => {
+  const calls = jupiter(t, routes);
+  // Lane 2 may take one request (the quote), not a second (the swap instructions).
+  const router = routerWith(new JupiterBudget({ reserve: 9 }));
+  const a = Keypair.generate().publicKey;
+  await assert.rejects(router.venueLegs([leg], a, 20, undefined, undefined, { lane: 2 }), isBusy);
+  assert.equal(calls.length, 1);
+  const tap = await router.venueLegs([leg], a, 20);
+  assert.deepEqual([tap.jupiter.template, tap.jupiter.quotes, tap.jupiter.instructions], ["hit", 0, 1]);
+  assert.equal(tap.venue.length, 1);
 });
