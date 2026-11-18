@@ -88,7 +88,7 @@ import { contractResolver, escrowedKind, mapLegs, nameResolver, onChainLegs, per
 import { PhoenixDesk } from "./phoenix.ts";
 import { LANE, newUse, type JupiterUse, type Lane } from "./guard.ts";
 import { Router, TEMPLATE_TTL_MS, escrowShare, type TradeLeg } from "./routing.ts";
-import { SendFailed, fates, refusedByPreflight, sendBackToBack, type Fate } from "./send.ts";
+import { SendFailed, fates, refusedByPreflight, resendIfStale, sendBackToBack, type Fate } from "./send.ts";
 import { SplitTrades, afterFailure, deserializeIx, incompleteView, serializeIx, sweepLegs } from "./split.ts";
 import { StateStore } from "./store.ts";
 import { Valuation } from "./valuation.ts";
@@ -214,6 +214,11 @@ function incompleteError(position: string, t: IncompleteTrade, status = 422, cod
 type Build = {
   owner: string;
   messages: Buffer[];
+  /**
+   * The messages answered before the last refresh, and when they expire: a client that signed
+   * them while the refresh ran may still submit them, until the build's first submit uses it.
+   */
+  previous?: { messages: Buffer[]; expires: number };
   market: PublicKey[];
   kind: "back" | "publish" | "exit" | "claim" | "phoenix" | "sweep";
   /** Per transaction (cleanup left out), the take leg of each venue leg in it. */
@@ -1596,15 +1601,21 @@ export class ForkService {
     const build = this.#builds.get(buildId);
     if (!build || build.expires < Date.now()) throw new ApiError(410, "build_expired", "Build again: transactions expire after about a minute");
     if (signed.length !== build.messages.length) throw new ApiError(400, "wrong_transaction_count");
-    const txs = await t.time("verify", async () => signed.map((b64, i) => {
-      let tx: VersionedTransaction;
+    const decoded = signed.map((b64) => {
       try {
-        tx = VersionedTransaction.deserialize(Buffer.from(b64, "base64"));
+        return VersionedTransaction.deserialize(Buffer.from(b64, "base64"));
       } catch {
         throw new ApiError(400, "invalid_transaction", "The wallet returned an invalid transaction.");
       }
+    });
+    // The build's messages, or the ones answered before its last refresh (signed while it ran),
+    // while their blockhash lasts. Either way every transaction must be one this service built.
+    const first = Buffer.from(decoded[0]?.message.serialize() ?? []);
+    const prior = build.previous && build.previous.expires >= Date.now() && first.equals(build.previous.messages[0]) ? build.previous.messages : null;
+    const expected = prior ?? build.messages;
+    const txs = await t.time("verify", async () => decoded.map((tx, i) => {
       const message = Buffer.from(tx.message.serialize());
-      if (!message.equals(build.messages[i])) throw new ApiError(400, "transaction_changed");
+      if (!message.equals(expected[i])) throw new ApiError(400, "transaction_changed");
       const signer = tx.message.staticAccountKeys
         .slice(0, tx.message.header.numRequiredSignatures)
         .findIndex((key) => key.toBase58() === build.owner);
@@ -1969,6 +1980,8 @@ export class ForkService {
       expiresAt: expires,
       /** Unix ms: when its quotes were made (none: it has none). */
       quotedAt: extra.quotedAt ?? null,
+      /** Built ahead of the tap: its money action counts at submit. Left out of a normal build. */
+      ...(extra.prebuilt ? { prebuilt: true as const } : {}),
     };
   }
 
@@ -1995,8 +2008,10 @@ export class ForkService {
    * A fresh blockhash for a build not yet submitted (POST /builds/:id/refresh): the same
    * instructions (quotes, sizes, compute limits) recompiled, with no Jupiter call, while its quotes
    * are at most QUOTE_REFRESH_MS old (409 `quote_stale` after: build again). Its market accounts
-   * are refreshed if they're older than MARKET_FRESH_MS. The build keeps its id; the transactions
-   * it answered before can't be submitted any more. 410 `build_gone`: expired, submitted or unknown.
+   * are refreshed if they're older than MARKET_FRESH_MS. The build keeps its id. Until its first
+   * submit, the transactions it answered just before (a client may have signed them while the
+   * refresh ran) can still be submitted, while their blockhash lasts; the first submit uses the
+   * build, and other bytes after it are 409 `build_used`. 410 `build_gone`: expired, submitted or unknown.
    */
   async refreshBuild(buildId: string, o: BuildOpts = {}) {
     const t = o.timings ?? new Timings();
@@ -2015,8 +2030,9 @@ export class ForkService {
         message.recentBlockhash = blockhash;
         return message;
       });
+      build.previous = { messages: build.messages, expires: build.expires };
       build.messages = messages.map((m) => Buffer.from(m.serialize()));
-      build.expires = Math.min(started + BUILD_TTL_MS, (build.position.exit?.horizonEnd ?? Infinity) * 1_000);
+      build.expires =Math.min(started + BUILD_TTL_MS, (build.position.exit?.horizonEnd ?? Infinity) * 1_000);
       return {
         ...(build.response ?? {}),
         buildId,
@@ -2033,13 +2049,31 @@ export class ForkService {
    * out back to back, each preflighted at "processed" (it sees the one before it), `accept` is
    * called once all were accepted, and then they're confirmed together. Either way it returns
    * once every one landed, or throws SendFailed with the ones that landed before the failure.
+   *
+   * `freshMs` leaves market accounts copied from mainnet that recently. If that left some and the
+   * first transaction's preflight is refused (nothing went out), they're all reset and the same
+   * signed transactions are sent once more (api/send.ts `resendIfStale`).
    */
   async #send(txs: VersionedTransaction[], market: PublicKey[], t = new Timings(), accept?: () => void, freshMs = 0): Promise<string[]> {
-    if (accept) return this.#sendAccepted(txs, market, t, accept, freshMs);
+    const refreshed = await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs }));
+    // lib.ts says how many it left (`fresh`); a fork that doesn't say may have left any of them.
+    const left = (refreshed as { fresh?: unknown } | undefined)?.fresh;
+    return resendIfStale(() => (accept ? this.#sendAccepted(txs, t, accept) : this.#sendConfirmed(txs, t)), {
+      stale: freshMs > 0 && market.length > 0 && (typeof left === "number" ? left > 0 : true),
+      reset: () => {
+        t.note("resent", "markets reset");
+        return t.time("refresh", () => this.#o.fork.refreshMarkets(market));
+      },
+      log: this.#log,
+    });
+  }
+
+  /** #send's default way: one at a time, each preflighted at "confirmed" and confirmed before the next. */
+  async #sendConfirmed(txs: VersionedTransaction[], t: Timings): Promise<string[]> {
     const conn = this.#o.connection;
-    await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs }));
     const out: string[] = [];
     let unknown = false;
+    let nothingSent = false;
     try {
       for (const [i, tx] of txs.entries()) {
         const sent = Date.now();
@@ -2050,7 +2084,10 @@ export class ForkService {
         const sig = base58(tx.signatures[0]);
         let fate: "landed" | "failed" | "unknown" | null = null;
         await conn.sendTransaction(tx, { skipPreflight: false }).catch(async (e) => {
-          if (refusedByPreflight(e)) throw new ApiError(502, "send_failed", errorText(e));
+          if (refusedByPreflight(e)) {
+            nothingSent = i === 0;
+            throw new ApiError(502, "send_failed", errorText(e));
+          }
           // The RPC failed: the transaction may have gone out all the same.
           this.#log(`sending ${sig} failed (${errorText(e)}); waiting to see if it landed`);
           fate = await this.#settle(sig, lastValidBlockHeight);
@@ -2077,7 +2114,7 @@ export class ForkService {
         out.push(sig);
       }
     } catch (e) {
-      throw new SendFailed(e instanceof ApiError ? e : new ApiError(502, "send_failed", errorText(e)), out, unknown);
+      throw new SendFailed(e instanceof ApiError ? e : new ApiError(502, "send_failed", errorText(e)), out, unknown, nothingSent);
     }
     return out;
   }
@@ -2090,8 +2127,7 @@ export class ForkService {
   }
 
   /** #send for until=accepted (api/send.ts): back to back, `accept` once all were accepted, then confirmed. */
-  async #sendAccepted(txs: VersionedTransaction[], market: PublicKey[], t: Timings, accept: () => void, freshMs: number): Promise<string[]> {
-    await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs }));
+  async #sendAccepted(txs: VersionedTransaction[], t: Timings, accept: () => void): Promise<string[]> {
     const lifetimes = await Promise.all(txs.map((tx) => this.#lifetime(tx)));
     return sendBackToBack(this.#o.connection, txs, Math.max(0, ...lifetimes.map((l) => l.lastValidBlockHeight)), { accept, timings: t, log: this.#log });
   }

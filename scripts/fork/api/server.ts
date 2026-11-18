@@ -4,11 +4,16 @@
 //   GET  /takes/:id?viewer=<wallet>                 the on-chain receipt (or what would be on-chain): status
 //                                                     open | closed (its author sold) | settled, closedAt
 //   POST /takes/:id/trades   { owner, side, usd, prebuild? }  → { buildId, transactions[], included, excluded, feeUsd,
-//                                                     expiresAt, quotedAt }; prebuild: built ahead of the tap (its own
-//                                                     per-wallet window; the money action counts at submit)
+//                                                     expiresAt, quotedAt, prebuilt? }; prebuild: built ahead of the
+//                                                     tap (its own per-wallet window; the money action counts at
+//                                                     submit). Served as one only when the guard can defer the money
+//                                                     action (checkAuth, countMoney): then the answer says
+//                                                     `prebuilt: true`. Otherwise it's a normal build (a money action
+//                                                     now) without `prebuilt`, and the apps build at the tap instead.
 //                                                     409 take_closed once the take isn't open
-//   POST /takes/:id/positions/:pos/exit  { owner, prebuild? }  → a sale's build, with closesTake (the author's buy-in)
-//   POST /takes/:id/publish  { author, usd }        → same, for posting an app take with the author's buy-in
+//   POST /takes/:id/positions/:pos/exit  { owner, prebuild? }  → a sale's build, with closesTake (the author's buy-in);
+//                                                     prebuild and prebuilt as for trades
+//   POST /takes/:id/publish  { author, usd, prebuild? }  → same, for posting an app take with the author's buy-in
 //   POST /takes/:id/confirm                         → { onChain, take?, relayed }: is the author's publish
 //                                                     on-chain here? If so, its events go to the backend again
 //   POST /submit             { buildId, transactions[], until?, timings? }  signed by the user → { signatures[] }
@@ -17,7 +22,9 @@
 //                                                     same build and bytes again: its status; other bytes: 409
 //                                                     build_used. `timings`: the client's marks (ms from the tap)
 //   POST /builds/:buildId/refresh                   → the build again with a fresh blockhash (same id, new
-//                                                     transactions, expiresAt); 409 quote_stale, 410 build_gone
+//                                                     transactions, expiresAt, prebuilt as built); 409 quote_stale,
+//                                                     410 build_gone. Until the build's first submit, the transactions
+//                                                     answered just before the refresh can still be submitted
 //   GET  /submissions/:buildId?wait=<ms ≤ 10000>     → { status: pending | landed | failed | incomplete, signatures,
 //                                                     error?, incomplete? }, waiting while pending
 //
@@ -171,10 +178,15 @@ export function forkApiServer(
   const prebuilds = new Map<string, number[]>();
   /**
    * A build route's limits: a money action, or with `prebuild` (and a guard that can defer it) the
-   * caller's check and the wallet's own window of PREBUILDS_PER_MINUTE.
+   * caller's check and the wallet's own window of PREBUILDS_PER_MINUTE. Returns whether it's served
+   * as a prebuild: only then is the build marked so (its answer says `prebuilt: true`, and its
+   * money action counts at submit). Without a guard that can defer it, it's a normal build.
    */
-  const buildLimits = async (req: IncomingMessage, wallet: string, route: string, prebuild: boolean) => {
-    if (!prebuild || !deferMoney) return money(req, wallet, route);
+  const buildLimits = async (req: IncomingMessage, wallet: string, route: string, prebuild: boolean): Promise<boolean> => {
+    if (!prebuild || !deferMoney) {
+      await money(req, wallet, route);
+      return false;
+    }
     parseKey(wallet);
     await g!.checkAuth!(req, wallet, route);
     const now = Date.now();
@@ -183,6 +195,7 @@ export function forkApiServer(
     recent.push(now);
     prebuilds.set(wallet, recent);
     if (prebuilds.size > 10_000) for (const [k, list] of prebuilds) if (!list.some((at) => at > now - 60_000)) prebuilds.delete(k);
+    return true;
   };
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const started = Date.now();
@@ -228,16 +241,14 @@ export function forkApiServer(
           if (!side) throw new ApiError(400, "invalid_side");
           const owner = str(b.owner, "owner");
           const usd = num(b.usd, "usd");
-          const prebuild = b.prebuild === true;
-          await buildLimits(req, owner, "trades", prebuild);
+          const prebuild = await buildLimits(req, owner, "trades", b.prebuild === true);
           const t = timed();
           return send(200, await service.buildTrade(parts[1], owner, side, usd, { timings: t, prebuild }));
         }
         if (m === "POST" && parts[2] === "positions" && parts[3] && parts[4] === "exit" && parts.length === 5) {
           const b = await body(req);
           const owner = str(b.owner, "owner");
-          const prebuild = b.prebuild === true;
-          await buildLimits(req, owner, "sell", prebuild);
+          const prebuild = await buildLimits(req, owner, "sell", b.prebuild === true);
           const t = timed();
           return send(200, await service.buildExit(parts[1], parts[3], owner, { timings: t, prebuild }));
         }
@@ -250,8 +261,7 @@ export function forkApiServer(
           const b = await body(req);
           const author = str(b.author, "author");
           const usd = num(b.usd, "usd");
-          const prebuild = b.prebuild === true;
-          await buildLimits(req, author, "publish", prebuild);
+          const prebuild = await buildLimits(req, author, "publish", b.prebuild === true);
           const t = timed();
           return send(200, await service.buildPublish(parts[1], author, usd, { timings: t, prebuild }));
         }
