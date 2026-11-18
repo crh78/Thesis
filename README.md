@@ -108,20 +108,17 @@ A direction, not a schedule; the on-chain steps follow [`docs/onchain-plan.md`](
 UI, latency and trade testing across the web app, the iOS app and the fork: every screen at phone and desktop width, every trade path (back, fade, sell, cash-out, claims; spot, yield, perp, prediction and card legs), timings for each step, and a team dogfood on the fork.
 
 **Latency and quota notes**
-- **Jupiter is the tightest limit.** The asset bank runs at 25 requests a minute, and builds share it. Options:
-  - a higher Jupiter plan, or more API keys/accounts if Jupiter's terms allow it;
-  - QuickNode's Swap API (Metis) instead of Jupiter's own key (a paid add-on on a QuickNode plan);
-  - another data source for reads that don't need Jupiter (prices, token data).
-- **Helius** (the fork's mainnet source, free plan, 1M credits a month): Surfpool never remembers a missing account and forwards every `getProgramAccounts` scan, so code that looks up deleted accounts or scans in a loop spends credits fast.
-  - Option: QuickNode (paid, already used by the asset bank) as `FORK_DATASOURCE_RPC_URL`, after checking its credit cost per method and its `getProgramAccounts` limits.
-- **Trade times on the fork:** post ~3–3.6 s, fade 2.9 s, sale 0.8 s.
+- **Jupiter is still the tightest limit** (free key, 60 requests a minute per organisation; more keys don't help and more accounts break Jupiter's terms). Its use is cut instead: the settler prices up to 50 tokens per call and rests on 429s, display prices come from the asset bank when under 2 minutes old, the asset bank pauses its probes while trades build, and a temporary quote failure answers `busy` instead of failing the trade. A paid plan ($25/mo) is the next step if real traffic still hits it.
+- **The fork's mainnet source is QuickNode** (the owner's Build plan) since the 2026-11-18 reset; Helius is retired. The fork API caches wallet reads (8 s) and creator fees (60 s), rescans a take's positions every 5 minutes (30 s right after a trade), and scans for abandoned tickets only when one is known.
+- **Load (2026-11-18, reads only):** at 200 concurrent visitors the fork API itself answers in 1–27 ms at p50 with no failures (tested on the VM). Through Tailscale Funnel, 19% of connections fail at 200 and p90 is about 10 s; 50 is fine (p90 0.15 s). Funnel is the first bottleneck. A load test with trades waits for real takes on the fresh fork.
+- **Trade times on the fork:** post ~2.8 s, back ~3.1 s (p90 over 20 s when Jupiter is busy), sale ~1.6 s, at the median.
 
 ### Phase 1: a public fork
 
 Anyone can sign up, reply "@yourthesisxyz back $20" under a post on X, and trade play money on the shared fork. Public users come in through the web app; the iOS app runs only as a development build on the team's phones until phase 3.
 
 **Needed before opening it up**
-- **Production launch:** mostly done. The web app is live on Vercel at `yourthesis.xyz`, `FORK_API_PROXY_KEY` is set in Vercel and on the VM, and the fork API's auth enforces (a Privy token on every money call). `FORK_API_READ_LIMIT=enforce` too. Still to do: a production deploy that picks up the proxy key and `NEXT_PUBLIC_X_LOGIN` (until then web visitors count against Vercel's IPs), and `FORK_API_SERVICE_KEY` in Vercel (a `web=` entry in the VM's `FORK_API_SERVICE_KEYS`) before the deploy that needs it, so server-rendered pages read receipts outside the read limit.
+- **Production launch: done.** The web app is live on Vercel at `yourthesis.xyz`. The browser calls the fork API directly (`NEXT_PUBLIC_FORK_API_URL`, allowed by `FORK_API_CORS_ORIGINS`), server renders read with `FORK_API_SERVICE_KEY`, and the fork API enforces auth and read limits (per Privy user when signed in, else per IP). Vercel builds production from `main` only (`apps/www/vercel.json`), so PR pushes don't use up the Hobby plan's 100 deploys a day.
 - **The web app as the public product** (`apps/www`): built: the iOS look and tabs, desktop with a QR code, Google and email sign-in, Me with both scores and the $1,000 cap, feed, leaderboards, Search, comments, notifications, Copy from X, install prompt, web push, the composer, card legs, and the Privy token on fork money calls. Still to do:
   - X login: on in Privy, and `NEXT_PUBLIC_X_LOGIN=on` is set in Vercel (live with the next deploy);
   - the spending-limit consent screen (`apps/www/app/limits`, built with the session signers);
@@ -136,7 +133,7 @@ Anyone can sign up, reply "@yourthesisxyz back $20" under a post on X, and trade
 - **A clean feed:** done (e2e suites trade only made-up takes from hidden accounts).
 - **Own-take fades:** the fork API refuses fading your own take; the program-level check waits for the next program change.
 - **Phoenix:** dogfooded in the simulator. The liquidation alert wasn't triggered, since the fork can't move a price that far.
-- **Check the limits:** Helius credits, Privy's free tier, a hard monthly cap in the X console, the VM's capacity.
+- **Limits checked (2026-11-18):** Privy's free tier (500 monthly users) is enough; Supabase is far below its free limits (110 of 500 MB); Vercel stays on Hobby with fewer function calls and builds; the VM has headroom (load under 1 at 200 concurrent reads). Still to do: a hard monthly cap in the X console when the bot goes live, and replacing Tailscale Funnel if real traffic nears 200 concurrent visitors.
 
 **Also on the fork**
 - **Collector Crypt cards: built and live** ([`docs/cards-plan.md`](docs/cards-plan.md)): paper legs priced at CC's insured value, any card CC prices, never faded. A take about cards can be all cards; any other take at most one card at 20%. **Later: tune the AI**, which doesn't always reach for the card search on a card take.
