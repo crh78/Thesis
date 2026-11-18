@@ -14,7 +14,8 @@ import { hasPhoenixCash, LiquidationLines, PhoenixCashCard } from "@/components/
 import { PostingRow } from "@/components/PostingRecovery";
 import ShareButton from "@/components/ShareButton";
 import { money, pct, rpcNow, topicImage, type Profile, type Take } from "@/lib/data";
-import { fork, holdings, TRADED_AT_KEY, TRADED_EVENT, useForkWallet, type CreatorFees as Fees, type History, type PhoenixCash, type Portfolio, type WalletSummary } from "@/lib/fork";
+import { fork, holdings, markTraded, TRADED_AT_KEY, TRADED_EVENT, useForkWallet, type CreatorFees as Fees, type History, type Incomplete, type PhoenixCash, type Portfolio, type WalletSummary } from "@/lib/fork";
+import StoppedTrade from "@/components/StoppedTrade";
 import { X_LOGIN } from "@/lib/flags";
 import { MY_TAKES_EVENT } from "@/lib/posting";
 import { useSession } from "@/lib/session";
@@ -36,6 +37,9 @@ export default function MePage() {
   const [history, setHistory] = useState<Record<string, History>>({});
   const [fees, setFees] = useState<Fees | null>(null);
   const [phoenix, setPhoenix] = useState<PhoenixCash | null>(null);
+  const [stopped, setStopped] = useState<Incomplete[]>([]);
+  // What finishing or sweeping a stopped trade did, once its card is gone.
+  const [stoppedNote, setStoppedNote] = useState<string | null>(null);
   const [range, setRange] = useState<(typeof RANGES)[number]>("1W");
   const [scrub, setScrub] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("positions");
@@ -94,6 +98,14 @@ export default function MePage() {
   }, [address]);
   useEffect(() => { loadPhoenix(); }, [loadPhoenix, traded]);
   useEffect(() => { if (sheet === "cash") loadPhoenix(); }, [sheet, loadPhoenix]);
+
+  // Split trades that stopped partway (StoppedTrade), so they can be finished or swapped back to
+  // cash after a reload or from another device. Loaded on open and after a trade.
+  const loadStopped = useCallback(async () => {
+    if (!address) return;
+    setStopped(await fork<{ trades: Incomplete[] }>("GET", `/wallets/${address}/incomplete`).then((r) => r.trades ?? []).catch(() => []));
+  }, [address]);
+  useEffect(() => { loadStopped(); }, [loadStopped, traded]);
 
   // Once per wallet (it signs a message), and again after a claim.
   const walletReady = !!wallet;
@@ -224,6 +236,13 @@ export default function MePage() {
         <button className="pill small" onClick={() => setSheet("add")}>Add cash</button>
       </section>
       {summary ? <CapLine summary={summary} /> : null}
+      {address ? stopped.map((t) => (
+        <div className="phx-card" key={t.position}>
+          <StoppedTrade card address={address} trade={t} retry={t.next === "retry"} signAndSubmit={signAndSubmit}
+            onDone={(text) => { setStoppedNote(text); markTraded(); }} />
+        </div>
+      )) : null}
+      {stoppedNote && !stopped.length ? <p className="muted small" style={{ margin: "8px 0" }}>{stoppedNote}</p> : null}
       {hasPhoenixCash(phoenix) && address ? <PhoenixCashCard address={address} phoenix={phoenix} onDone={() => { loadPhoenix(); loadFork(); }} /> : null}
       {loadError ? <div className="err">Couldn&apos;t load your money: {loadError}</div> : null}
       <div className="hair" />

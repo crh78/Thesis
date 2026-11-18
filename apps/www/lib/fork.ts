@@ -99,10 +99,12 @@ const KNOWN: Record<string, string> = {
   transaction_failed: "That didn't go through. Check your balance, then try again.",
   // Sent without a message (a sale after the take ended, a trade on a closed take).
   take_closed: "This take has ended, so it can't be traded or sold now. It settles at its end date.",
-  // A trade split over several transactions where a later one failed, even after the API's retry:
-  // the earlier ones swapped some cash into tokens that aren't in a position. `sweepToCash` swaps
-  // them back (TradeDock offers it).
+  // A trade split over several transactions where a later one failed: the earlier ones swapped
+  // some cash into tokens that aren't in a position. StoppedTrade offers the retry, then the sweep.
   trade_incomplete: "This trade didn't finish: part of your cash was swapped into tokens that aren't in a position.",
+  // A retry that can't be built (each comes with retry: false: the sweep is what's left).
+  retry_used: "It was already tried once. Swap the leftover back to cash instead.",
+  retry_unavailable: "It can't be finished now. Swap the leftover back to cash instead.",
   // A crash on the API's side: its message is a stack line, not for people.
   internal: "Something went wrong on our side. Try again.",
 };
@@ -121,7 +123,8 @@ export function errorText(code: string, message: string | undefined): string {
 
 /** A fork API refusal: `code` is the API's error code ("insufficient_funds", "already_on_chain"…). */
 export class ForkError extends Error {
-  constructor(public code: string, message: string) { super(message); }
+  /** `data`: the API's whole refusal (a `trade_incomplete` carries `retry` and `incomplete`). */
+  constructor(public code: string, message: string, public data?: Record<string, unknown>) { super(message); }
 }
 
 // Every call carries the signed-in person's Privy access token: on money calls the fork API checks
@@ -156,7 +159,7 @@ export async function fork<T>(method: string, path: string, body?: unknown, head
     // "failed to fetch". Through the proxy, the server answers these with 502 fork_unreachable.
     throw new ForkError("fork_unreachable", "Can't reach Thesis right now. Try again in a moment.");
   }
-  const json = (await r.json().catch(() => ({}))) as { error?: string; message?: string };
+  const json = (await r.json().catch(() => ({}))) as { error?: string; message?: string } & Record<string, unknown>;
   if (!r.ok) {
     const code = json.error ?? json.message ?? "Something went wrong";
     if ((r.status === 401 && code === "unauthorized") || code === "wrong_wallet") {
@@ -167,7 +170,7 @@ export async function fork<T>(method: string, path: string, body?: unknown, head
       const wait = Number(r.headers.get("retry-after"));
       throw new ForkError("rate_limited", wait > 0 ? `Too many tries. Wait ${wait < 90 ? `${Math.ceil(wait)} s` : `${Math.ceil(wait / 60)} min`} and try again.` : "Too many tries. Wait a moment and try again.");
     }
-    throw new ForkError(code, errorText(code, json.message));
+    throw new ForkError(code, errorText(code, json.message), json);
   }
   return json as T;
 }
@@ -193,14 +196,70 @@ export async function cashOutPhoenix(address: string, signAndSubmit: (b: Built) 
 }
 
 /**
- * After a `trade_incomplete`: swaps the tokens the unfinished trade left in the wallet back to USDC.
- * The API builds it (`POST /wallets/:w/sweep`); false when it says there's nothing left to swap.
+ * A split trade that stopped partway (the fork API's `incomplete`): `landed` of its transactions
+ * went through, so the wallet holds what they bought and no position exists yet. `next` is
+ * "retry" while its one retry is left, then "sweep".
  */
-export async function sweepToCash(address: string, signAndSubmit: (b: Built) => Promise<string[]>): Promise<boolean> {
-  const r = await fork<{ done?: boolean; buildId?: string; transactions?: string[] }>("POST", `/wallets/${address}/sweep`, {});
-  if (r.done || !r.buildId || !r.transactions?.length) return false;
-  await signAndSubmit({ buildId: r.buildId, transactions: r.transactions });
-  return true;
+export type Incomplete = {
+  position: string;
+  take: string;
+  takeId: string;
+  side: "back" | "fade";
+  usd: number;
+  next: "retry" | "sweep";
+  landed: number;
+  signatures: string[];
+  at: string;
+};
+
+/** A `trade_incomplete` refusal's details: the stopped trade and whether its retry is left. */
+export function stoppedTrade(e: unknown): { trade: Incomplete | null; retry: boolean } | null {
+  if (!(e instanceof ForkError) || e.code !== "trade_incomplete") return null;
+  const trade = (e.data?.incomplete as Incomplete | undefined) ?? null;
+  return { trade, retry: e.data?.retry === true && trade?.next !== "sweep" };
+}
+
+/** How a retry or sweep ended: `complete` when the trade went through after all (`trade_complete`). */
+export type Recovery = "complete" | "swept" | "nothing" | "gone";
+
+/**
+ * Builds the rest of a stopped split trade once more and sends it (`POST /wallets/:w/retry`).
+ * Throws a ForkError with `data.retry === false` when only the sweep is left (retry_used,
+ * retry_unavailable, take_closed, or a retry that stopped again).
+ */
+export async function retryTrade(address: string, position: string | null, signAndSubmit: (b: Built) => Promise<string[]>): Promise<Recovery> {
+  try {
+    await signAndSubmit(await fork<Built>("POST", `/wallets/${address}/retry`, position ? { position } : {}));
+    return "complete";
+  } catch (e) {
+    if (e instanceof ForkError && e.code === "trade_complete") return "complete";
+    if (e instanceof ForkError && e.code === "incomplete_gone") return "gone";
+    throw e;
+  }
+}
+
+/**
+ * Swaps what a stopped split trade bought back to USDC (`POST /wallets/:w/sweep`), round after
+ * round until the API says `done`; Phoenix legs then go through the Phoenix cash-out.
+ */
+export async function sweepToCash(address: string, position: string | null, signAndSubmit: (b: Built) => Promise<string[]>): Promise<Recovery> {
+  let swept = false;
+  let phoenix = false;
+  try {
+    for (let round = 0; round < 4; round++) {
+      const r = await fork<{ done: boolean; buildId?: string; transactions?: string[]; phoenixCashOut?: boolean }>(
+        "POST", `/wallets/${address}/sweep`, position ? { position } : {});
+      phoenix ||= !!r.phoenixCashOut;
+      if (r.done || !r.buildId || !r.transactions?.length) break;
+      await signAndSubmit({ buildId: r.buildId, transactions: r.transactions });
+      swept = true;
+    }
+  } catch (e) {
+    if (e instanceof ForkError && e.code === "trade_complete") return "complete";
+    throw e;
+  }
+  if (phoenix) await cashOutPhoenix(address, signAndSubmit);
+  return swept || phoenix ? "swept" : "nothing";
 }
 
 /** "NVDA 3x long liquidates at $61.21 · 18% away", as the iOS receipt's liquidation line. */

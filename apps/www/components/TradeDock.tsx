@@ -8,16 +8,17 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
 import { legName, pct, usd, type Position, type Receipt } from "@/lib/data";
 // The fork client adds the Privy token on money calls and handles "Sign in again".
-import { cashOutPhoenix, centsInput, depositLeft, fork, ForkError, markTraded, sweepToCash, type Built, type PhoenixLeg, type PhoenixRisk, type WalletSummary } from "@/lib/fork";
+import { cashOutPhoenix, centsInput, depositLeft, fork, markTraded, stoppedTrade, type Built, type Incomplete, type PhoenixLeg, type PhoenixRisk, type WalletSummary } from "@/lib/fork";
 import { cardValue } from "@/lib/data";
 import { X_LOGIN } from "@/lib/flags";
 import { useSession } from "@/lib/session";
 import { LiquidationLines } from "./Phoenix";
 import SignIn from "./SignIn";
+import StoppedTrade from "./StoppedTrade";
 
 type Side = "back" | "fade";
 /** `incomplete`: a trade split over several transactions stopped partway (the fork API's `trade_incomplete`). */
-type Step = { kind: "closed" } | { kind: "signin" } | { kind: "trade"; side: Side } | { kind: "sell"; position: Position } | { kind: "incomplete" } | { kind: "done"; text: string };
+type Step = { kind: "closed" } | { kind: "signin" } | { kind: "trade"; side: Side } | { kind: "sell"; position: Position } | { kind: "incomplete"; trade: Incomplete | null; retry: boolean } | { kind: "done"; text: string };
 /** The receipt's legs and positions also carry their Phoenix details (lib/fork.ts). */
 type Leg = Receipt["legs"][number] & PhoenixLeg;
 const phoenixOf = (p: Position) => (p as Position & { phoenix?: PhoenixRisk[] }).phoenix;
@@ -136,11 +137,12 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
       await refresh();
       setStep({ kind: "done", text: `You ${side === "back" ? "traded" : "faded"} ${author}'s take with $${usdAmount}.` });
     } catch (e) {
-      if (e instanceof ForkError && e.code === "trade_incomplete") {
-        // Some legs were bought, the rest (and the receipt) weren't: offer to swap them back.
+      const stopped = stoppedTrade(e);
+      if (stopped) {
+        // Some legs were bought, the rest (and the receipt) weren't: finish it, or swap them back.
         markTraded();
         await refresh().catch(() => {});
-        return setStep({ kind: "incomplete" });
+        return setStep({ kind: "incomplete", ...stopped });
       }
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -148,20 +150,10 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
     }
   }
 
-  async function sweep() {
-    if (!address) return;
-    setError(null);
-    try {
-      setBusy("Swapping back to cash…");
-      const swept = await sweepToCash(address, signAndSubmit);
-      markTraded();
-      await refresh();
-      setStep({ kind: "done", text: swept ? "The leftover is back in your balance as cash." : "Nothing was left to swap: it's already back in your balance." });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(null);
-    }
+  async function recovered(text: string) {
+    markTraded();
+    await refresh().catch(() => {});
+    setStep({ kind: "done", text });
   }
 
   async function sell(position: Position) {
@@ -313,18 +305,8 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
                 </button>
               </>
             ) : null}
-            {step.kind === "incomplete" ? (
-              <>
-                <h3>The trade didn&apos;t finish</h3>
-                <p className="muted">
-                  Part of it went through and the rest didn&apos;t, so some of your cash is now in tokens that aren&apos;t in a
-                  position. Swap them back to have it as cash again.
-                </p>
-                {error ? <div className="err">{error}</div> : null}
-                <button className="btn light" style={{ width: "100%", marginTop: 16 }} disabled={!!busy} onClick={sweep}>
-                  {busy ?? "Swap the leftover back to cash"}
-                </button>
-              </>
+            {step.kind === "incomplete" && address ? (
+              <StoppedTrade address={address} trade={step.trade} retry={step.retry} signAndSubmit={signAndSubmit} onDone={recovered} />
             ) : null}
             {step.kind === "done" ? (
               <div style={{ textAlign: "center" }}>
