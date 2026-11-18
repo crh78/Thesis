@@ -131,7 +131,12 @@ Anyone can sign up, reply "@yourthesisxyz back $20" under a post on X, and trade
   - the X bot answers each person at most 10 times a day (every reply counts), 3 times per thread and 100 times in total (`apps/x`). Its replies carry no link: the draft waits in the web app for whoever signs in with the asker's X account, and "stop" opts out. Still to do: X's written approval for an AI reply bot, and a hard monthly cap in the X console.
 - **No resets once it's public:** no program changes and no clock-moving suites while it's open. Policy in [`scripts/fork/README.md`](scripts/fork/README.md#resets).
 - **A clean feed:** done (e2e suites trade only made-up takes from hidden accounts).
-- **Own-take fades:** the fork API refuses fading your own take; the program-level check waits for the next program change.
+- **No-timeline takes** (being built; needs a program change, so a fresh-fork reset before the fork goes public): a take is a claim and a risk level, with no horizon to pick. It runs until its author sells their buy-in, at most 365 days after posting. The author's sale closes it: no new backs or fades, and its headline result is final at the sale's prices. Backers and faders keep their positions until they sell; a take its author never sells settles at the 365-day mark, along with any positions still open. Holders are told when the author sells. Composer, X bot, iMessage and every API stop asking for a horizon (an old client's is accepted and ignored). The owner's agent code still needs:
+  - `packages/agent/src/basket.ts`: `horizon` optional in `BasketArgs`, and dropped from the `build_basket` tool schema (its `required` list and 3-month default) and from the `/source/drafts` body;
+  - `packages/agent/src/index.ts`: the prompt's "Risk and horizon … 3 months" line and the `"3 months"` default;
+  - the agent's and MCP server's sell flow: warn an author that selling their buy-in closes the take (the exit build's `closesTake`);
+  - the `/source/drafts` contract: `horizon` optional and ignored. Then `apps/x` can stop sending its fixed value (`FIXED_HORIZON` in `src/bot.ts`). `apps/imessage` has no horizon of its own.
+- **Own-take fades:** the fork API refuses fading your own take; the program refuses it too from the no-timeline reset.
 - **Phoenix:** dogfooded in the simulator. The liquidation alert wasn't triggered, since the fork can't move a price that far.
 - **Limits checked (2026-11-18):** Privy's free tier (500 monthly users) is enough; Supabase is far below its free limits (110 of 500 MB); Vercel stays on Hobby with fewer function calls and builds; the VM has headroom (load under 1 at 200 concurrent reads). Still to do: a hard monthly cap in the X console when the bot goes live, and replacing Tailscale Funnel if real traffic nears 200 concurrent visitors.
 
@@ -144,7 +149,7 @@ Anyone can sign up, reply "@yourthesisxyz back $20" under a post on X, and trade
 - **X cost limits:** read each post once and share the result; track an account only once someone scores or copies it; fetch only posts that look like calls; cache share-sheet results per URL.
 - **iMessage trading:** create, back and fade by text through the session signers (the BlueBubbles adapter is built but untested on a real install); also takes shared links.
 - **Thesis MCP server:** score an account, build a take from a post, back, fade, sell and list positions, within the user's limits.
-- **Perp limits: done:** a 30% perp cap beside other picks, one pick per name, a leverage ceiling per horizon.
+- **Perp limits: done:** a 30% perp cap beside other picks, one pick per name, at most 5x (and the market's max), picked from the risk and how directly the name is the take; 2x without a model call.
 
 ### Phase 2: a private mainnet program
 
@@ -185,6 +190,7 @@ No users and no money in; just a real program ID and real activity ([launch chec
 ### Settled
 
 - **Product:** the name is Thesis; two scores instead of a formula (own P&L and made for backers, by dollars or percent, plus a faders board); no creator performance boost (a flat 5 bps on every back and fade).
+- **Takes:** no timeline. A take runs until its author sells, at most 365 days; the author's sale closes it and settles its headline result, and backers keep their positions until they sell.
 - **Pricing:** Gemini quotes from best bid and ask only; token first with no band, from Jupiter and Alpaca only; tradeable means a $50k pool and under 1% impact; a take's live return follows its author's signed entry prices; every signed price's source document public in `price_audit`.
 - **Phase 1:** web first; 10 bot replies per user per day plus a monthly cap; X-reply takes are normal takes earning the replier the creator share; $1,000 of play money with no top-ups; no resets while public; one link-free reply to people who haven't signed up; iMessage trading and the MCP server in phase 1; sharing to the Thesis contact in Messages as the public share path; the bot is @yourthesisxyz.
 - **Mainnet:** the upgrade authority is held by the project owner, with the SOL for the deploy ready.

@@ -4,7 +4,7 @@ The direction for everything on Solana: the Thesis Anchor program, its TypeScrip
 
 ## The idea
 
-The user's own wallet does the trading (Jupiter swaps, Jupiter Lend, Phoenix). In the same transaction, the Thesis program writes a **receipt**: who backed or faded which take, with how much, and when. The program never holds user money except the escrowed share of paper legs (below). It collects the platform fee, credits creators their share, records settler-signed prices, settles takes at their horizon, keeps everyone's track record, and mints "called it" badges.
+The user's own wallet does the trading (Jupiter swaps, Jupiter Lend, Phoenix). In the same transaction, the Thesis program writes a **receipt**: who backed or faded which take, with how much, and when. The program never holds user money except the escrowed share of paper legs (below). It collects the platform fee, credits creators their share, records settler-signed prices, settles a take when its author sells (or a year after posting), keeps everyone's track record, and mints "called it" badges.
 
 ## Principles
 
@@ -24,13 +24,14 @@ The user's own wallet does the trading (Jupiter swaps, Jupiter Lend, Phoenix). I
 | Creator share | 5 bps of the fee to the take's author on every back and fade; the platform keeps 5 bps. On the author's own buy-in it goes to the platform. No performance boost |
 | Minimum stake | $10. Smaller positions are recorded but don't score |
 | Max legs per take | 10 |
-| Take length | 1 hour to 5 years |
+| Take length | No timeline to pick: a take runs until its author sells their buy-in, at most 365 days after posting. `horizon_end` is fixed at posting + 365 days (the config's window is 364 to 366 days), and a take its author never sells settles then, as if sold at that day's prices |
+| Closing a take | The author's sale of their own buy-in closes the take (`Closed`, event `takeClosed`): no new backs or fades, and its headline result settles from the sale's prices (`settle_take`). Backers and faders who haven't sold keep their positions; each settles when its owner sells, or at the 365-day mark. "Made for backers" counts positions as they settle. The program refuses a fade by the take's own author |
 | Author buy-in | At least $10. Like a back, it records only the legs it bought, so a leg with no venue never holds up the take's result |
 | Leverage | A perp leg's return × its leverage, each leg's loss capped at −100% |
 | Yield legs | Count in the score: priced as one Jupiter Lend vault share's value in USDC (`totalAssets / totalSupply`) |
 | Prices | Settler-signed. Token first, at any hour: the issuer token's Jupiter price when it has a $50k pool and a $100 buy moves it under 1%; the stock's Alpaca price only as a fallback. Prices are the first at or after the moment |
 | Badges | Author only, each once per user: first take posted, first take at +50%, first at +100%, ten takes at +50%, a take at +1,000% |
-| Selling before the horizon | A sale exits the whole position; `exit_position` records it in the same transaction; the settler signs prices at or after the sale and the position settles right away. No fee. An author can sell their buy-in: their own score uses the sale, the take's headline still runs to the horizon. No partial sales |
+| Selling | A sale exits the whole position; `exit_position` records it in the same transaction, while the take is open or closed and before the 365-day mark; the settler signs prices at or after the sale and the position settles right away. No fee. The author's sale also closes the take (above). No partial sales |
 | Proof of trade | `begin_trade` / `trade_step` brackets, a program allowlist with its own key, exact USDC drop, output accounts that grow, settler-side asset and 90% value checks ([`hardening-plan.md`](hardening-plan.md) §1) |
 | Paper legs | Gemini prediction legs ([`gemini-plan.md`](gemini-plan.md)) and Collector Crypt card legs ([`cards-plan.md`](cards-plan.md)): share escrowed and returned in full, P&L in the score only |
 | Fades | Prediction legs (the other side) and Phoenix shorts ([`phoenix-plan.md`](phoenix-plan.md)); card legs and unlisted names are left out |

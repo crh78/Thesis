@@ -9,10 +9,10 @@ Prediction legs from Gemini's prediction markets, filled on paper at Gemini's li
 - **The score.** Prediction legs count in the same return, profile stats, leaderboards and badges as real legs.
 - **Prices** (settler-signed):
   - entry is the held side's ask when the trade lands;
-  - exit is 1 or 0 if the contract resolved, otherwise the held side's bid at the horizon or sale;
+  - exit is 1 or 0 if the contract resolved, otherwise the held side's bid at the sale or the take's 365-day mark;
   - quotes come only from `bestBid` / `bestAsk` (No is the complement of Yes's book); a missing one is no quote. Never Gemini's `prices.buy` / `prices.sell`, which it fills from the last trade.
 - **Fades** hold the other side of each prediction leg. Other legs are faded through Phoenix shorts where listed; the rest show as excluded.
-- **Markets:** all categories. A contract must resolve at least an hour out and have a bid and an ask on the chosen side. Contracts resolving after the horizon are allowed (exit at the bid); the builder prefers ones resolving near the settle date.
+- **Markets:** all categories. A contract must resolve at least an hour out and have a bid and an ask on the chosen side. A take has no timeline (it runs until its author sells, a year at most), so the builder prefers contracts resolving within 365 days; later ones are allowed (exit at the bid).
 - **Fee:** 0.10% of the whole stake, prediction share included.
 - **No "paper" label** in the app on the fork. Before real users: paper gains must never look withdrawable.
 

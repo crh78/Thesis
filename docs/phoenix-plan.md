@@ -19,11 +19,11 @@ Phoenix docs: [trader onboarding](https://docs.phoenix.trade/sdk/register.md), [
 
 | Question | Rule |
 |---|---|
-| Leverage | The take builder's model picks it per perp pick, at most 5x and the market's max, under a ceiling by horizon: 5x for 2 weeks, 4x for 1 month, 3x for 3 months, 2x for 6 months. A pick with no leverage is left out. Without a model call (rules fallback, a switch to high risk) the horizon decides. A perp is at most 30% when the basket holds other picks, and one pick per name |
+| Leverage | The take builder's model picks it per perp pick, at most 5x and the market's max. A take has no timeline, so the model picks from the risk and how directly the name is the take. A pick with no leverage is left out. Without a model call (rules fallback, a switch to high risk) it's 2x. A perp is at most 30% when the basket holds other picks, and one pick per name |
 | Margin | One isolated Phoenix subaccount per perp leg per position, so legs never net against each other and one liquidation can't touch another |
-| Price the settler signs | Phoenix's mark: the first one-minute bar at or after the trade, horizon or sale (rule `phoenix-mark`), per unit of the underlying (kPEPE is 1,000 PEPE) |
-| A position gone at the horizon without a Thesis sale | That leg scores −100% (`phoenix-liquidated`): the exit is `entry × (1 − 1/leverage)` for a back, `entry × (1 + 1/leverage)` for a fade |
-| After the horizon | The position stays open on Phoenix until the user taps "Cash out" (Thesis can't close it without their signature). The score stops at the horizon; funding and liquidation risk continue, and the app says so |
+| Price the settler signs | Phoenix's mark: the first one-minute bar at or after the trade, sale or the take's 365-day mark (rule `phoenix-mark`), per unit of the underlying (kPEPE is 1,000 PEPE) |
+| A position gone at the 365-day mark without a Thesis sale | That leg scores −100% (`phoenix-liquidated`): the exit is `entry × (1 − 1/leverage)` for a back, `entry × (1 + 1/leverage)` for a fade |
+| After the 365-day mark | The position stays open on Phoenix until the user taps "Cash out" (Thesis can't close it without their signature). The score stops at the mark; funding and liquidation risk continue, and the app says so |
 | Fades of spot legs | A short of the same underlying where Phoenix lists it (`fade_via = PhoenixShort`); otherwise left out with the reason |
 | US users | Open to everyone for now. `US_RESTRICTIONS=on` hides perps from US accounts again |
 
