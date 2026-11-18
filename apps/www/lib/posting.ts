@@ -35,11 +35,25 @@ export const postingBuyIns = {
   },
 };
 
-/** Is the author's buy-in on-chain? If so, the fork API also delivers its events again. */
-export const isOnChain = (id: string) =>
-  fork<{ onChain: boolean }>("POST", `/takes/${id}/confirm`, {}).then((r) => r.onChain === true, () => false);
+/**
+ * Is the author's buy-in on-chain? If so, the fork API also delivers its events again. Null when
+ * it couldn't be checked (the fork API unreachable, rate-limited, failing): only a real `false`
+ * may say "Didn't post", offer Discard or list the take as stuck.
+ */
+export const isOnChain = (id: string): Promise<boolean | null> =>
+  fork<{ onChain: boolean }>("POST", `/takes/${id}/confirm`, {}).then(
+    (r) => (typeof r.onChain === "boolean" ? r.onChain : null),
+    () => null,
+  );
 
-/** Signs and sends the take's buy-in. An earlier send that landed is fine; throws if it can't have landed. */
+/** Thrown when a send failed and whether it landed anyway couldn't be checked. */
+export const UNCHECKED = "unchecked";
+export const UNCHECKED_TEXT = "Couldn't check whether your buy-in landed. Try again.";
+
+/**
+ * Signs and sends the take's buy-in. An earlier send that landed is fine. Throws the send's error
+ * if it didn't land, or a ForkError with code `UNCHECKED` if that couldn't be checked.
+ */
 export async function sendBuyIn(id: string, author: string, usd: number, signAndSubmit: (b: Built) => Promise<string[]>) {
   try {
     const built = await fork<Built>("POST", `/takes/${id}/publish`, { author, usd });
@@ -47,8 +61,12 @@ export async function sendBuyIn(id: string, author: string, usd: number, signAnd
     markTraded();
   } catch (e) {
     const landed = e instanceof ForkError && (e.code === "already_on_chain" || e.code === "already_live");
+    if (landed) return;
     // The send may have landed even though the answer didn't come back.
-    if (!landed && !(await isOnChain(id))) throw e;
+    const onChain = await isOnChain(id);
+    if (onChain === true) return;
+    if (onChain === null) throw new ForkError(UNCHECKED, UNCHECKED_TEXT);
+    throw e;
   }
 }
 
@@ -56,10 +74,10 @@ const isLive = (id: string) => rpcNow<{ status: string } | null>("take", { p_id:
 
 /**
  * Polls the public read until the take is live (the chain event made it so). Halfway, asks the
- * fork API to deliver the publish again; at the timeout, says whether it's on-chain. "stopped"
- * once `wanted()` turns false (the screen closed).
+ * fork API to deliver the publish again; at the timeout, says whether it's on-chain ("unknown"
+ * when that couldn't be checked). "stopped" once `wanted()` turns false (the screen closed).
  */
-export async function waitUntilLive(id: string, wanted: () => boolean = () => true): Promise<"live" | "unconfirmed" | "failed" | "stopped"> {
+export async function waitUntilLive(id: string, wanted: () => boolean = () => true): Promise<"live" | "unconfirmed" | "failed" | "unknown" | "stopped"> {
   const start = Date.now();
   let nudged = false;
   while (Date.now() - start < POSTING_TIMEOUT_MS) {
@@ -70,5 +88,6 @@ export async function waitUntilLive(id: string, wanted: () => boolean = () => tr
   }
   if (!wanted()) return "stopped";
   if (await isLive(id)) return "live";
-  return (await isOnChain(id)) ? "unconfirmed" : "failed";
+  const onChain = await isOnChain(id);
+  return onChain === true ? "unconfirmed" : onChain === false ? "failed" : "unknown";
 }

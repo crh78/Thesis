@@ -10,8 +10,8 @@ import {
   adding, basketFrom, builderLegs, type Built, type Draft, HORIZONS, horizonOf, type Leg, MAX_PICKS, newDraft, type PickAsset,
   removing, type Risk, RISKS, setting, settleDate, topicGuess,
 } from "@/lib/compose";
-import { centsInput, fork, useForkWallet, type WalletSummary } from "@/lib/fork";
-import { postingBuyIns, sendBuyIn, showMyTakes, waitUntilLive } from "@/lib/posting";
+import { centsInput, fork, ForkError, useForkWallet, type WalletSummary } from "@/lib/fork";
+import { isOnChain, postingBuyIns, sendBuyIn, showMyTakes, UNCHECKED, UNCHECKED_TEXT, waitUntilLive } from "@/lib/posting";
 import { useSession } from "@/lib/session";
 import { AssetLogo, type Asset } from "./AssetBits";
 import { AddCash } from "./CashSheets";
@@ -469,7 +469,9 @@ function AssetPicker({ legs, onClose, onPick }: { legs: Leg[]; onClose: () => vo
 
 // Post ----------------------------------------------------------------------------------------
 
-type PostState = { kind: "sending" | "waiting" } | { kind: "live"; id: string } | { kind: "unconfirmed"; id: string } | { kind: "failed"; id: string | null; message: string };
+type PostState = { kind: "sending" | "waiting" } | { kind: "live"; id: string } | { kind: "unconfirmed"; id: string } | { kind: "failed"; id: string | null; message: string }
+  // The fork API couldn't say whether the buy-in landed: never "Didn't post", never Discard.
+  | { kind: "unknown"; id: string };
 
 const WALLET_WAIT_MS = 20_000;
 
@@ -531,7 +533,9 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
         if (r === "live") { postingBuyIns.set(id, null); setState({ kind: "live", id }); }
         else if (r === "unconfirmed") setState({ kind: "unconfirmed", id });
         else if (r === "failed") setState({ kind: "failed", id, message: "Your buy-in didn't go through." });
+        else if (r === "unknown") setState({ kind: "unknown", id });
       } catch (e) {
+        if (live && takeId.current && e instanceof ForkError && e.code === UNCHECKED) return setState({ kind: "unknown", id: takeId.current });
         if (live) setState({ kind: "failed", id: takeId.current, message: e instanceof Error ? e.message : "Couldn't post your take. Try again." });
       }
     })();
@@ -550,11 +554,23 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
   }, [state, onClose, router, draft.draftId, source]);
 
   async function discard() {
+    const id = takeId.current;
+    if (!id) return onClose();
     setDiscarding(true);
-    if (takeId.current) {
-      await social("DELETE", `takes/${takeId.current}`).catch(() => {});
-      postingBuyIns.set(takeId.current, null);
+    // Only a take the fork API says isn't on-chain is deleted: one that landed goes live, and one
+    // it couldn't check is kept.
+    const onChain = await isOnChain(id);
+    if (onChain !== false) {
+      setDiscarding(false);
+      return setState(onChain === true ? { kind: "unconfirmed", id } : { kind: "unknown", id });
     }
+    try {
+      await social("DELETE", `takes/${id}`);
+    } catch {
+      setDiscarding(false);
+      return setState({ kind: "failed", id, message: "Couldn't discard it. Try again." });
+    }
+    postingBuyIns.set(id, null);
     onClose();
   }
 
@@ -582,6 +598,12 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
             <p className="muted">Your buy-in landed; the take will show up shortly.</p>
           </div>
         ) : null}
+        {state.kind === "unknown" ? (
+          <div className="build-status">
+            <h2>Couldn&apos;t check</h2>
+            <p className="muted">{UNCHECKED_TEXT} It stays in My takes on Me until it&apos;s settled either way.</p>
+          </div>
+        ) : null}
         {state.kind === "failed" ? (
           <div className="build-status">
             <h2>Didn&apos;t post</h2>
@@ -591,6 +613,13 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
       </div>
       <div className="cmp-foot">
         {state.kind === "unconfirmed" ? <button className="obtn filled" onClick={openMyTakes}>See my takes</button> : null}
+        {state.kind === "unknown" ? (
+          <>
+            {/* Safe to send again: the fork API answers already_on_chain if the first one landed. */}
+            <button className="obtn filled" onClick={() => setAttempt((a) => a + 1)}>Try again</button>
+            <button className="obtn plain" onClick={openMyTakes}>See my takes</button>
+          </>
+        ) : null}
         {state.kind === "failed" ? (
           <>
             <button className="obtn filled" onClick={() => setAttempt((a) => a + 1)}>Retry</button>

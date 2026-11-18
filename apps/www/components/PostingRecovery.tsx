@@ -7,14 +7,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { money, topicImage, type Take } from "@/lib/data";
-import { fork, useForkWallet } from "@/lib/fork";
-import { isOnChain, POSTING_STALE_MS, postingBuyIns, sendBuyIn, showMyTakes, waitUntilLive } from "@/lib/posting";
+import { fork, ForkError, useForkWallet } from "@/lib/fork";
+import { isOnChain, POSTING_STALE_MS, postingBuyIns, sendBuyIn, showMyTakes, UNCHECKED, waitUntilLive } from "@/lib/posting";
 import { useSession } from "@/lib/session";
 
 type State =
   | { kind: "posting" }
   | { kind: "failed"; message: string }
   | { kind: "unconfirmed" }
+  /** The fork API couldn't say whether it's on-chain: never "Didn't post", never Discard. */
+  | { kind: "unknown" }
   | { kind: "working"; text: string }
   | { kind: "confirmDiscard" };
 
@@ -36,10 +38,12 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
   const set = (s: State) => { if (mounted.current) setState(s); };
   const buyIn = postingBuyIns.get(take.id) ?? minStake;
 
-  // On-chain already: wait for it to go live. Otherwise it didn't post.
+  // On-chain already: wait for it to go live. Only a real "not on-chain" means it didn't post.
   async function check() {
-    if (await isOnChain(take.id)) return wait();
-    set({ kind: "failed", message: DIDNT });
+    set({ kind: "working", text: "Checking…" });
+    const onChain = await isOnChain(take.id);
+    if (onChain === true) return wait();
+    set(onChain === false ? { kind: "failed", message: DIDNT } : { kind: "unknown" });
   }
 
   async function wait() {
@@ -48,6 +52,7 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
     if (r === "live") { postingBuyIns.set(take.id, null); onChanged(); }
     else if (r === "unconfirmed") set({ kind: "unconfirmed" });
     else if (r === "failed") set({ kind: "failed", message: DIDNT });
+    else if (r === "unknown") set({ kind: "unknown" });
   }
 
   // Checked once it's about 2 minutes old (the composer may still be sending it before then).
@@ -72,6 +77,7 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
     try {
       await sendBuyIn(take.id, address, buyIn, signAndSubmit);
     } catch (e) {
+      if (e instanceof ForkError && e.code === UNCHECKED) return set({ kind: "unknown" });
       return set({ kind: "failed", message: e instanceof Error ? e.message : "Couldn't send your buy-in." });
     }
     await wait();
@@ -79,8 +85,10 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
 
   async function discard() {
     set({ kind: "working", text: "Discarding…" });
-    // It landed after all: it'll go live.
-    if (await isOnChain(take.id)) return wait();
+    // It landed after all: it'll go live. Couldn't check: never delete on a guess.
+    const onChain = await isOnChain(take.id);
+    if (onChain === true) return wait();
+    if (onChain === null) return set({ kind: "unknown" });
     try {
       await social("DELETE", `takes/${take.id}`);
     } catch {
@@ -93,6 +101,7 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
   const status =
     state.kind === "failed" ? <><b className="down">Didn&apos;t post</b> · {state.message}</>
     : state.kind === "unconfirmed" ? <><b>On-chain, not showing yet</b> · your buy-in landed</>
+    : state.kind === "unknown" ? <><b>Couldn&apos;t check</b> · whether your buy-in landed. Try again.</>
     : state.kind === "working" ? <><b className="muted">{state.text}</b></>
     : state.kind === "confirmDiscard" ? <><b className="down">Discard this take?</b> · it never made it on-chain, so nobody saw it and no money moved</>
     : <><b className="muted">Posting…</b> · only you can see it</>;
@@ -116,6 +125,9 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
             <button className="pill small" onClick={() => set({ kind: "failed", message: DIDNT })}>Keep it</button>
           </div>
         ) : null}
+        {state.kind === "unknown" ? (
+          <div className="posting-actions"><button className="pill small" onClick={check}>Try again</button></div>
+        ) : null}
         {state.kind === "unconfirmed" ? (
           <div className="posting-actions"><button className="pill small" onClick={wait}>Check again</button></div>
         ) : null}
@@ -138,12 +150,16 @@ export function PostingAtLaunch() {
   useEffect(() => {
     if (phase.kind !== "ready" || !userId) return;
     const key = `thesis.postingChecked.${userId}`;
-    try { if (sessionStorage.getItem(key)) return; sessionStorage.setItem(key, "1"); } catch { /* private mode: check every load */ }
+    try { if (sessionStorage.getItem(key)) return; } catch { /* private mode: check every load */ }
     let live = true;
     (async () => {
-      const posting = await social<{ takes: Take[] }>("GET", "takes/posting").then((r) => r.takes, () => [] as Take[]);
+      const posting = await social<{ takes: Take[] }>("GET", "takes/posting").then((r) => r.takes, () => null);
+      // A failed read is tried again on the next load; only a good one counts for this session.
+      if (!posting) return;
+      try { sessionStorage.setItem(key, "1"); } catch { /* private mode */ }
       const stale = posting.filter((t) => age(t) >= POSTING_STALE_MS);
-      const checked = await Promise.all(stale.map(async (t) => ((await isOnChain(t.id)) ? null : t)));
+      // Only takes the fork API says aren't on-chain; one it couldn't check stays off the sheet (Me checks it again).
+      const checked = await Promise.all(stale.map(async (t) => ((await isOnChain(t.id)) === false ? t : null)));
       const failed = checked.filter((t): t is Take => t !== null);
       if (live && failed.length) { setStuck(failed); setOpen(true); }
     })();
