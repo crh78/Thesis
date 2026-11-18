@@ -10,8 +10,12 @@ import { useSignMessage, useSignTransaction, useWallets } from "@privy-io/react-
 /**
  * `phoenixCashOut`: a sale that closed Phoenix legs; their cash comes back with `cashOutPhoenix`.
  * `closesTake` (sales only): this is the author selling their buy-in, which closes the take.
+ * `expiresAt` / `quotedAt` (unix ms, the server's clock): when the build's blockhash runs out, and
+ * when its quote was made. An older fork API sends neither (its builds last about a minute and can't
+ * be refreshed). `prebuilt`: the API served a `prebuild: true` request as a prebuild (its money
+ * action counts at submit); without it the request was a normal build.
  */
-export type Built = { buildId: string; transactions: string[]; feeUsd?: number; phoenixCashOut?: boolean; closesTake?: boolean };
+export type Built = { buildId: string; transactions: string[]; feeUsd?: number; phoenixCashOut?: boolean; closesTake?: boolean; expiresAt?: number; quotedAt?: number; prebuilt?: boolean };
 
 export type PortfolioPosition = {
   address: string;
@@ -132,8 +136,11 @@ export function errorText(code: string, message: string | undefined): string {
 
 /** A fork API refusal: `code` is the API's error code ("insufficient_funds", "already_on_chain"…). */
 export class ForkError extends Error {
-  /** `data`: the API's whole refusal (a `trade_incomplete` carries `retry` and `incomplete`). */
-  constructor(public code: string, message: string, public data?: Record<string, unknown>) { super(message); }
+  /**
+   * `data`: the API's whole refusal (a `trade_incomplete` carries `retry` and `incomplete`).
+   * `status`: the HTTP status it came with (none when the API wasn't reached).
+   */
+  constructor(public code: string, message: string, public data?: Record<string, unknown>, public status?: number) { super(message); }
 }
 
 // Every call carries the signed-in person's Privy access token: on money calls the fork API checks
@@ -153,15 +160,20 @@ export const REAUTH_EVENT = "thesis:reauth";
  */
 const FORK_BASE = (process.env.NEXT_PUBLIC_FORK_API_URL ?? "").trim().replace(/\/+$/, "") || "/api/fork";
 
-export async function fork<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
-  const token = forkToken ? await forkToken().catch(() => null) : null;
+/**
+ * `plain`: the JSON goes as text/plain with no token, so a direct call is a CORS simple request
+ * (no preflight round trip first). Only for routes that need no token (`/submit`).
+ */
+export async function fork<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>, opts: { plain?: boolean; keepalive?: boolean } = {}): Promise<T> {
+  const token = forkToken && !opts.plain ? await forkToken().catch(() => null) : null;
   let r: Response;
   try {
     r = await fetch(`${FORK_BASE}${path}`, {
       method,
-      headers: { ...(body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
+      headers: { ...(body ? { "content-type": opts.plain ? "text/plain" : "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
       body: body ? JSON.stringify(body) : undefined,
       cache: "no-store",
+      keepalive: opts.keepalive,
     });
   } catch {
     // Offline, the fork API down, or (calling it directly) a CORS refusal: the browser only says
@@ -179,7 +191,7 @@ export async function fork<T>(method: string, path: string, body?: unknown, head
       const wait = Number(r.headers.get("retry-after"));
       throw new ForkError("rate_limited", wait > 0 ? `Too many tries. Wait ${wait < 90 ? `${Math.ceil(wait)} s` : `${Math.ceil(wait / 60)} min`} and try again.` : "Too many tries. Wait a moment and try again.");
     }
-    throw new ForkError(code, errorText(code, json.message), json);
+    throw new ForkError(code, errorText(code, json.message), json, r.status);
   }
   return json as T;
 }
@@ -334,6 +346,34 @@ export function holdings(positions: PortfolioPosition[]): PortfolioPosition[] {
   });
 }
 
+/**
+ * Client timing marks for one trade, in ms since the tap (performance.now()), sent to the fork API
+ * as `timings` on submit (it only logs them, with the build id). A mark before the tap is negative.
+ */
+export type Stopwatch = { marks: Record<string, number>; mark: (name: string, at?: number) => void };
+export function stopwatch(): Stopwatch {
+  const t0 = performance.now();
+  const marks: Record<string, number> = {};
+  return { marks, mark: (name, at = performance.now()) => { marks[name] = Math.round(at - t0); } };
+}
+
+/**
+ * What `/submit` answered. `pending`: the fork accepted every transaction and confirms them in the
+ * background (`until: "accepted"`; `GET /submissions/:buildId` says how it ended). An older fork
+ * API ignores `until` and answers only once it's confirmed, with no `status: "pending"`.
+ */
+export type Submitted = { signatures: string[]; pending: boolean };
+
+/**
+ * Sends signed transactions (`POST /submit`) as a CORS simple request: text/plain JSON and no token
+ * (the API checks the owner's signature on what it built instead), so a direct call needs no preflight.
+ */
+export async function submit(buildId: string, transactions: string[], opts: { until?: "accepted"; timings?: Record<string, number>; keepalive?: boolean } = {}): Promise<Submitted> {
+  const body = { buildId, transactions, ...(opts.until ? { until: opts.until } : {}), ...(opts.timings ? { timings: opts.timings } : {}) };
+  const r = await fork<{ signatures?: string[]; status?: string }>("POST", "/submit", body, undefined, { plain: true, keepalive: opts.keepalive });
+  return { signatures: r.signatures ?? [], pending: r.status === "pending" };
+}
+
 /** The signed-in user's Privy Solana wallet (the one the app uses), and fork calls made with it. */
 export function useForkWallet() {
   const { user } = usePrivy();
@@ -347,15 +387,22 @@ export function useForkWallet() {
   }, [user]);
   const wallet = useMemo(() => wallets.find((w) => w.address === address) ?? null, [wallets, address]);
 
-  const signAndSubmit = useCallback(async (built: Built) => {
+  /** Signs every transaction of a build at once, not one after another; `marks` gets `sign<i>` and `signed`. */
+  const sign = useCallback(async (built: Built, marks?: Stopwatch) => {
     if (!wallet) throw new Error("Your wallet isn't ready yet. Try again in a moment.");
-    const signed: string[] = [];
-    for (const tx of built.transactions) {
+    const signed = await Promise.all(built.transactions.map(async (tx, i) => {
       const { signedTransaction } = await signTransaction({ transaction: b64ToBytes(tx), wallet, options: { uiOptions: { showWalletUIs: false } } });
-      signed.push(bytesToB64(signedTransaction));
-    }
-    return (await fork<{ signatures: string[] }>("POST", "/submit", { buildId: built.buildId, transactions: signed })).signatures;
+      marks?.mark(`sign${i}`);
+      return bytesToB64(signedTransaction);
+    }));
+    marks?.mark("signed");
+    return signed;
   }, [wallet, signTransaction]);
+
+  /** Signs and sends a build, and waits until it's confirmed (the fork API's default). */
+  const signAndSubmit = useCallback(async (built: Built) => {
+    return (await submit(built.buildId, await sign(built))).signatures;
+  }, [sign]);
 
   // Privy hands back a new wallet object and signMessage on most renders; creatorFees reads the latest
   // through a ref so it keeps one identity per address (a screen loading fees in an effect would
@@ -376,5 +423,5 @@ export function useForkWallet() {
     return fork<CreatorFees>("GET", `/wallets/${address}/creator-fees`, undefined, { "x-thesis-wallet-auth": `${at}.${bytesToB64(signature)}` });
   }, [address]);
 
-  return { address, wallet, signAndSubmit, creatorFees };
+  return { address, wallet, sign, signAndSubmit, creatorFees };
 }

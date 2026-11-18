@@ -3,12 +3,17 @@
 // the transactions, the user's Privy Solana wallet signs them (it never sends), and the API adds
 // the app's fee payer and sends them. Sign-in is the app's (X, Google or email), so the same person
 // gets the same wallet and Thesis profile as in the app; onboarding is drawn by SessionScreens.
-import { useCallback, useEffect, useMemo, useState } from "react";
+//
+// Fast trades (lib/trade.ts): the sheet builds as soon as it opens and again as the amount changes,
+// so the tap only signs and sends. "You're in" shows once the fork has accepted the transactions;
+// confirmation is watched in the background, and the rare trade that doesn't confirm is rolled back
+// on screen ("That trade didn't go through").
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
-import { useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
 import { closedReason, legName, pct, takeState, usd, type Position, type Receipt } from "@/lib/data";
 // The fork client adds the Privy token on money calls and handles "Sign in again".
-import { cashOutPhoenix, centsInput, depositLeft, fork, ForkError, markTraded, stoppedTrade, type Built, type Incomplete, type PhoenixLeg, type PhoenixRisk, type WalletSummary } from "@/lib/fork";
+import { cashOutPhoenix, centsInput, depositLeft, fork, ForkError, markTraded, stoppedTrade, stopwatch, submit, useForkWallet, type Built, type Incomplete, type PhoenixLeg, type PhoenixRisk, type Stopwatch, type WalletSummary } from "@/lib/fork";
+import { pendingTrade, useEarlyBuild, watchSubmission, type PendingTrade, type Submission } from "@/lib/trade";
 import { cardValue } from "@/lib/data";
 import { X_LOGIN } from "@/lib/flags";
 import { useSession } from "@/lib/session";
@@ -20,18 +25,36 @@ type Side = "back" | "fade";
 /**
  * `incomplete`: a trade split over several transactions stopped partway (the fork API's `trade_incomplete`).
  * `sell` with `closing`: the exit build said it's the author's buy-in (`closesTake`), so the sheet
- * warns that selling closes the take before anything is signed; `built` is that build, kept to sign
- * on the second tap (null once it's been used or failed, and the next tap builds again).
+ * warns that selling closes the take before anything is signed (the build waits for the second tap).
+ * `placed`: "You're in" (or "Sold"); `confirming` until the watch says it landed, `slow` when it
+ * couldn't tell. `failed`: it was accepted but didn't confirm, so nothing happened.
  */
-type Step = { kind: "closed" } | { kind: "signin" } | { kind: "trade"; side: Side } | { kind: "sell"; position: Position; closing?: { built: Built | null } } | { kind: "incomplete"; trade: Incomplete | null; retry: boolean } | { kind: "done"; text: string };
+type Step =
+  | { kind: "closed" }
+  | { kind: "signin" }
+  | { kind: "trade"; side: Side }
+  | { kind: "sell"; position: Position; closing?: boolean }
+  | { kind: "incomplete"; trade: Incomplete | null; retry: boolean }
+  | { kind: "done"; text: string }
+  | { kind: "placed"; buildId: string; sale: boolean; text: string; confirming: boolean; slow?: boolean }
+  | { kind: "failed"; side: Side; usd: number | null }
+  | { kind: "failed"; side: "sell"; position: Position | null };
 /** The receipt's legs and positions also carry their Phoenix details (lib/fork.ts). */
 type Leg = Receipt["legs"][number] & PhoenixLeg;
 const phoenixOf = (p: Position) => (p as Position & { phoenix?: PhoenixRisk[] }).phoenix;
 
 const CHIPS = [10, 20, 50, 100];
+/** Typing an amount builds it once the typing stops for this long; a chip builds at once. */
+const TYPING_MS = 500;
 
-const b64ToBytes = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-const bytesToB64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
+// Early builds are cached by what they'd buy: "back:2000" ($20), "fade:5000", "sell:<position>".
+const tradeKey = (side: Side, usdAmount: number) => `${side}:${Math.round(usdAmount * 100)}`;
+const saleKey = (position: string) => `sell:${position}`;
+
+const SOLD = "Sold. The cash is back in your balance, and the position is scored at today's prices.";
+const SOLD_PHOENIX = "Sold, and the position is scored at today's prices. Moving the cash from its leveraged legs back to your balance…";
+const SOLD_STRANDED = "Sold, and the position is scored at today's prices. The cash from its leveraged legs is still on its way: tap Cash out on Me to move it to your balance.";
+const CLOSED_NOTE = " Your take is closed now: no new trades, and its result is final.";
 
 /**
  * `closed`: why the take can't be traded ("Closed: @jake sold"), when the server render already
@@ -39,10 +62,10 @@ const bytesToB64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
  * here finds out later (the author sold while the page was open).
  */
 export default function TradeDock({ takeId, author, handle = null, receipt: initial, closed = null }: { takeId: string; author: string; handle?: string | null; receipt: Receipt | null; closed?: string | null }) {
-  const { ready, authenticated, user } = usePrivy();
+  const { ready, authenticated } = usePrivy();
   const { phase, snapshot, logout } = useSession();
-  const { wallets } = useWallets();
-  const { signTransaction } = useSignTransaction();
+  // The user's Privy (embedded) Solana wallet, the one the app also uses.
+  const { address, wallet, sign, signAndSubmit } = useForkWallet();
 
   const [step, setStep] = useState<Step>({ kind: "closed" });
   const [pending, setPending] = useState<Side | null>(null);
@@ -59,13 +82,8 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
   const [amount, setAmount] = useState("20");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  // The user's Privy (embedded) Solana wallet, the one the app also uses.
-  const address = useMemo(() => {
-    const linked = (user?.linkedAccounts ?? []) as Array<{ type: string; chainType?: string; walletClientType?: string; address?: string }>;
-    return linked.find((a) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy")?.address ?? null;
-  }, [user]);
-  const wallet = useMemo(() => wallets.find((w) => w.address === address) ?? null, [wallets, address]);
+  // A sale sent and still confirming: its position shows "Selling…" instead of Sell.
+  const [selling, setSelling] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!address) return;
@@ -114,9 +132,9 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
     try { sessionStorage.removeItem(pendingKey); } catch { /* private mode */ }
   }, [pending, phase.kind, wallet, pendingKey, receipt, viewerReceipt, closedText]);
 
-  const start = (side: Side) => {
+  const start = (side: Side, usdAmount = 20) => {
     setError(null);
-    setAmount("20");
+    setAmount(String(usdAmount));
     setPending(side);
     if (!authenticated) {
       try { sessionStorage.setItem(pendingKey, side); } catch { /* private mode */ }
@@ -124,32 +142,171 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
     }
   };
 
-  async function signAndSubmit(built: Built): Promise<string[]> {
-    if (!wallet) throw new Error("Your wallet isn't ready yet. Try again in a moment.");
-    const signed: string[] = [];
-    for (const tx of built.transactions) {
-      const { signedTransaction } = await signTransaction({
-        transaction: b64ToBytes(tx),
-        wallet,
-        options: { uiOptions: { showWalletUIs: false } },
-      });
-      signed.push(bytesToB64(signedTransaction));
+  // ── Early builds ────────────────────────────────────────────────────────────────────────────
+  const sheetOpen = step.kind === "trade" || step.kind === "sell";
+  const early = useEarlyBuild({
+    ready: sheetOpen && phase.kind === "ready" && !!wallet && !!address && !closedText,
+    make: (key, prebuild) => {
+      const [kind, rest] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
+      const flag = prebuild ? { prebuild: true } : {};
+      if (kind === "sell") return fork<Built>("POST", `/takes/${takeId}/positions/${rest}/exit`, { owner: address, ...flag });
+      return fork<Built>("POST", `/takes/${takeId}/trades`, { owner: address, side: kind, usd: Number(rest) / 100, ...flag });
+    },
+    // Never build behind a trade that's still confirming: wait for it first.
+    beforeEarly: async () => {
+      const p = address ? pendingTrade.get(address) : null;
+      return !p || (await watchSubmission(p.buildId))?.status !== "incomplete";
+    },
+    // The author's own buy-in: the sheet warns that selling closes the take before the tap.
+    onEarlyBuilt: (key, built) => {
+      if (built.closesTake) setStep((s) => (s.kind === "sell" && saleKey(s.position.address) === key ? { ...s, closing: true } : s));
+    },
+  });
+  // How long to wait before building the amount: 0 for the sheet opening or a chip, TYPING_MS
+  // after a keystroke (set just before the amount changes).
+  const buildDelay = useRef(0);
+  const n = Number(amount) || 0;
+  const affordable = cash != null && cash >= n + n * config.feeRate;
+  const tradeSide = step.kind === "trade" ? step.side : null;
+  const saleOf = step.kind === "sell" ? step.position.address : null;
+  useEffect(() => {
+    const delay = buildDelay.current;
+    buildDelay.current = 0;
+    if (tradeSide) early.want(n >= config.minStakeUsd && affordable ? tradeKey(tradeSide, n) : null, delay);
+    else if (saleOf) early.want(saleKey(saleOf));
+  }, [early, tradeSide, saleOf, n, affordable, config.minStakeUsd]);
+  const typeAmount = (s: string) => { buildDelay.current = TYPING_MS; setAmount(s); };
+
+  // ── Confirmation ────────────────────────────────────────────────────────────────────────────
+  // The stopwatch of the trade on screen: "shown" is marked when "You're in" renders.
+  const shownWatch = useRef<Stopwatch | null>(null);
+  const onShown = useCallback(() => {
+    const sw = shownWatch.current;
+    shownWatch.current = null;
+    if (!sw) return;
+    sw.mark("shown");
+    // Verbose level in the browser console: tap → "You're in", for checking on a phone.
+    console.debug("[thesis] trade timings (ms since the tap)", sw.marks);
+  }, []);
+
+  /** A trade or sale that ended without landing (or stopped partway): say so, on any screen of the sheet. */
+  const rolledBack = useCallback((p: Pick<PendingTrade, "kind" | "usd" | "position">, s: Submission | null) => {
+    if (s?.status === "incomplete") {
+      markTraded();
+      return setStep({ kind: "incomplete", trade: s.incomplete ?? null, retry: s.incomplete?.next === "retry" });
     }
-    const sent = await fork<{ signatures: string[] }>("POST", "/submit", { buildId: built.buildId, transactions: signed });
-    return sent.signatures;
+    if (p.kind === "sell") {
+      const held = (receipt?.viewerPositions ?? []).find((x) => x.address === p.position) ?? null;
+      return setStep({ kind: "failed", side: "sell", position: held });
+    }
+    setStep({ kind: "failed", side: p.kind, usd: p.usd });
+  }, [receipt]);
+
+  /**
+   * Watches a trade the fork accepted until it confirms. Landed: "Confirming…" turns into
+   * "Confirmed", and a sale with Phoenix legs moves their cash back. Failed or stopped: the sheet
+   * says so. Then the trade's timings, with "shown" and how it ended, go to the fork API once more.
+   */
+  const confirm = useCallback(async (p: PendingTrade, extra: { built: Built; signed: string[]; sw: Stopwatch } | null) => {
+    const s = await watchSubmission(p.buildId);
+    pendingTrade.clear(p.buildId);
+    if (p.kind === "sell") setSelling((x) => (x === p.position ? null : x));
+    refresh().catch(() => {});
+    if (extra) {
+      extra.sw.mark(s?.status ?? "unknown");
+      // Same build, same bytes: the API answers with its status and logs the timings with the build id.
+      submit(p.buildId, extra.signed, { until: "accepted", timings: { ...extra.sw.marks }, keepalive: true }).catch(() => {});
+    }
+    if (s && s.status !== "landed") return rolledBack(p, s);
+    markTraded();
+    setStep((x) => (x.kind === "placed" && x.buildId === p.buildId ? { ...x, confirming: false, slow: !s } : x));
+    if (s && extra?.built.phoenixCashOut) await cashOut(p.buildId, extra.built);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rolledBack]);
+
+  // A sale with Phoenix legs closed them; their cash comes back to USDC in a second step (as iOS),
+  // after the sale has landed. If that fails, it waits on Me with "Cash out".
+  async function cashOut(buildId: string, built: Built) {
+    let stranded = false;
+    await cashOutPhoenix(address!, signAndSubmit).catch(() => { stranded = true; });
+    refresh().catch(() => {});
+    const text = (stranded ? SOLD_STRANDED : SOLD) + (built.closesTake ? CLOSED_NOTE : "");
+    setStep((x) => (x.kind === "placed" && x.buildId === buildId ? { ...x, text } : x));
+  }
+
+  // A trade still confirming when the page was left or reloaded: watch it to the end here, and on
+  // this take's page say so if it didn't go through.
+  useEffect(() => {
+    const p = address ? pendingTrade.get(address) : null;
+    if (!p) return;
+    let live = true;
+    if (p.kind === "sell" && p.takeId === takeId) setSelling(p.position);
+    watchSubmission(p.buildId).then((s) => {
+      pendingTrade.clear(p.buildId);
+      if (!live) return;
+      setSelling(null);
+      refresh().catch(() => {});
+      if (s?.status === "landed") markTraded();
+      else if (s && p.takeId === takeId) rolledBack(p, s);
+    });
+    return () => { live = false; };
+    // Once per wallet and take: rolledBack changes with every receipt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, takeId]);
+
+  /**
+   * Before a new build at the tap: a trade still confirming is waited for. False when it stopped
+   * partway: the sheet offers to finish it or swap it back first. One that failed left nothing
+   * behind, so this trade goes ahead.
+   */
+  async function priorSettled(): Promise<boolean> {
+    const p = address ? pendingTrade.get(address) : null;
+    if (!p) return true;
+    setBusy("Finishing your last trade…");
+    const s = await watchSubmission(p.buildId);
+    if (s?.status !== "incomplete") return true;
+    rolledBack(p, s);
+    return false;
+  }
+
+  /**
+   * Sends a signed build and shows it as placed: right away when the fork has accepted it (then
+   * watched to the end), or once it's confirmed with an older fork API that waits for that.
+   */
+  async function place(p: Omit<PendingTrade, "buildId" | "owner" | "at">, built: Built, signed: string[], sw: Stopwatch, text: string) {
+    early.reset();
+    sw.mark("submit");
+    const sent = await submit(built.buildId, signed, { until: "accepted", timings: { ...sw.marks } });
+    sw.mark("accepted");
+    const pend: PendingTrade = { ...p, buildId: built.buildId, owner: address!, at: Date.now() };
+    shownWatch.current = sw;
+    setStep({ kind: "placed", buildId: built.buildId, sale: p.kind === "sell", text, confirming: sent.pending });
+    if (p.kind === "sell") setSelling(p.position);
+    if (sent.pending) {
+      pendingTrade.set(pend);
+      void confirm(pend, { built, signed, sw });
+    } else {
+      // Already confirmed (an older fork API).
+      if (p.kind === "sell") setSelling(null);
+      markTraded();
+      refresh().catch(() => {});
+      if (built.phoenixCashOut) void cashOut(built.buildId, built);
+    }
   }
 
   async function trade(side: Side) {
     const usdAmount = Number(amount);
     if (!(usdAmount >= config.minStakeUsd)) return setError(`The minimum is $${config.minStakeUsd}.`);
     setError(null);
+    const sw = stopwatch();
     try {
       setBusy(side === "back" ? "Trading…" : "Fading…");
-      const built = await fork<Built>("POST", `/takes/${takeId}/trades`, { owner: address, side, usd: usdAmount });
-      await signAndSubmit(built);
-      markTraded();
-      await refresh();
-      setStep({ kind: "done", text: `You ${side === "back" ? "traded" : "faded"} ${author}'s take with $${usdAmount}.` });
+      if (!(await priorSettled())) return;
+      setBusy(side === "back" ? "Trading…" : "Fading…");
+      const t = await early.take(tradeKey(side, usdAmount));
+      sw.mark("built", t.at);
+      const signed = await sign(t.built, sw);
+      await place({ kind: side, takeId, usd: usdAmount, position: null }, t.built, signed, sw, `You ${side === "back" ? "traded" : "faded"} ${author}'s take with $${usdAmount}.`);
     } catch (e) {
       const stopped = stoppedTrade(e);
       if (stopped) {
@@ -174,35 +331,26 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
 
   /**
    * Sell the whole position. The author's own buy-in closes the take (`closesTake` on the build):
-   * the first tap only builds and shows that warning, and the second signs (`closing.built`, or a
-   * new build once that one was used or failed).
+   * the sheet shows that warning once the build says so (usually before the first tap, since the
+   * sheet builds when it opens), and only the tap after the warning signs.
    */
-  async function sell(position: Position, closing?: { built: Built | null }) {
+  async function sell(position: Position, closing?: boolean) {
     setError(null);
-    let built: Built | null = closing?.built ?? null;
+    const sw = stopwatch();
+    const key = saleKey(position.address);
     try {
       setBusy("Selling…");
-      built ??= await fork<Built>("POST", `/takes/${takeId}/positions/${position.address}/exit`, { owner: address });
-      if (built.closesTake && !closing) return setStep({ kind: "sell", position, closing: { built } });
-      // A build is signed once: if this fails, the next tap builds again.
-      if (closing) setStep({ kind: "sell", position, closing: { built: null } });
-      await signAndSubmit(built);
-      markTraded();
-      // A sale with Phoenix legs closed them; their cash comes back to USDC in a second step (as
-      // iOS). If that fails, it waits on Me with "Cash out".
-      let stranded = false;
-      if (built.phoenixCashOut) {
-        setBusy("Moving cash back…");
-        await cashOutPhoenix(address!, signAndSubmit).catch(() => { stranded = true; });
+      if (!(await priorSettled())) return;
+      setBusy("Selling…");
+      const t = await early.take(key);
+      if (t.built.closesTake && !closing) {
+        early.put(key, t);
+        return setStep({ kind: "sell", position, closing: true });
       }
-      await refresh();
-      const closedNote = built.closesTake ? " Your take is closed now: no new trades, and its result is final." : "";
-      setStep({
-        kind: "done",
-        text: (stranded
-          ? "Sold, and the position is scored at today's prices. The cash from its leveraged legs is still on its way: tap Cash out on Me to move it to your balance."
-          : "Sold. The cash is back in your balance, and the position is scored at today's prices.") + closedNote,
-      });
+      sw.mark("built", t.at);
+      const signed = await sign(t.built, sw);
+      const text = (t.built.phoenixCashOut ? SOLD_PHOENIX : SOLD) + (t.built.closesTake ? CLOSED_NOTE : "");
+      await place({ kind: "sell", takeId, usd: null, position: position.address }, t.built, signed, sw, text);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -260,7 +408,9 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
               </div>
               <div style={{ textAlign: "right" }}>
                 <div className="mono">{usd(p.valueUsd)}</div>
-                {p.canExit ? (
+                {selling === p.address ? (
+                  <div className="note">Selling…</div>
+                ) : p.canExit ? (
                   <button className="pill small" style={{ marginTop: 6 }} onClick={() => { setError(null); setStep({ kind: "sell", position: p }); }}>Sell</button>
                 ) : null}
               </div>
@@ -299,7 +449,8 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
 
       {step.kind !== "closed" ? (
         <div className="sheet-wrap" onClick={(e) => e.target === e.currentTarget && !busy && setStep({ kind: "closed" })}>
-          <div className="sheet">
+          {/* Any touch keeps the sheet's early build fresh (it stops after 3 minutes untouched). */}
+          <div className="sheet" onPointerDown={early.touch}>
             <button className="x" aria-label="Close" disabled={!!busy} onClick={() => setStep({ kind: "closed" })}>×</button>
             {step.kind === "signin" ? (
               <>
@@ -315,6 +466,7 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
                 receipt={receipt}
                 amount={amount}
                 setAmount={setAmount}
+                typeAmount={typeAmount}
                 cash={cash}
                 depositLeftUsd={depositLeft(summary).left}
                 feeRate={config.feeRate}
@@ -356,10 +508,49 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
                 <button className="btn ghost" style={{ width: "100%", marginTop: 12 }} onClick={() => setStep({ kind: "closed" })}>Back to the take</button>
               </div>
             ) : null}
+            {step.kind === "placed" ? (
+              <Placed key={step.buildId} sale={step.sale} text={step.text} confirming={step.confirming} slow={!!step.slow} cash={cash} onShown={onShown} onClose={() => setStep({ kind: "closed" })} />
+            ) : null}
+            {step.kind === "failed" ? (
+              <div style={{ textAlign: "center" }}>
+                <h3>{step.side === "sell" ? "That sale didn't go through." : "That trade didn't go through."}</h3>
+                <p className="muted">{step.side === "sell" ? "You still hold the position." : "Nothing left your balance."}</p>
+                {step.side === "sell" ? (
+                  step.position ? (
+                    <button className="btn light" style={{ width: "100%", marginTop: 12 }} onClick={() => { setError(null); setStep({ kind: "sell", position: step.position! }); }}>Try again</button>
+                  ) : null
+                ) : !closedText ? (
+                  <button className={`btn ${step.side}`} style={{ width: "100%", marginTop: 12, flex: "none" }} onClick={() => start(step.side as Side, step.usd ?? 20)}>Try again</button>
+                ) : null}
+                <button className="btn ghost" style={{ width: "100%", marginTop: 8 }} onClick={() => setStep({ kind: "closed" })}>Back to the take</button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
     </>
+  );
+}
+
+/**
+ * "You're in" (or "Sold") as soon as the fork has accepted it, with "Confirming on-chain…" until it
+ * lands. `onShown` runs once it's on screen: the trade's "shown" timing mark.
+ */
+function Placed(props: { sale: boolean; text: string; confirming: boolean; slow: boolean; cash: number | null; onShown: () => void; onClose: () => void }) {
+  const { onShown } = props;
+  useEffect(() => { onShown(); }, [onShown]);
+  return (
+    <div style={{ textAlign: "center" }}>
+      <div className="check">✓</div>
+      <h3>{props.sale ? "Sold" : "You're in"}</h3>
+      <p className="small muted" role="status" style={{ marginTop: 0 }}>
+        {props.confirming ? "Confirming on-chain…" : props.slow ? "Still confirming on-chain. Me shows it once it lands." : "Confirmed on-chain."}
+      </p>
+      <p className="muted">{props.text}</p>
+      {/* The balance is read again once it lands: until then it would still show the cash before. */}
+      {!props.confirming && props.cash != null ? <p className="mono">Cash {usd(props.cash)}</p> : null}
+      <button className="btn ghost" style={{ width: "100%", marginTop: 12 }} onClick={props.onClose}>Back to the take</button>
+    </div>
   );
 }
 
@@ -368,7 +559,10 @@ function TradeSheet(props: {
   author: string;
   receipt: Receipt | null;
   amount: string;
+  /** A chip: built at once. */
   setAmount: (s: string) => void;
+  /** Typed: built once the typing stops. */
+  typeAmount: (s: string) => void;
   cash: number | null;
   /** How much more cash this wallet can add (the fork API's cap); Infinity without one. */
   depositLeftUsd: number;
@@ -404,7 +598,7 @@ function TradeSheet(props: {
         {side === "back" ? "You get the same basket at today's prices." : `You win if ${props.author} is wrong. Fades are public.`}
       </p>
       <div className="amount">
-        $<input inputMode="decimal" value={amount} onChange={(e) => props.setAmount(centsInput(e.target.value))} aria-label="Amount" />
+        $<input inputMode="decimal" value={amount} onChange={(e) => props.typeAmount(centsInput(e.target.value))} aria-label="Amount" />
       </div>
       <div className="chips">
         {CHIPS.map((c) => (
