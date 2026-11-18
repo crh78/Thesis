@@ -419,9 +419,6 @@ verify_jwt = false
 [functions.social]
 verify_jwt = false
 
-[functions.cash]
-verify_jwt = false
-
 # Privy token checked inside the function.
 [functions.take-builder]
 verify_jwt = false

@@ -4,8 +4,8 @@ import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
   articleText, checkHost, checkUrl, cleanClaim, decode, fetchPublic, isPublicIp, readCapped, readSource, slugTitle, xPost,
 } from "../_shared/source.ts";
-import { parseHandle } from "../_shared/x.ts";
-import { xUsernameOf } from "../_shared/x_account.ts";
+import { apifyItems, fetchPosts, parseHandle, XFetchError } from "../_shared/x.ts";
+import { mayPostDraft, xUsernameOf } from "../_shared/x_account.ts";
 
 Deno.test("X post links: x.com, twitter.com, mobile, with tracking", () => {
   assertEquals(xPost("https://x.com/KobeissiLetter/status/2121729777891496181"), { username: "KobeissiLetter", id: "2121729777891496181" });
@@ -221,4 +221,42 @@ Deno.test("the X account among Privy's linked accounts", () => {
   assertEquals(xUsernameOf([{ type: "email" }, { type: "twitter_oauth", username: "Jake_Trades" }]), "jake_trades");
   assertEquals(xUsernameOf([{ type: "google_oauth", username: "jake" }]), null);
   assertEquals(xUsernameOf([{ type: "twitter_oauth", username: "not a handle!" }]), null);
+});
+
+Deno.test("Apify's answers: items, or a failure that says why", async () => {
+  const ok = await apifyItems(new Response(JSON.stringify([{ id: "1", type: "tweet" }]), { status: 201 }));
+  assertEquals(ok.length, 1);
+  const failed = await assertRejects(() =>
+    apifyItems(new Response(JSON.stringify({
+      error: { type: "run-failed", message: "Actor run did not succeed (run ID: abc, status: FAILED)." },
+    }), { status: 400 })), XFetchError);
+  assertEquals(failed.reason, "run_failed");
+  assertEquals(failed.detail, "Actor run did not succeed (run ID: abc, status: FAILED).");
+  const timeout = await assertRejects(() =>
+    apifyItems(new Response(JSON.stringify({ error: { type: "run-timeout-exceeded", message: "slow" } }), { status: 408 })), XFetchError);
+  assertEquals(timeout.reason, "timeout");
+  const down = await assertRejects(() => apifyItems(new Response("<html>bad gateway</html>", { status: 502 })), XFetchError);
+  assertEquals(down.reason, "http_502");
+  const empty = await assertRejects(() => apifyItems(new Response("", { status: 201 })), XFetchError);
+  assertEquals(empty.reason, "bad_response");
+  const notList = await assertRejects(() => apifyItems(new Response("{}", { status: 201 })), XFetchError);
+  assertEquals(notList.reason, "bad_response");
+});
+
+Deno.test("no Apify token is its own reason", async () => {
+  const e = await assertRejects(() => fetchPosts("", ["a"]), XFetchError);
+  assertEquals(e.reason, "no_token");
+});
+
+Deno.test("an X draft is posted only by the X account it was made for", () => {
+  // Made for @jake on X: only a login linking @jake (any case on the draft side) may post it.
+  assertEquals(mayPostDraft("jake", "jake"), true);
+  assertEquals(mayPostDraft("Jake", "jake"), true);
+  assertEquals(mayPostDraft("jake", "priya"), false);
+  // No X account linked, or Privy didn't answer: no.
+  assertEquals(mayPostDraft("jake", null), false);
+  // iMessage drafts (no for_x) keep their link rule: anyone signed in.
+  assertEquals(mayPostDraft(null, null), true);
+  assertEquals(mayPostDraft(null, "priya"), true);
+  assertEquals(mayPostDraft("", "priya"), true);
 });

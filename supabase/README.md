@@ -18,10 +18,11 @@ Privy access token (`privy-token` header) and uses the service role.
 | `migrations/*_chain_scores.sql` | Scores from the chain: `chain_positions` (one row per on-chain position, kept from `chain_events`), `chain_wallet_stats(network, since)`. With the `x-thesis-network` header, `leaderboard()` and `person_json()` use on-chain P&L, and only profiles with on-chain activity are on the board. |
 | `migrations/*_two_scores.sql` | The second score: `chain_backer_stats(network, since)` is what everyone who backed an author's takes made, net of losses, without fades or the author's own positions. `person_json()` adds `backers_made` and `backers_pct`. `leaderboard(period, limit, board, sort)` takes a board (`own` or `backers`) and a sort (`cash` or `pct`); called with only a period it answers as before. |
 | `migrations/*_fader_board.sql` | The fader board: `chain_fader_stats(network, since)` is what each wallet made fading other people's takes, and `leaderboard()` accepts the board `faders`. |
+| `migrations/*_leaderboard_dir_viewer.sql` | `leaderboard(period, limit, board, sort, dir, viewer)`: `dir` `asc` ranks lowest first; with a `viewer` profile id the answer is `{ rows, viewer: { rank, cash, pct, person } \| null }` (their place on the whole board), without one the same array as before |
+| `migrations/*_account_deletion.sql` | Deleting an account keeps the takes others are in: `takes.author_id` and `comments.author_id` are `on delete set null`, reads show `deleted_person_json()` ("Deleted account") for a missing author, and `delete_account(profile)` (service role, `functions/session`) drops the takes nobody else is in, the person's comments (one others replied to stays as "[deleted]") and the profile |
 | `migrations/*_social_writes.sql` | `create_take`: a take and its legs in one transaction (service role only) |
 | `migrations/*_cash.sql` | Double-entry `ledger` (every transfer is a user row + a platform row that sum to 0), and the money functions: `cash_deposit`, `cash_withdraw`, `place_trade`, `cash_summary`. Service role only; each locks the user's account row so balance checks can't race. |
 | `migrations/*_positions_and_selling.sql` | `positions` (shares and cost per person, take and side), the price on every trade, and `sell_position`. A take's price is `take_price()` = 1 + its return. |
-| `functions/cash` | Balance and activity, deposits, withdrawals, trades / fades, positions and sells |
 | `functions/session` | Sign-in: find-or-create the user, sync their wallet, onboarding fields |
 | `functions/social` | Social writes: post a take, save, follow, comment, like, edit your bio; plus `GET /saves` (saves are private). Name, handle and photo are edited through `functions/session`. |
 | `functions/_shared/privy.ts` | Privy token verification |
@@ -58,6 +59,9 @@ Privy access token (`privy-token` header) and uses the service role.
 | `migrations/*_web_push.sql` | Web push for `apps/www`: `push_subscriptions` (one row per browser, service role only), `web_push_secret()`, and a trigger that sends each new notification through `functions/web-push` (chain notifications for the fork's network only) |
 | `functions/web-push` | Saves and removes a browser's push subscription (with the user's Privy token), and sends a notification to that person's browsers when the trigger calls it |
 | `tests/web_push.sql` | Checks the trigger queues one call only for a person with a subscribed browser, and chain notifications only for the fork's network (rolls back) |
+| `tests/account_deletion.sql` | Checks deleting an account: takes others are in stay with the "Deleted account" author, the rest go, comments go except an answered one (rolls back) |
+| `tests/leaderboard.sql` | Checks the boards lowest first and the viewer's own rank, past the limit and off the board (rolls back) |
+| `tests/take_drafts.sql` | Checks `take_draft()` says whom an X draft is for, and that the drafts table stays private (rolls back) |
 | `migrations/*_badges_bucket.sql` | The public `badges` bucket: each badge's Token-2022 metadata JSON and image (`infra/badges/README.md`) |
 | `seed/demo.sql` | Demo callers (Jake, Priya, …) and their takes so a new account has a feed |
 | `seed/demo_trades.sql` | Real ledger trades / fades from the demo callers on the demo takes, so take pages can name who traded. Run after `demo.sql`; safe to re-run |
@@ -65,33 +69,23 @@ Privy access token (`privy-token` header) and uses the service role.
 `take_stats.ret_pct` and its history move with the marker (`apps/executor`, every 5 minutes,
 through `functions/marks`): a take's return is its author's buy-in's live return once its
 entry prices are signed, else an index of its picks since posting. Trade/fade counts and money in
-are real: `place_trade` updates them.
+are real: on the fork they come from the chain.
 
-### Money rules (for now)
+### Retired: simulated money
 
-- A take's **price** is 1 + its return: $1.00 when posted, $1.14 at +14%.
-- A trade or fade is any amount from **$1** (default $20) up to your balance. It
-  buys shares at the take's price (recorded on the ledger row), adds to your
-  position on that side, and counts on the take. The money goes to the platform.
-- A trade is worth `shares × price`; a fade is worth `max(0, 2 × cost − shares × price)`
-  (it gains what the take loses). Selling (`sell_position`, any part from $1 or all
-  of it) pays that from the platform back to your balance.
-- `take_stats.ret_pct` comes from the marker, and whatever moves it moves every play-money
-  position.
-- Deposits: $10 minimum, $2,500 per rolling 24 hours. Withdrawals: $1 minimum, up to
-  your balance. Limits live in `cash_rules()`.
-- Deposits and withdrawals are **simulated**: the ledger is real but no card is
-  charged and nothing is paid out. An on/offramp provider should call
-  `cash_deposit` / `cash_withdraw` from its webhook; until then the app calls them
-  through `functions/cash`, so any signed-in user can add play money up to the cap.
-- Platform totals: `select kind, sum(amount) from ledger where profile_id is null group by kind;`
+The simulated-money mode is gone (decided 2026-11-18): `functions/cash` is removed, and only the
+fork's on-chain trades count. Its tables and SQL functions stay so no data is dropped: the
+double-entry `ledger`, `positions`, `cash_rules()`, `cash_deposit` / `cash_withdraw`,
+`place_trade`, `sell_position`, `cash_summary` / `cash_activity` / `cash_positions` (all service
+role only, and nothing calls the writes any more). `take_traders()` still reads the ledger, so
+older play-money trades keep their names on take pages.
 
 ## Deploying
 
 With the Supabase CLI 2.x (3.x rejects `config.toml`'s `[inbucket]`; to use 3.x, deploy from a folder holding only the function), linked to the project.
 
 - **Migrations:** the hosted history uses MCP-assigned versions, so **never `supabase db push`** (it would re-run old ones). Apply each new migration on its own with `supabase db query --linked -f supabase/migrations/<file>.sql`, then record its version in `supabase_migrations.schema_migrations`. Additive, backward-compatible changes may go to the hosted project after local tests pass.
-- **Functions:** `supabase functions deploy <name>` (all `verify_jwt = false` in `config.toml`): `session social cash assets take-builder open securities-index quicknode-stream notify gemini source cards marks price-audit web-push`. Preserve live changes from other branches when redeploying one.
+- **Functions:** `supabase functions deploy <name>` (all `verify_jwt = false` in `config.toml`): `session social assets take-builder open securities-index quicknode-stream notify gemini source cards marks price-audit web-push`. Preserve live changes from other branches when redeploying one.
 - **Seed:** `psql "$DATABASE_URL" -f supabase/seed/demo.sql`, then `seed/demo_trades.sql` (both safe to re-run).
 - **Vault** (once per project, in SQL): `select vault.create_secret('https://<project-ref>.supabase.co', 'project_url');`. The X poll cron job and the web push trigger call functions at this URL; there is no default.
 - **Secrets** (dashboard or `supabase secrets set`): the Privy keys, OpenAI, `SECURITIES_INDEX_SECRET`, `QUICKNODE_STREAM_TOKEN`, `NOTIFY_TOKEN`, `GEMINI_PROXY_TOKEN`, `MARKS_TOKEN`, `PRICE_AUDIT_TOKEN`, and for web push `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`. Every name, with what it's for, is in `functions/.env.example`.

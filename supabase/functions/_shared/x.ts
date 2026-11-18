@@ -42,11 +42,39 @@ export function parseHandle(raw: string): string | null {
 }
 
 /**
+ * Reading posts failed: `reason` says why in one word (no_token, timeout, run_failed, http_<status>,
+ * bad_response), `detail` is Apify's own message. The poll answers 502 with the reason, so
+ * net._http_response shows it next to the cron run.
+ */
+export class XFetchError extends Error {
+  constructor(readonly reason: string, readonly detail = "") {
+    super(detail ? `${reason}: ${detail}` : reason);
+  }
+}
+
+/** One Apify call's answer → its items, or an XFetchError saying what went wrong. */
+export async function apifyItems(r: Response): Promise<ApifyTweet[]> {
+  const text = await r.text();
+  let body: unknown = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch { /* not JSON: reported below */ }
+  if (!r.ok) {
+    // {"error":{"type":"run-failed","message":"Actor run did not succeed (run ID: …, status: FAILED)."}}
+    const err = (body as { error?: { type?: string; message?: string } } | null)?.error;
+    const reason = err?.type === "run-failed" ? "run_failed" : err?.type === "run-timeout-exceeded" ? "timeout" : `http_${r.status}`;
+    throw new XFetchError(reason, (err?.message ?? text).slice(0, 200));
+  }
+  if (!Array.isArray(body)) throw new XFetchError("bad_response", text.slice(0, 200));
+  return body as ApifyTweet[];
+}
+
+/**
  * Original posts (no replies or reposts) from these accounts, newest first, after `since`.
- * `max` caps what one call can cost.
+ * `max` caps what one call can cost. Throws XFetchError when Apify can't answer.
  */
 export async function fetchPosts(token: string, handles: string[], opts: { since?: Date; max?: number } = {}): Promise<XPost[]> {
-  if (!token) throw new Error("no Apify token");
+  if (!token) throw new XFetchError("no_token");
   const out: XPost[] = [];
   for (let i = 0; i < handles.length; i += HANDLES_PER_QUERY) {
     const group = handles.slice(i, i + HANDLES_PER_QUERY);
@@ -61,9 +89,10 @@ export async function fetchPosts(token: string, handles: string[], opts: { since
         body: JSON.stringify({ searchTerms: [query], maxItems: max, queryType: "Latest" }),
         signal: AbortSignal.timeout(100_000),
       },
-    );
-    if (!r.ok) throw new Error(`apify ${r.status}: ${(await r.text()).slice(0, 200)}`);
-    const items = await r.json() as ApifyTweet[];
+    ).catch((e) => {
+      throw e instanceof DOMException && e.name === "TimeoutError" ? new XFetchError("timeout") : new XFetchError("network", String(e).slice(0, 200));
+    });
+    const items = await apifyItems(r);
     for (const t of items) {
       // The scraper pads small results with "mock_tweet" notices (id -1).
       if (t.type !== "tweet" || !t.id || String(t.id) === "-1" || t.isReply || t.retweeted_tweet) continue;

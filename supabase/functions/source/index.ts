@@ -14,10 +14,13 @@
 //   PUT    /source/x/:handle       copy an X account → { account }. The first person to copy one
 //                                  reads its last three weeks, so there's something to copy now;
 //                                  404 x_account_not_found when it has no recent posts; 403
-//                                  copy_limit past MAX_COPIED (10) accounts per person.
+//                                  copy_limit past MAX_COPIED (10) accounts per person; 502
+//                                  x_fetch_failed when Apify can't answer.
 //   DELETE /source/x/:handle       stop copying
 //   POST   /source/poll            header x-poll-secret: new posts from copied accounts → drafted
-//                                  takes → x_call notifications (pg_cron, every 15 minutes)
+//                                  takes → x_call notifications (pg_cron, every 15 minutes).
+//                                  502 { error: x_fetch_failed, reason, detail } when Apify can't
+//                                  answer (503 with reason no_token); the next run reads the same window
 //   POST   /source/drafts          header x-bot-secret: a chat bot's take { claim, risk, horizon,
 //                                  source?: { text, url, label }, origin: imessage|x, context?,
 //                                  origin_ref? } → the take builder's basket, saved as a draft:
@@ -31,7 +34,9 @@
 //                                  first, from the last 14 days: { id, claim, legs, context, created_at }
 //   PUT    /source/drafts/:id      { take_id } you posted it: your live take → { posted, take_id }
 //                                  (posted false when someone else's live take got there first);
-//                                  404 unless the take is yours, 409 take_not_live while it's posting
+//                                  404 unless the take is yours, 409 take_not_live while it's posting,
+//                                  403 draft_for_other_account when the X bot made it for an X account
+//                                  (for_x) other than the one your Privy login links
 //
 // Reading: X posts through X's public oEmbed, articles by fetching the page (_shared/source.ts);
 // copied accounts' timelines through Apify (_shared/x.ts). Drafting: one fast model call.
@@ -43,8 +48,9 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { privyDid, privyXUsername } from "../_shared/privy.ts";
+import { mayPostDraft } from "../_shared/x_account.ts";
 import { draftTake, readSource, SourceError } from "../_shared/source.ts";
-import { fetchPosts, ingest, parseHandle, recentCalls } from "../_shared/x.ts";
+import { fetchPosts, ingest, parseHandle, recentCalls, XFetchError } from "../_shared/x.ts";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false },
@@ -258,19 +264,28 @@ async function myDrafts(req: Request) {
   return json(200, { x, drafts: data ?? [] });
 }
 
-/** You posted this draft: point it at your live take, unless someone's live take got there first. */
-async function draftPosted(profile: string, id: string, b: Record<string, unknown>) {
+/**
+ * You posted this draft: point it at your live take, unless someone's live take got there first.
+ * A draft the X bot made for an X account is posted only by whoever's login links that account
+ * (decided 2026-11-18); its username comes from Privy, never from the client.
+ */
+async function draftPosted(req: Request, id: string, b: Record<string, unknown>) {
+  const profile = await me(req, true);
   check(DRAFT_ID_RE.test(id), "invalid_draft_id");
   const takeId = String(b.take_id ?? "");
   check(UUID_RE.test(takeId), "invalid_take_id");
+  const { data: d, error: e } = await db.from("take_drafts").select("take_id, for_x, takes(status)").eq("id", id).maybeSingle();
+  dbCheck(e);
+  if (!d) throw new HttpError(404, "not_found");
+  if (d.for_x) {
+    const did = await privyDid(req);
+    if (!mayPostDraft(d.for_x, did ? await privyXUsername(did) : null)) throw new HttpError(403, "draft_for_other_account");
+  }
   const { data: take, error } = await db.from("takes").select("id, status").eq("id", takeId).eq("author_id", profile).maybeSingle();
   dbCheck(error);
   if (!take) throw new HttpError(404, "not_found");
   // Only a live take: a posting one may never make it on-chain (the web app calls this once it's live).
   if (take.status !== "live") throw new HttpError(409, "take_not_live");
-  const { data: d, error: e } = await db.from("take_drafts").select("take_id, takes(status)").eq("id", id).maybeSingle();
-  dbCheck(e);
-  if (!d) throw new HttpError(404, "not_found");
   const current = (Array.isArray(d.takes) ? d.takes[0] : d.takes) as { status: string } | null;
   if (d.take_id && d.take_id !== takeId && current?.status === "live") return json(200, { posted: false, take_id: d.take_id });
   const { error: u } = await db.from("take_drafts").update({ take_id: takeId, posted_at: new Date().toISOString() }).eq("id", id);
@@ -312,7 +327,11 @@ async function copy(profile: string, raw: string) {
   if (!known) {
     const token = await apifyToken();
     if (!token) throw new HttpError(503, "x_not_configured");
-    const posts = await fetchPosts(token, [username], { since: new Date(Date.now() - 21 * 86_400_000), max: 20 });
+    const posts = await fetchPosts(token, [username], { since: new Date(Date.now() - 21 * 86_400_000), max: 20 }).catch((e) => {
+      if (!(e instanceof XFetchError)) throw e;
+      console.error("copy read failed", { handle, reason: e.reason, detail: e.detail });
+      throw new HttpError(502, "x_fetch_failed");
+    });
     if (!posts.length) throw new HttpError(404, "x_account_not_found");
     const p = posts[0];
     const { error: e } = await db.from("x_accounts").upsert(
@@ -348,7 +367,18 @@ async function poll() {
 
   const oldest = Math.min(...[...followed.values()].map((a) => a.seenUntil.getTime()));
   const since = new Date(Math.max(oldest, Date.now() - MAX_LOOKBACK_MS));
-  const posts = (await fetchPosts(await apifyToken(), [...followed.values()].map((a) => a.username), { since, max: 40 }))
+  let fetched;
+  try {
+    fetched = await fetchPosts(await apifyToken(), [...followed.values()].map((a) => a.username), { since, max: 40 });
+  } catch (e) {
+    if (!(e instanceof XFetchError)) throw e;
+    // Apify's actor fails now and then (status FAILED after about a minute). Nothing is lost: the
+    // cursors didn't move, so the next run reads the same window. Say why, in the log and in the
+    // answer pg_net stores (net._http_response), instead of a bare 500.
+    console.error("poll failed", { reason: e.reason, detail: e.detail, accounts: followed.size });
+    return json(e.reason === "no_token" ? 503 : 502, { error: "x_fetch_failed", reason: e.reason, detail: e.detail });
+  }
+  const posts = fetched
     .filter((p) => {
       const a = followed.get(p.username.toLowerCase());
       return a && p.postedAt > a.seenUntil;
@@ -391,7 +421,7 @@ Deno.serve(async (req) => {
       case "GET drafts/:id":
         if (id === "mine") return await myDrafts(req);
         return json(404, { error: "no_such_route" });
-      case "PUT drafts/:id": return await draftPosted(await me(req, true), id, await body(req));
+      case "PUT drafts/:id": return await draftPosted(req, id, await body(req));
       default: return json(404, { error: "no_such_route" });
     }
   } catch (e) {

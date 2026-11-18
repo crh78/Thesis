@@ -12,11 +12,14 @@
 //   POST  → upload a profile photo: body is the image (image/jpeg or image/png,
 //           ≤ 3 MB). Stored in the public `avatars` bucket; avatar_url = its URL.
 //   DELETE { confirm: "delete" } → deletes the account for good: photos, the
-//           profile and everything that hangs off it (takes, comments, follows,
-//           saves, cash ledger rows: all `on delete cascade`), and the Privy
-//           user so the login can't come back to an empty profile. Privy test
-//           accounts keep their Privy user (the dev login must keep working);
-//           their next sign-in starts over at onboarding.
+//           profile and what hangs off it (follows, saves, likes, notifications,
+//           comments), and the Privy user so the login can't come back to an empty
+//           profile. Takes other people are in (on-chain, backed or faded, or
+//           commented on by others) stay, shown as by "Deleted account"; the rest
+//           of their takes go. A comment others replied to stays as "[deleted]".
+//           All of it is delete_account() in SQL (migrations/*_account_deletion.sql),
+//           one transaction. Privy test accounts keep their Privy user (the dev
+//           login must keep working); their next sign-in starts over at onboarding.
 //
 // The app sends its Privy access token as `privy-token: <jwt>` (or
 // `Authorization: Bearer <jwt>`). JWT verification at the Supabase gateway is
@@ -119,11 +122,12 @@ async function deleteAccount(req: Request, profileId: string, did: string, isTes
   const { data: photos } = await bucket.list(profileId);
   if (photos?.length) await bucket.remove(photos.map((f) => `${profileId}/${f.name}`));
 
-  const { error } = await db.from("profiles").delete().eq("id", profileId);
+  const { data: deleted, error } = await db.rpc("delete_account", { p_profile: profileId });
   if (error) {
-    console.error("delete profile failed", error);
+    console.error("delete account failed", error);
     return json(500, { error: "internal" });
   }
+  console.log("account deleted", deleted);
 
   if (!isTestAccount) {
     const res = await fetch(`https://auth.privy.io/api/v1/users/${encodeURIComponent(did)}`, {
