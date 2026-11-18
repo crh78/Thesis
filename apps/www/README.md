@@ -36,7 +36,10 @@ fails the request that needs it with an error naming it.
   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
 - Required, server only: `FORK_API_URL` (`https://<fork-host>`, the fork API behind `/api/fork/*`),
   `FORK_API_PROXY_KEY` (the secret the fork API shares with this proxy, the same value as the VM's;
-  without it the fork API counts every web visitor as Vercel's IP).
+  without it the fork API counts every web visitor as Vercel's IP), `FORK_API_SERVICE_KEY` (a
+  fork API service key, the secret of a `web=<secret>` entry in the VM's `FORK_API_SERVICE_KEYS`;
+  the take, profile and link-preview pages send it on their own receipt reads, so server renders
+  aren't rate-limited as one Vercel IP. Server only: a service key may act for any wallet).
 - Optional: `FORK_BLINK_URL` (server; `https://<fork-host>:8443`, the fork Blink; without it
   `/actions.json` and `/api/actions/*` don't exist), `NEXT_PUBLIC_X_LOGIN` (`on` once X login is
   enabled in Privy), `NEXT_PUBLIC_SITE_URL` (defaults to Vercel's production URL),

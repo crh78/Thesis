@@ -12,6 +12,10 @@ export const supabaseUrl = () => required("NEXT_PUBLIC_SUPABASE_URL", process.en
 export const supabaseKey = () => required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
 /** Server-side only: where /api/fork/* is proxied to (app/api/fork). */
 export const forkApiUrl = () => required("FORK_API_URL", process.env.FORK_API_URL).replace(/\/$/, "");
+/** Server-side only: the fork API service key for the pages' own reads (the receipt), so server
+ *  renders don't count against the read limit as one Vercel IP. Never NEXT_PUBLIC_, never sent to
+ *  the browser: a service key may act for any wallet. */
+const forkServiceKey = () => required("FORK_API_SERVICE_KEY", process.env.FORK_API_SERVICE_KEY);
 
 export type Person = {
   id: string;
@@ -162,9 +166,28 @@ export async function getProfile(handleOrId: string): Promise<Profile | null> {
  *  one, so the profile, the take page and the called-it page all show the same number. */
 export async function getProfileTakes(id: string): Promise<Take[]> {
   const takes = await rpc<Take[]>("profile_takes", { p_profile: id }).catch(() => []);
-  const live = takes.filter((t) => t.status === "live").slice(0, 40);
-  const receipts = await Promise.all(live.map((t) => getReceipt(t.id)));
+  const live = takes.filter((t) => t.status === "live").slice(0, PROFILE_TAKES);
+  const receipts = await mapLimit(live, RECEIPTS_AT_ONCE, (t) => getReceipt(t.id));
   return live.map((t, i) => ({ ...t, ret: takeReturn(t, receipts[i]) }));
+}
+
+/** A profile shows at most this many takes, and reads their receipts this many at a time, so one
+ *  render doesn't send the fork API a burst of 40 receipt builds at once. */
+const PROFILE_TAKES = 40;
+const RECEIPTS_AT_ONCE = 4;
+
+/** `fn` over `items`, at most `limit` running at once, results in order. */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 
 /** A take is a "called it" once it's up at least this much (percent) since it was posted. */
@@ -188,8 +211,12 @@ export const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-U
 
 export const nameOf = (p: Pick<Person, "display_name" | "handle">) => p.display_name || (p.handle ? `@${p.handle}` : "Someone");
 
+/** A take's on-chain receipt, read by the server (pages, link previews) with the service key. */
 export async function getReceipt(id: string): Promise<Receipt | null> {
-  const r = await fetch(`${forkApiUrl()}/takes/${id}`, { next: { revalidate: 15 } }).catch(() => null);
+  if (!UUID.test(id)) return null;
+  const url = `${forkApiUrl()}/takes/${id}`; // outside the catch: a missing setting is a setup error
+  const headers = { "x-thesis-service-key": forkServiceKey() };
+  const r = await fetch(url, { headers, next: { revalidate: 15 } }).catch(() => null);
   return r?.ok ? ((await r.json()) as Receipt) : null;
 }
 
