@@ -74,7 +74,8 @@ export function programReader(program: ThesisProgram): ChainReader {
   };
 }
 
-const isOpen = (t: TakeAccount) => "open" in t.status;
+/** Not settled yet: open, or closed by its author's sale and waiting for `settle_take`. */
+const isOpen = (t: TakeAccount) => !("settled" in t.status);
 
 export class OpenSet {
   #chain: ChainReader;

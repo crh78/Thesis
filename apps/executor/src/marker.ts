@@ -10,7 +10,8 @@
 // address the chain doesn't have is skipped until the hourly full check (MissingAccounts). A take's return is its author's buy-in's live return once the settler
 // has signed its entry prices, since those set the take's result; until then,
 // an index of its picks since it was posted. One POST to the
-// `marks` edge function writes it all (apply_marks, 0038_live_marks.sql). take_price()
+// `marks` edge function writes it all (apply_marks, 0038_live_marks.sql). Once the author sells,
+// the take's return and pick marks stay at the sale; positions still open on it keep moving. take_price()
 // reads take_stats.ret_pct, so paper positions and sales move with it.
 //
 // Settings (environment or the repo-root .env; keys are never printed):
@@ -78,15 +79,18 @@ async function run() {
   const bank = bankLookup(state);
   // Card picks mark at the insured value the asset bank last read (its cards tier).
   const cards = new Map(Object.values(state?.venues.cards?.picked ?? {}).flatMap((c) => (c.insuredValueUsd ? [[c.cardId, c.insuredValueUsd] as const] : [])));
-  const takes = await db.openTakes(limit);
+  const listed = await db.openTakes(limit);
   if (!db.hasMarkColumns) log("live-marks migration not applied yet: bases are computed in memory, nothing can be written");
-  const secs = await db.securities(takes.flatMap((t) => t.legs.map((l) => l.asset_id).filter((x): x is string => !!x)));
-  const assets = new Map<string, Map<number, PickAsset>>();
-  for (const t of takes) assets.set(t.id, new Map(t.legs.map((l) => [l.idx, resolvePick(l, l.asset_id ? secs.get(l.asset_id) : undefined, bank)])));
 
   // Positions: which takes have open ones, and the Phoenix shorts their fades hold.
   const chain = await chainReader(rpcUrl, missing);
   const positions = chain ? await db.openPositions(network) : [];
+  // A take its author sold out of is marked only while positions are still open on it.
+  const held = new Set(positions.map((p) => p.take_id));
+  const takes = listed.filter((t) => !t.frozen || held.has(t.id));
+  const secs = await db.securities(takes.flatMap((t) => t.legs.map((l) => l.asset_id).filter((x): x is string => !!x)));
+  const assets = new Map<string, Map<number, PickAsset>>();
+  for (const t of takes) assets.set(t.id, new Map(t.legs.map((l) => [l.idx, resolvePick(l, l.asset_id ? secs.get(l.asset_id) : undefined, bank)])));
   const extraPerps = new Set<string>();
   for (const p of positions) {
     if (p.side !== "fade" || !p.take_id) continue;
@@ -128,6 +132,8 @@ async function run() {
   const legs: LegUpdate[] = [];
   const takeRets: { take_id: string; ret_pct: number }[] = [];
   for (const t of takes) {
+    // The author sold: the take's headline and its picks' marks stay at the sale.
+    if (t.frozen) continue;
     const a = assets.get(t.id)!;
     // Older takes: bases from history (the stock's first trade, Phoenix's first bar after posting).
     const historical = new Map<number, Base>();
@@ -153,7 +159,7 @@ async function run() {
   }
 
   const marks = { legs, takes: takeRets, positions: posRows };
-  log(`${takes.length} open takes: ${takeRets.length} returns, ${legs.length} pick marks, ${posRows.length}/${positions.length} positions${skipped ? ` (${skipped} not on chain, skipped until the hourly check)` : ""} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+  log(`${takes.length - takes.filter((t) => t.frozen).length} open takes (+${takes.filter((t) => t.frozen).length} closed with open positions): ${takeRets.length} returns, ${legs.length} pick marks, ${posRows.length}/${positions.length} positions${skipped ? ` (${skipped} not on chain, skipped until the hourly check)` : ""} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
   if (dry || !db.hasMarkColumns) {
     if (dry && args.includes("--json")) console.log(JSON.stringify(marks, null, 1));
     return;

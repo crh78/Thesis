@@ -5,7 +5,8 @@ import { THESIS_PROGRAM_ID, exitAddress, type ExitAccount, type PositionAccount,
 import { OpenSet, SupabaseOpenPositions, type ChainReader, type OpenPositionsSource } from "../src/settler/open-set.ts";
 
 const key = () => Keypair.generate().publicKey;
-const take = (open = true) => ({ status: open ? { open: {} } : { settled: {} } }) as unknown as TakeAccount;
+const take = (open: boolean | "closed" = true) =>
+  ({ status: open === "closed" ? { closed: {} } : open ? { open: {} } : { settled: {} } }) as unknown as TakeAccount;
 const position = (t: PublicKey, owner = key()) => ({ take: t, owner }) as unknown as PositionAccount;
 
 /** A chain of accounts by address, counting full scans and reads. */
@@ -103,6 +104,25 @@ test("an unsettled take stays tracked after its last position settles (the autho
   const later = await set.load(true);
   assert.equal(later.positions.length, 0);
   assert.ok(later.takes.has(t.toBase58()), "settle_take still has to run at the horizon");
+});
+
+test("a take its author's sale closed stays tracked until it settles", async () => {
+  const chain = fakeChain();
+  const t = key();
+  const p = key();
+  chain.takes.set(t.toBase58(), take("closed"));
+  chain.positions.set(p.toBase58(), position(t));
+  let now = 0;
+  const set = new OpenSet({ chain: chain.reader, programId: THESIS_PROGRAM_ID, source: fakeSource([]), now: () => now });
+  await set.load(true);
+  chain.positions.delete(p.toBase58());
+  now = 1_000;
+  const later = await set.load(true);
+  assert.ok(later.takes.has(t.toBase58()), "settle_take still has to run on the sale");
+  chain.takes.set(t.toBase58(), take(false));
+  now = 2_000;
+  await set.load(true);
+  assert.equal(set.size.takes, 0);
 });
 
 test("a database outage keeps the known set; a row from an old fork holds nothing and drops", async () => {
