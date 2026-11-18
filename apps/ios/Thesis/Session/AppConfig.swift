@@ -19,8 +19,10 @@ enum AppConfig {
     /// Off until the team is in the paid Apple Developer Program (see project.yml).
     static let appleSignInEnabled = value("AppleSignInEnabled") == "YES"
 
-    /// Fork mode: trades, cash and receipts go through the local fork API (`pnpm fork:api`).
-    /// Set only by the gitignored Config/Fork.local.xcconfig in Debug builds; nil otherwise.
+    /// The fork API (`https://<fork-host>`): cash, trades, posting and receipts all go through it.
+    /// Required: set by the gitignored Config/Fork.local.xcconfig (Debug and Release). Nil when it's
+    /// missing, and then the app stops at launch on a screen that says so (AppGate) instead of
+    /// running without money. UI tests and `-screen` previews run on mock data and don't need it.
     static let forkAPIURL: URL? = {
         guard let raw = Bundle.main.object(forInfoDictionaryKey: "ForkAPIURL") as? String else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespaces)

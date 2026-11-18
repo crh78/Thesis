@@ -97,12 +97,6 @@ struct CashView: View {
                             CashEntryRow(entry: entry)
                             Hairline().padding(.leading, 66)
                         }
-                        // Reaching the end loads the next page, until there's no more.
-                        if app.cashHasMore {
-                            ProgressView()
-                                .frame(maxWidth: .infinity, minHeight: 60)
-                                .task(id: app.cashActivity.count) { await app.loadMoreCash() }
-                        }
                     }
                 }
             }

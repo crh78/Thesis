@@ -45,21 +45,6 @@ enum FundingMethod: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The `method` the cash API stores.
-    var serverValue: String {
-        switch self {
-        case .applePay: "apple_pay"
-        case .debit: "debit"
-        case .bank: "bank"
-        case .transfer: "transfer"
-        }
-    }
-
-    init?(serverValue: String?) {
-        guard let match = Self.allCases.first(where: { $0.serverValue == serverValue }) else { return nil }
-        self = match
-    }
-
     // Withdrawing: where the money goes.
     var payoutTitle: String {
         switch self {

@@ -11,11 +11,10 @@ struct StartWithCashView: View {
             OnboardingScaffold(title: "Add cash to start trading",
                                subtitle: "Trade the takes you believe in and fade the ones you don't.") {
                 VStack(alignment: .leading, spacing: 0) {
-                    point("dollarsign.circle", "Trade or fade any take with as little as \(Fmt.usd(AppState.minTrade)).")
+                    // The program's minimum stake ($10 unless the fork config says otherwise).
+                    point("dollarsign.circle", "Trade or fade any take with as little as \(Fmt.usd(app.minTrade)).")
                     Hairline()
                     point("applelogo", "Add with Apple Pay, a debit card or your bank. It shows up as dollars.")
-                    Hairline()
-                    point("arrow.uturn.backward.circle", "Withdraw whenever you want.")
                 }
             } footer: {
                 VStack(spacing: 6) {

@@ -9,11 +9,12 @@ brew install xcodegen          # once
 cd apps/ios
 cp Config/Backend.local.xcconfig.example Config/Backend.local.xcconfig   # once; fill in Supabase URL and key
 cp Config/Privy.local.xcconfig.example Config/Privy.local.xcconfig       # once; fill in Privy app and client ID
+cp Config/Fork.local.xcconfig.example Config/Fork.local.xcconfig         # once; set FORK_API_URL (see "The fork")
 xcodegen generate              # creates Thesis.xcodeproj from project.yml
 open Thesis.xcodeproj
 ```
 
-Both `.local.xcconfig` files are gitignored and included by `Config/Debug.xcconfig` and `Config/Release.xcconfig`. Without them the app still builds, and stops at launch naming the missing value.
+The `.local.xcconfig` files are gitignored and included by `Config/Debug.xcconfig` and `Config/Release.xcconfig`. Without them the app still builds, and stops at launch naming the missing value: a missing backend or Privy value stops it with an error, and a missing `FORK_API_URL` shows "This build needs FORK_API_URL (see apps/ios/README)".
 
 Needs Xcode 26 with the iOS 26 platform installed (Xcode → Settings → Components). Build through Xcode: Border Beam's Metal shader is compiled by Xcode's build system.
 
@@ -28,7 +29,7 @@ Bundle IDs: `xyz.yourthesis.app.dev` ("Thesis Dev", Debug) and `xyz.yourthesis.a
 | `Thesis/App` | App entry, tab bar (`RootView`), debug screen routes |
 | `Thesis/DesignSystem` | Colors (`Palette`), Geist fonts (`Font.geist/serif/mono/pixel`), components, charts |
 | `Thesis/Model` | Models and `MockData` (UI tests and `-screen` previews; signed-in builds use the live backend) |
-| `Thesis/Session` | Privy sign-in, the Supabase APIs (session, social, cash) and the fork API (`ForkAPI.swift`) |
+| `Thesis/Session` | Privy sign-in, the Supabase APIs (session, social) and the fork API (`ForkAPI.swift`) |
 | `Thesis/Features` | Feed, Take page, Create flow (write → build → basket), Back/Fade sheet, Comments, Search, Scores, Profile |
 | `Thesis/Resources` | Geist fonts (OFL), avatars, topic images |
 
@@ -62,15 +63,17 @@ Backend values (Privy app/client ID, Supabase URL and publishable key) come from
 
 Privy dashboard, for sign-in to work: the iOS client must list both bundle IDs under Allowed app identifiers, and `yourthesis-dev` / `yourthesis` under Allowed URL schemes.
 
-## Fork mode (dogfooding on the mainnet fork)
+## The fork
 
-Debug builds can run Trade, Cash, posting and the take page against the Thesis program on the shared mainnet fork (the Oracle VM) with fake money, instead of the play-money ledger. Social data (feed, profiles, comments) still comes from Supabase.
+The app runs only on the fork: Trade, Cash, posting and the take page go through the Thesis program on the shared mainnet fork (the Oracle VM) with fake money. There is no other money mode. Social data (feed, profiles, comments) comes from Supabase.
 
-1. `cp Config/Fork.local.xcconfig.example Config/Fork.local.xcconfig` (gitignored). Set `FORK_API_URL` to the team's shared fork, `https://<fork-host>` (the Oracle VM in [`infra/executor`](../../infra/executor/README.md)), which runs the fork, the fork API, the relay and the settler. Nothing needs to run on your Mac, and a real iPhone reaches it too.
-2. (The team runs one shared fork; don't start your own for dogfooding. A local fork would be `FORK_API_URL = http:/$()/127.0.0.1:18901`, see [`scripts/fork/README.md`](../../scripts/fork/README.md).)
+1. `cp Config/Fork.local.xcconfig.example Config/Fork.local.xcconfig` (gitignored). Set `FORK_API_URL` to the team's shared fork, `https://<fork-host>` (the Oracle VM in [`infra/executor`](../../infra/executor/README.md)), which runs the fork, the fork API, the relay and the settler. Nothing needs to run on your Mac, and a real iPhone reaches it too. Debug and Release both read it.
+2. The team runs exactly one fork; don't start your own.
 3. `xcodegen generate`, build and sign in. Add cash first: on the fork it mints fake USDC into your Privy wallet.
 
-What changes in fork mode:
+Without `FORK_API_URL` the app stops at launch on a screen that says so. Signing in also needs your Privy Solana wallet: if it couldn't be made, the app says so, and Try again makes it again. UI tests and `-screen` previews run on mock data and need neither.
+
+How it works:
 
 - **Trade:** the fork API builds the trade (Jupiter swaps for stock legs, Jupiter Lend for cash legs, a Phoenix position for perp legs, plus the receipt); your Privy wallet signs it (`signTransaction`, no send) and the API adds the fee payer and sends it. No SOL needed. Minimum $10; the sheet shows the 0.10% fee and any legs left out, with why. Prediction legs are paper-filled ("Yes · 47¢"), their share escrowed; **Fade** takes their other side and shorts each leg Phoenix lists.
 - **Perps:** leverage comes from the take builder ("Stock · 3x"). Under each position the receipt shows each Phoenix leg's liquidation price and distance, in warning colors within 25% and red within 10%. A sale closes Phoenix positions and moves the cash back; positions left open after the horizon keep their risk until **Cash out** on the Cash tab.
@@ -80,8 +83,6 @@ What changes in fork mode:
 - **Creator fees:** your own profile shows what you earned (5 bps of every back and fade of your takes), with Claim and Claim all.
 - **Take page:** returns come from the chain ("—" while entry prices are pending), and an "On-chain receipt" section shows backers, faders, money in, each leg's entry and current price, and your positions. **Sell position** quotes a full exit and the program scores the position at the sale ([selling a position](../../scripts/fork/README.md#selling-a-position)).
 - **Feed:** cards show on-chain counts and settled results (the app sends `x-thesis-network: solana-mainnet-fork` on Supabase reads).
-
-Without `Config/Fork.local.xcconfig` (and in every Release build) none of this is active.
 
 ## Notifications
 
@@ -120,7 +121,7 @@ These run on mock data (`-skipAuth`), so they work offline and never touch the b
 
 `LiveBackendUITests` sign in with Dev login and check that saves, follows, comments,
 likes and new takes are stored on the server (still there after a relaunch). They're
-skipped unless switched on, because they write to the shared Supabase project:
+skipped unless switched on, because they write to the shared Supabase project and the fork:
 
 ```sh
 TEST_RUNNER_THESIS_LIVE=1 TEST_RUNNER_DEV_USER=<username> TEST_RUNNER_DEV_PASS=<password> \
@@ -129,20 +130,21 @@ xcodebuild test -project Thesis.xcodeproj -scheme Thesis -allowProvisioningUpdat
   -only-testing:ThesisUITests/LiveBackendUITests
 ```
 
-- Needs `Config/DevLogin.local.xcconfig` (the Dev login link only exists with it).
+- Needs `Config/DevLogin.local.xcconfig` (the Dev login link only exists with it) and
+  `Config/Fork.local.xcconfig`.
 - Build signed (no `CODE_SIGNING_ALLOWED=NO`): unsigned simulator apps can't use the
   keychain, so Privy can't keep the session across relaunches.
-- Saves, follows and likes are undone by the tests, and the cash test withdraws what it
-  deposits. Test comments and takes are named `[live test] …`; remove them, and the dev
-  account's ledger rows, with
+- Saves, follows and likes are undone by the tests. Test comments and takes are named
+  `[live test] …`; remove them with
   `delete from comments where body like '[live test]%'; delete from takes where claim like '[live test]%';`
-  and `delete from ledger where transfer_id in (select transfer_id from ledger where profile_id = '<dev profile id>');`
-  (the $20 trade also bumped a take's traded count and money in by one / $20).
+- `testDisposableForkFullExit` adds fake cash, trades $10 and sells the position on the fork.
+  It also needs `TEST_RUNNER_THESIS_FORK_EXIT=1`.
 
 ## Data
 
-Signed in, `AppState` loads everything from the backend through `Session/SocialAPI.swift`
+Signed in, `AppState` loads social data from the backend through `Session/SocialAPI.swift`
 (reads: SQL functions with the publishable key; writes: the `social` edge function with
-the Privy token). Changes show immediately and roll back with a banner if the request
+the Privy token), and money (cash, trades, posting, positions) from the fork API through
+`Session/ForkAPI.swift`. Changes show immediately and roll back with a banner if the request
 fails. Without a session (tests, `-screen` previews) it uses `Model/MockData.swift`.
 Backend details: `supabase/README.md`.

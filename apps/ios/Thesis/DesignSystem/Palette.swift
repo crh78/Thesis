@@ -90,4 +90,6 @@ enum Side: String, Hashable {
     /// Quiet tint for small pills (feed rows).
     var soft: Color { self == .back ? Palette.upSoft : Palette.downSoft }
     var arrow: String { self == .back ? "arrow.up.right" : "arrow.down.right" }
+    /// The lowercase word ("trade" / "fade"), as in accessibility identifiers.
+    var serverValue: String { self == .back ? "trade" : "fade" }
 }

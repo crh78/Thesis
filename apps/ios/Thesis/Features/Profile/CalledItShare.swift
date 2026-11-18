@@ -24,6 +24,8 @@ struct CallCard: Hashable, Identifiable {
     var called: Bool { ret >= 1 }
     var pct: String { Fmt.pct(ret) }
     var sideWord: String { faded ? "Faded" : "Traded" }
+    /// "@handle", or just the name when there's no handle (a deleted account's take).
+    var byline: String { handle.isEmpty ? name : "@\(handle)" }
     /// "@mo_fades's take", or nil when it's your own.
     var whose: String? {
         guard let author, author.lowercased() != handle.lowercased() else { return nil }
@@ -575,7 +577,7 @@ private struct ReceiptCard: View {
                 .minimumScaleFactor(0.7)
                 .frame(maxWidth: .infinity, alignment: .leading)
             rule
-            line("CALLED BY", "@\(c.handle)")
+            line("CALLED BY", c.byline)
             line("SIDE", c.sideWord.uppercased())
             if let since = c.since { line("SINCE", since.uppercased()) }
             if let author = c.author, c.whose != nil { line("TAKE BY", "@\(author)") }
@@ -639,7 +641,7 @@ private struct TerminalCard: View {
                 .background(amber)
             VStack(alignment: .leading, spacing: 11) {
                 row("SUBJ", c.claim.uppercased())
-                row("AUTH", "@\(c.handle)".uppercased())
+                row("AUTH", c.byline.uppercased())
                 row("SIDE", c.faded ? "SHORT" : "LONG")
                 if let since = c.since { row("OPEN", since.uppercased()) }
             }
@@ -697,7 +699,7 @@ private struct GoldCard: View {
                 Face(c: c, photo: photo, size: 44)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(c.name).font(.geist(18, .semibold))
-                    Text("@\(c.handle)").font(.geist(14)).opacity(0.6)
+                    Text(c.byline).font(.geist(14)).opacity(0.6)
                 }
             }
             .padding(.top, 18)
@@ -735,7 +737,7 @@ private struct HoloCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Face(c: c, photo: photo, size: 32)
-                Text("@\(c.handle)").font(.geist(17, .semibold))
+                Text(c.byline).font(.geist(17, .semibold))
             }
             .padding(.leading, 4).padding(.trailing, 12).padding(.vertical, 4)
             .background(.white.opacity(0.65), in: Capsule())
@@ -801,7 +803,7 @@ private struct PressCard: View {
             }
             .font(.mono(10)).tracking(1).padding(.vertical, 7)
             Rectangle().frame(height: 1)
-            Text(c.called ? "@\(c.handle) called it" : "@\(c.handle) makes the call")
+            Text(c.called ? "\(c.byline) called it" : "\(c.byline) makes the call")
                 .font(.serif(46)).textCase(.uppercase).tracking(-1.5)
                 .lineSpacing(-6)
                 .minimumScaleFactor(0.6)
@@ -838,16 +840,16 @@ extension AppState {
         if isOnFork, let p = forkPortfolio?.holdings.first(where: { $0.takeId == take.id }),
            let value = p.valueUsd, let cost = p.costUsd, cost > 0 {
             return CallCard(takeID: take.id, claim: take.claim, ret: (value / cost - 1) * 100, faded: p.side == "fade",
-                            author: p.authorHandle ?? take.author.id, name: me.name, handle: me.id, avatar: me.avatar,
+                            author: p.authorHandle ?? take.author.handleID, name: me.name, handle: me.id, avatar: me.avatar,
                             since: take.since, legs: take.legs)
         }
         if !isOnFork, let p = positions.first(where: { $0.take.id == take.id }) {
             return CallCard(takeID: take.id, claim: take.claim, ret: p.ret, faded: p.side == .fade,
-                            author: take.author.id, name: me.name, handle: me.id, avatar: me.avatar, since: take.since,
+                            author: take.author.handleID, name: me.name, handle: me.id, avatar: me.avatar, since: take.since,
                             legs: take.legs)
         }
         return CallCard(takeID: take.id, claim: take.claim, ret: takeReturn ?? take.ret, faded: false,
-                        author: nil, name: take.author.name, handle: take.author.id, avatar: take.author.avatar,
+                        author: nil, name: take.author.name, handle: take.author.handleID ?? "", avatar: take.author.avatar,
                         since: take.since, legs: take.legs)
     }
 }

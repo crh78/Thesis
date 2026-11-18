@@ -12,6 +12,7 @@
 // file the Dev login link just doesn't appear.
 #include? "DevLogin.local.xcconfig"
 
-// Fork mode (trades, cash and receipts on the local mainnet fork): Fork.local.xcconfig, also
-// gitignored; copy Fork.local.xcconfig.example. Without it the app uses the normal backend.
+// The fork API (cash, trades, posting and receipts on the shared mainnet fork): FORK_API_URL in
+// Fork.local.xcconfig, also gitignored; copy Fork.local.xcconfig.example. Required: without it
+// the app still builds, and stops at launch saying FORK_API_URL is missing.
 #include? "Fork.local.xcconfig"

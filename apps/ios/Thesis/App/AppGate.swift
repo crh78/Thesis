@@ -17,7 +17,25 @@ struct AppGate: View {
         #endif
     }
 
+    /// Signing in needs the fork: there's no other money mode. Mock data (UI tests, `-screen`
+    /// previews) doesn't.
+    private var missingForkConfig: Bool {
+        #if DEBUG
+        if LaunchFlags.skipsAuth { return false }
+        #endif
+        return AppConfig.forkAPIURL == nil
+    }
+
+    @ViewBuilder
     private var gate: some View {
+        if missingForkConfig {
+            MissingForkConfigView()
+        } else {
+            phases
+        }
+    }
+
+    private var phases: some View {
         ZStack {
             switch session.phase {
             case .launching:
@@ -114,6 +132,31 @@ private struct SessionErrorView: View {
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 12)
+        .frame(maxWidth: .infinity)
+        .background(ThesisBackground())
+    }
+}
+
+/// The build has no fork API to trade on (Config/Fork.local.xcconfig is missing). Nothing to
+/// retry: it takes a rebuild.
+private struct MissingForkConfigView: View {
+    var body: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 36))
+                .foregroundStyle(Palette.muted)
+            Text("This build needs FORK_API_URL (see apps/ios/README)")
+                .font(.geist(17))
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("missing-fork-config")
+            Text("Copy Config/Fork.local.xcconfig.example to Config/Fork.local.xcconfig, set FORK_API_URL, run xcodegen generate and build again.")
+                .font(.geist(14))
+                .foregroundStyle(Palette.muted)
+                .multilineTextAlignment(.center)
+            Spacer()
+        }
+        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity)
         .background(ThesisBackground())
     }

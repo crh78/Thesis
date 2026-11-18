@@ -1,5 +1,5 @@
-// Copy to Fork.local.xcconfig (gitignored) to run the Debug build in fork mode: Trade, Cash,
-// posting and the take page's receipt go through the fork API instead of the play-money ledger.
+// Copy to Fork.local.xcconfig (gitignored). Required: Trade, Cash, posting and the take page's
+// receipt all go through the fork API, and without FORK_API_URL the app stops at launch.
 //
 // Set it to the shared fork on the team's VM (infra/executor), public over HTTPS, so the
 // simulator and real iPhones both reach it with nothing else running.

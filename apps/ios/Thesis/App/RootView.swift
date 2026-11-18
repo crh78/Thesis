@@ -104,8 +104,13 @@ struct RootView: View {
         #endif
         guard let profile = session.snapshot?.profile else { return }
         let session = session
-        await app.connect(api: SocialAPI(token: { try await session.accessToken() }), profile: profile,
-                          fork: await session.forkAPI())
+        // Money only runs on the fork, from your wallet. No wallet yet (making it failed at
+        // sign-in): say so, and Try again makes it again.
+        guard let fork = await session.forkAPI() else {
+            session.walletMissing()
+            return
+        }
+        await app.connect(api: SocialAPI(token: { try await session.accessToken() }), profile: profile, fork: fork)
         // Just finished onboarding: offer Add cash once (after connecting, so a
         // deposit goes to the real balance).
         if session.finishedOnboarding {

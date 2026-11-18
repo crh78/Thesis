@@ -214,7 +214,7 @@ struct TakeRow: View {
                     PersonLink(person: take.author) {
                         HStack(spacing: 5) {
                             Text(take.author.name).font(.geist(15, .semibold))
-                            Text("\(take.author.handle) · \(take.age)").font(.geist(15)).foregroundStyle(Palette.muted)
+                            Text(take.author.handle(then: take.age)).font(.geist(15)).foregroundStyle(Palette.muted)
                         }
                     }
                     Spacer(minLength: 4)

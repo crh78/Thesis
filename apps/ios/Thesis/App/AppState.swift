@@ -69,9 +69,11 @@ enum LoadState: Equatable {
 /// App-wide state: navigation (tab, sidebar, Home stack) and the social data —
 /// feeds, saves, follows, your profile.
 ///
-/// Signed in, `connect` points it at the backend: data loads from `SocialAPI`
-/// and every change is applied right away, sent, and rolled back if it fails.
-/// Without a connection (UI tests, `-screen` previews) it runs on `MockData`.
+/// Signed in, `connect` points it at the backend and the fork: social data loads from
+/// `SocialAPI`, money (cash, trades, posting, positions) goes through `ForkAPI`, and every
+/// change is applied right away, sent, and rolled back if it fails. There is no other money
+/// mode: a build without `FORK_API_URL` stops at launch (AppGate). Without a connection (UI
+/// tests, `-screen` previews) it runs on `MockData`.
 @MainActor @Observable
 final class AppState {
     // MARK: Navigation
@@ -98,12 +100,12 @@ final class AppState {
 
     // MARK: Data
 
-    /// Your cash. Signed in, it's whatever the server's ledger says.
+    /// Your cash. Signed in, it's your wallet's USDC on the fork.
     private(set) var balance: Double = MockData.balance
     /// Deposits, withdrawals, trades and fades, newest first.
     private(set) var cashActivity: [CashEntry] = []
     /// Fork mode: your open positions and on-chain badges, for the profile.
-    private(set) var forkPortfolio: ForkPortfolio? { didSet { updateMyReturn() } }
+    private(set) var forkPortfolio: ForkPortfolio?
     /// Fork mode: what you earned as a creator, per take. Only you see it (your own profile).
     private(set) var creatorFees: ForkCreatorFees?
     /// Fork mode: cash left on Phoenix after a sale, or positions left open after a take settled.
@@ -113,13 +115,11 @@ final class AppState {
     /// Your inbox (newest first) and how many are unread.
     private(set) var notifications: [AppNotification] = []
     private(set) var unreadNotifications = 0
-    /// More (older) activity is on the server than `cashActivity` holds.
-    private(set) var cashHasMore = false
-    /// Takes you hold shares in, valued at today's price.
-    private(set) var positions: [OwnedPosition] = MockData.positions { didSet { updateMyReturn() } }
-    private(set) var loadingMoreCash = false
-    /// Trades and fades take any amount from `minTrade` up to your balance
-    /// (the server checks both). The Trade sheet starts at `defaultTradeAmount`.
+    /// Mock data only (UI tests, previews): takes you hold shares in, valued at today's price.
+    /// Signed in, your positions are on the fork (`forkPortfolio`).
+    private(set) var positions: [OwnedPosition] = MockData.positions
+    /// Mock data's smallest trade; signed in it's the program's minimum stake (`minTrade`).
+    /// The Trade sheet starts at `defaultTradeAmount`.
     static let minTrade: Double = 1
     static let defaultTradeAmount: Double = 20
 
@@ -146,9 +146,10 @@ final class AppState {
     var actionError: String?
 
     @ObservationIgnored private var api: SocialAPI?
-    /// Fork mode (Debug builds with Config/Fork.local.xcconfig): cash is the wallet's fake USDC on
-    /// the mainnet fork, and trades are real on-chain receipts plus swaps from the user's wallet.
+    /// The fork API as the signed-in user: cash is the wallet's USDC on the mainnet fork, and
+    /// trades are on-chain receipts plus swaps from the user's wallet. Set exactly when `api` is.
     @ObservationIgnored private var fork: ForkAPI?
+    /// Signed in (always on the fork). False only on mock data.
     private(set) var isOnFork = false
 
     /// Fork mode: the program's fee, minimum stake and limits, from the fork API (the config
@@ -184,12 +185,12 @@ final class AppState {
                     backersMade: me.backersMade, backersPct: me.backersPct)
     }
 
-    /// Switches to the backend for the signed-in user and loads everything.
-    func connect(api: SocialAPI, profile: RemoteProfile, fork: ForkAPI? = nil) async {
+    /// Switches to the backend and the fork for the signed-in user and loads everything.
+    func connect(api: SocialAPI, profile: RemoteProfile, fork: ForkAPI) async {
         guard self.api == nil else { return }
         self.api = api
         self.fork = fork
-        isOnFork = fork != nil
+        isOnFork = true
         me = Person(id: profile.handle ?? "you", name: profile.displayName ?? profile.handle ?? "You",
                     made: 0, returnPct: 0, takes: 0, remoteID: profile.id, avatarURL: profile.avatarUrl)
         forYou = []
@@ -264,10 +265,8 @@ final class AppState {
         async let fans = api.followers(of: myID)
         async let mine = api.takes(by: myID)
         async let profile = api.profileDetail(myID)
-        async let cash = api.cash()
-        async let owned = api.positions()
         async let suggestions = api.suggested()
-        async let posting = fork != nil ? api.postingTakes() : []
+        async let posting = api.postingTakes()
 
         do {
             forYou = try await feed
@@ -285,33 +284,22 @@ final class AppState {
         if let list = try? await fans { followers = list }
         if let list = try? await suggestions { suggested = list }
         if let takes = try? await mine { myTakes = takes }
-        if fork != nil { await reconcilePosting((try? await posting) ?? myTakes.filter(\.posting)) }
+        await reconcilePosting((try? await posting) ?? myTakes.filter(\.posting))
         if let detail = try? await profile {
             me = detail.person
             privacy = detail.privacy
         }
-        if fork != nil {
-            await refreshCash()
-            return
-        }
-        do {
-            apply(try await cash)
-        } catch {
-            log.error("cash failed: \(error.localizedDescription, privacy: .public)")
-        }
-        if let owned = try? await owned { positions = owned }
+        await refreshCash()
     }
 
     // MARK: Cash
 
-    /// Adds money. Simulated until a payments provider exists: the server
-    /// records it, with the same limits the real thing will have.
+    /// Adds money: fake USDC into your wallet on the fork (the fork API caps it per account).
+    /// Mock data: added to the mock balance.
     func deposit(_ amount: Double, method: FundingMethod) async throws {
         if let fork {
             apply(try await fork.deposit(amount))
             for range in portfolioHistory.keys { await refreshHistory(range) }
-        } else if let api {
-            apply(try await api.deposit(amount, method: method))
         } else {
             balance += amount
             cashActivity.insert(CashEntry(id: UUID().uuidString, kind: .deposit, amount: amount, method: method,
@@ -319,13 +307,11 @@ final class AppState {
         }
     }
 
-    /// Sends money out of your balance. Simulated payout for now.
+    /// Sends money out of your balance. Mock data only: money stays on the fork, so signed in
+    /// Cash and the sidebar hide Withdraw.
     func withdraw(_ amount: Double, method: FundingMethod) async throws {
         if fork != nil {
-            // Play money stays on the fork; Cash hides Withdraw in fork mode.
             throw ForkAPIError(code: "withdrawals_off", message: "Play money can't be withdrawn.")
-        } else if let api {
-            apply(try await api.withdraw(amount, method: method))
         } else {
             guard amount <= balance else { throw SocialAPIError.invalid("insufficient_funds") }
             balance -= amount
@@ -343,12 +329,6 @@ final class AppState {
             // The trade has landed: the sheet closes now, and cash, the receipt and the portfolio
             // catch up in the background (they used to add several seconds before it closed).
             Task { await refreshAfterTrade(take.id) }
-        } else if let api {
-            let (cash, updated) = try await api.trade(take.id, side: side, amount: amount)
-            apply(cash)
-            updateTake(take.id) { $0 = updated }
-            // The new trade joins (or adds to) a position.
-            if let owned = try? await api.positions() { positions = owned }
         } else {
             guard amount >= Self.minTrade else { throw SocialAPIError.invalid("below_minimum") }
             guard amount <= balance else { throw SocialAPIError.invalid("insufficient_funds") }
@@ -405,16 +385,11 @@ final class AppState {
         positions.first { $0.take.id == take.id && $0.side == side }
     }
 
-    /// Sells `amount` dollars of a position at today's price, or all of it when
-    /// nil. The money goes back into your balance.
+    /// Mock data only: sells `amount` dollars of a position at today's price, or all of it when
+    /// nil. The money goes back into your balance. Signed in, a sale is a full exit on the fork
+    /// (`quoteForkExit` / `confirmForkExit`).
     @discardableResult
     func sell(_ position: OwnedPosition, amount: Double?) async throws -> SaleResult {
-        if let api {
-            let (cash, result) = try await api.sell(position.take.id, side: position.side, amount: amount)
-            apply(cash)
-            if let owned = try? await api.positions() { positions = owned }
-            return result
-        }
         guard let i = positions.firstIndex(where: { $0.id == position.id }) else {
             throw SocialAPIError.invalid("no_position")
         }
@@ -462,33 +437,17 @@ final class AppState {
         }
     }
 
-    /// Signed in, what you've made (profile score, drawer) is the gain or loss on what you hold:
-    /// on the fork, the chain's cost and value of each priced position; otherwise the paper
-    /// positions at today's price. Sold positions aren't counted yet.
-    private func updateMyReturn() {
-        // On the fork, "made" is the chain's: scored P&L of settled positions, from your profile
-        // (person_json with the network header). Open positions don't count toward it.
-        guard isLive, !isOnFork else { return }
-        var cost = 0.0, value = 0.0
-        for p in positions { cost += p.amount; value += p.value }
-        let made = value - cost
-        me = Person(id: me.id, name: me.name, made: made, returnPct: cost > 0 ? made / cost * 100 : 0,
-                    takes: me.takes, bio: me.bio, remoteID: me.remoteID, avatarURL: me.avatarURL)
-    }
-
-    /// Reloads just your balance and activity.
+    /// Reloads just your balance and activity. What you've made (profile score, drawer) is the
+    /// chain's: scored P&L of settled positions, from your profile (person_json with the network
+    /// header), so it reloads with the profile, not here.
     func refreshCash() async {
-        if let fork {
-            do {
-                apply(try await fork.summary())
-            } catch {
-                log.error("fork wallet failed: \(error.localizedDescription, privacy: .public)")
-            }
-            phoenixCash = try? await fork.phoenixCash()
-            return
+        guard let fork else { return }
+        do {
+            apply(try await fork.summary())
+        } catch {
+            log.error("fork wallet failed: \(error.localizedDescription, privacy: .public)")
         }
-        guard let api, let cash = try? await api.cash() else { return }
-        apply(cash)
+        phoenixCash = try? await fork.phoenixCash()
     }
 
     // MARK: Fork mode
@@ -603,31 +562,6 @@ final class AppState {
             return CashEntry(id: a.signature ?? "\(a.kind)-\(a.at)-\(i)", kind: kind, amount: signed, method: nil,
                              date: date, takeClaim: a.takeId.flatMap { claims[$0] })
         }
-        cashHasMore = false
-    }
-
-    /// Loads the next page of older activity (Cash calls this at the bottom of the list).
-    func loadMoreCash() async {
-        guard let api, cashHasMore, !loadingMoreCash, let last = cashActivity.last else { return }
-        loadingMoreCash = true
-        defer { loadingMoreCash = false }
-        do {
-            let page = try await api.activity(after: last)
-            let known = Set(cashActivity.map(\.id))
-            cashActivity += page.entries.filter { !known.contains($0.id) }
-            cashHasMore = page.hasMore
-        } catch {
-            log.error("older activity failed: \(error.localizedDescription, privacy: .public)")
-            actionError = (error as? LocalizedError)?.errorDescription ?? "Couldn't load older activity."
-        }
-    }
-
-    /// Replaces the balance and the newest page. Older pages are dropped and load
-    /// again as you scroll, so the list always matches the server.
-    private func apply(_ cash: CashSummary) {
-        balance = cash.balance
-        cashActivity = cash.activity
-        cashHasMore = cash.hasMore
     }
 
     /// Changes a take everywhere it's shown.
@@ -808,7 +742,7 @@ final class AppState {
     }
 
     func toggleFollow(_ person: Person) {
-        guard !isMe(person) else { return }
+        guard !isMe(person), !person.deleted else { return }
         let on = !isFollowing(person)
         let before = (following, followingPeople, followingFeed)
         if on {
@@ -839,8 +773,8 @@ final class AppState {
     // MARK: Takes
 
     /// Posts a take and puts it at the top of For you.
-    /// `confirmLeftOut`: asked before signing when the buy-in would leave legs out (fork mode); no
-    /// means nothing is signed, the posting take is discarded, and this throws `post_cancelled`.
+    /// `confirmLeftOut`: asked before signing when the buy-in would leave legs out; no means
+    /// nothing is signed, the posting take is discarded, and this throws `post_cancelled`.
     func post(_ draft: TakeDraft, legs: [Leg], confirmLeftOut: (([ForkBuild.LeftOut]) async -> Bool)? = nil) async throws {
         if let fork {
             guard draft.buyIn.isFinite, draft.buyIn >= minTrade else {
@@ -855,7 +789,7 @@ final class AppState {
         }
         var take: Take
         if let api {
-            take = try await api.post(NewTake(draft: draft, legs: legs, awaitChain: fork != nil))
+            take = try await api.post(NewTake(draft: draft, legs: legs))
             // Credit where it came from. Not worth failing the post over: it just shows without it.
             if let source = draft.source {
                 do {
@@ -874,7 +808,7 @@ final class AppState {
         }
         forYou.insert(take, at: 0)
         myTakes.insert(take, at: 0)
-        // Fork mode: buying in is required to post. The take stays "posting…" (yours only) until
+        // Buying in is required to post. The take stays "posting…" (yours only) until
         // its on-chain buy-in confirms; if that fails it shows "Didn't post" with Retry / Discard,
         // so a failure here is shown on the take, not thrown.
         if fork != nil, take.posting {

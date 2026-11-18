@@ -19,10 +19,18 @@ struct Person: Identifiable, Hashable {
     /// (faders and the person's own positions not counted). From the chain; 0 elsewhere.
     var backersMade: Double = 0
     var backersPct: Double = 0
+    /// The account was deleted: its takes and comments stay, under a placeholder author
+    /// ("Deleted account", no handle). Nothing to open or follow.
+    var deleted = false
 
     /// What follows, saves and comments are keyed by.
     var profileID: String { remoteID ?? id }
-    var handle: String { "@\(id)" }
+    /// "@handle", or empty for a deleted account.
+    var handle: String { deleted ? "" : "@\(id)" }
+    /// The handle, then " · " and `rest` ("@sam · 2h"); just `rest` for a deleted account.
+    func handle(then rest: String) -> String { deleted ? rest : "\(handle) · \(rest)" }
+    /// The handle without @, or nil for a deleted account (share cards).
+    var handleID: String? { deleted ? nil : id }
     /// Bundled images only for mock people and explicit `asset:` URLs, so a real
     /// user whose handle matches a demo name doesn't get the demo picture.
     var avatar: String {
@@ -362,8 +370,6 @@ struct CashEntry: Identifiable, Hashable {
     let date: Date
     /// For trades and fades.
     let takeClaim: String?
-    /// The server's exact timestamp (microseconds), for paging. Nil for mock entries.
-    var cursorAt: String? = nil
 
     var title: String {
         switch kind {
@@ -441,12 +447,18 @@ struct SaleResult: Equatable {
     let closed: Bool
 }
 
-/// What a balance read returns: the balance and the newest page of activity.
-struct CashSummary {
-    let balance: Double
-    let activity: [CashEntry]
-    /// Older activity exists beyond this page.
-    var hasMore = false
+/// What a money error (add cash, trade, fade, sell) means to the person looking at it.
+enum CashErrorText {
+    static func message(for error: Error) -> String {
+        switch error as? SocialAPIError {
+        case .invalid("insufficient_funds"): "Not enough cash in your balance."
+        case .invalid("below_minimum"): "That's under the minimum."
+        case .invalid("no_position"): "You don't hold this anymore."
+        case .some(let e): e.errorDescription ?? "That didn't go through. Try again."
+        // Fork API errors carry their own text (ForkAPIError.errorDescription).
+        case nil: (error as? LocalizedError)?.errorDescription ?? "That didn't go through. Try again."
+        }
+    }
 }
 
 /// Someone to follow, with why (e.g. "Followed by @priya and 2 others").
