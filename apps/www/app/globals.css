@@ -59,7 +59,7 @@ button:disabled { cursor: default; opacity: 0.5; }
 input { font: inherit; color: inherit; }
 
 /* Room under the last row for the tab bar and the composer bar above it (126 px), plus the home indicator. */
-.page { max-width: var(--col); margin: 0 auto; padding: 16px 16px calc(180px + env(safe-area-inset-bottom)); }
+.page { max-width: var(--col); margin: 0 auto; padding: calc(16px + env(safe-area-inset-top)) 16px calc(180px + env(safe-area-inset-bottom)); }
 .top { display: flex; align-items: center; justify-content: space-between; height: 52px; }
 .brand { font-family: var(--font-pixel); font-size: 24px; line-height: 1; }
 .pill { border: 1px solid var(--hairline); background: var(--tile); border-radius: 999px; padding: 8px 14px; font-size: 14px; }
@@ -96,7 +96,7 @@ input { font: inherit; color: inherit; }
 .btn.light { background: var(--text); color: var(--bg); }
 
 .sheet-wrap { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
-.sheet { width: 100%; max-width: var(--col); max-height: 92dvh; overflow: auto; background: var(--sheet); border: 1px solid var(--hairline); border-bottom: 0; border-radius: 28px 28px 0 0; padding: 22px 20px calc(20px + env(safe-area-inset-bottom)); }
+.sheet { width: 100%; max-width: var(--col); max-height: calc(92dvh - env(safe-area-inset-top)); overflow: auto; background: var(--sheet); border: 1px solid var(--hairline); border-bottom: 0; border-radius: 28px 28px 0 0; padding: 22px 20px calc(20px + env(safe-area-inset-bottom)); }
 .sheet h3 { font-size: 24px; margin: 0 0 4px; }
 .x { float: right; width: 36px; height: 36px; border-radius: 50%; background: var(--tile); font-size: 18px; }
 .amount { font-family: var(--font-mono); font-size: 46px; font-weight: 500; margin: 18px 0 12px; display: flex; align-items: center; }

@@ -4,6 +4,7 @@
 // accounts you copy. Opening it marks everything read.
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { fromCall } from "@/lib/compose";
 import { useSession } from "@/lib/session";
 import { useComposer } from "./Composer";
@@ -59,7 +60,7 @@ export default function NotificationsBell() {
         </svg>
         {unread ? <i className="bell-dot" /> : null}
       </button>
-      {open ? (
+      {open ? createPortal(
         <div className="sheet-wrap" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
           <div className="sheet" role="dialog" aria-label="Notifications">
             <button className="x" aria-label="Close" onClick={() => setOpen(false)}>×</button>
@@ -94,7 +95,8 @@ export default function NotificationsBell() {
               return <div key={n.id} className="nrow">{row}</div>;
             })}
           </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </>
   );
