@@ -10,9 +10,18 @@ User=thesis
 WorkingDirectory=/opt/thesis
 EnvironmentFile=/etc/thesis/executor.env
 Environment=ASSET_BANK_JUPITER_RPM=25
-ExecStart=/usr/bin/pnpm --filter @thesis/executor asset-bank
+# Node directly (`pnpm --filter @thesis/executor asset-bank` runs the same file): no ~135 MB pnpm
+# wrapper. On SIGTERM it flushes the bank and exits within about 10 s.
+ExecStart=/usr/bin/node apps/executor/src/asset-bank.ts
 Restart=always
 RestartSec=30
+TimeoutStopSec=30
+# Writes only under .data (infra/executor/README.md, "Hardening").
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/thesis/.data
+ProtectHome=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

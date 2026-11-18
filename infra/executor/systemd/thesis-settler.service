@@ -16,9 +16,16 @@ WorkingDirectory=/opt/thesis
 EnvironmentFile=/etc/thesis/executor.env
 LoadCredential=settler.json:/etc/thesis/settler.json
 Environment=SETTLER_KEYPAIR=%d/settler.json
-ExecStart=/usr/bin/pnpm --filter @thesis/executor settler
+# Node directly (`pnpm --filter @thesis/executor settler` runs the same file), without the pnpm
+# wrapper.
+ExecStart=/usr/bin/node apps/executor/src/settler.ts
 Restart=always
 RestartSec=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/thesis/.data
+ProtectHome=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

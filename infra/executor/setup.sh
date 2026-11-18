@@ -34,7 +34,9 @@ command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh |
 
 echo "• user thesis"
 id thesis >/dev/null 2>&1 || useradd --create-home --shell /bin/bash thesis
-usermod -aG docker thesis
+# Not in the docker group: that's root-equivalent, and only thesis-surfpool (a root unit) uses
+# Docker. Older setups added it; take it back out.
+gpasswd -d thesis docker >/dev/null 2>&1 || true
 
 echo "• app in $APP"
 if [ "$REPO_SRC" != "$APP" ]; then
@@ -42,6 +44,8 @@ if [ "$REPO_SRC" != "$APP" ]; then
   # The checkout this script came from; later updates: git pull in $APP.
   [ -d "$APP/.git" ] || git clone -q "$REPO_SRC" "$APP"
 fi
+# The only place the services may write (ProtectSystem=strict, ReadWritePaths in the units).
+install -d -o thesis -g thesis "$APP/.data"
 chown -R thesis:thesis "$APP"
 sudo -u thesis -H bash -c "cd $APP && corepack prepare pnpm@$PNPM_VERSION --activate >/dev/null && pnpm install --frozen-lockfile"
 
