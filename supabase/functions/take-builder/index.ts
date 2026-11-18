@@ -1,6 +1,6 @@
 // take-builder: turns a take ("AI power demand is underrated.") into a basket in ~2-3 s.
 //
-//   POST { claim, risk: "low"|"medium"|"high", horizon: "2 weeks"|"1 month"|"3 months"|"6 months",
+//   POST { claim, risk: "low"|"medium"|"high",
 //          include?: [assetId], source?: { text, label?, kind?: "post"|"article"|"holdings" } }
 //                                                      build (include: picks the basket must keep;
 //                                                      source: what the take copies. Holdings, or a
@@ -10,9 +10,10 @@
 //                                                      change the basket the way the ask says
 //   POST { ..., mode: "risk", legs: [...] }            new risk, same picks: swaps only the cash
 //                                                      (low) or leveraged (high) pick, no model call
-//   legs[].leverage: 1, or for a perp the leverage chosen for it (by the model from the horizon
-//   and how directly it's the take, at most 5x and the market's max; by the horizon alone when
-//   there's no model call)
+//   legs[].leverage: 1, or for a perp the leverage chosen for it (by the model from the risk and
+//   how directly it's the take, at most 5x and the market's max; 2x when there's no model call)
+//   There's no horizon: a take runs until its author sells their buy-in, or 365 days at most. An
+//   old client's horizon is ignored.
 //   header privy-token: <jwt>
 //   → { verdict: "basket"|"no_clean_exposure", summary, reason, legs: [...], note, ms, picker }
 //     note: why an edit didn't do what was asked ("NVIDIA isn't available in the US yet.")
@@ -58,7 +59,7 @@ import { capCards, CARD_PREFIX, cardAbout, isCardTake, searchCards } from "./car
 const cardRule = (cardTake: boolean) => cardTake
   ? "This take is about cards: the basket can be all cards (up to 5), or cards with stocks that move with them."
   : "At most one card, at most 20% of the basket, never the only pick.";
-import { applyHouseRules, MAX_PERP_WEIGHT } from "./rules.ts";
+import { applyHouseRules, MAX_LEVERAGE, MAX_PERP_WEIGHT, RULES_LEVERAGE } from "./rules.ts";
 
 /** Every yield pick is traded as a Jupiter Lend jlUSDC deposit (scripts/fork/api/legs.ts), so it's the one yield row offered: another vault's APY would be a rate the pick never earns. */
 const TRADED_YIELD_VENUE = "Jupiter Lend Earn";
@@ -72,41 +73,40 @@ const INDEX_SECRET = Deno.env.get("SECURITIES_INDEX_SECRET") ?? "";
 const AGENT_TIMEOUT_MS = Number(Deno.env.get("TAKE_AGENT_TIMEOUT_MS") ?? 8000);
 
 const SPOT = new Set(["stock", "etf", "commodity", "pre-ipo", "leveraged", "other"]);
-const HORIZON_DAYS: Record<string, number> = { "2 weeks": 14, "1 month": 31, "3 months": 92, "6 months": 183 };
+/** A take runs until its author sells, or this long at most (it then settles at that day's prices). */
+const TAKE_LIFETIME_DAYS = 365;
 /**
- * The day a take posted now settles (YYYY-MM-DD), for the model: prediction markets that resolve
- * near it are preferred; earlier ones are allowed.
+ * The last day a take posted now can run (YYYY-MM-DD), for the model: prediction markets that
+ * resolve by it are preferred; later ones are allowed (the take exits them at the bid).
  */
-const settlesOn = (horizon: string) => new Date(Date.now() + (HORIZON_DAYS[horizon] ?? 92) * 86_400_000).toISOString().slice(0, 10);
+const endsBy = () => new Date(Date.now() + TAKE_LIFETIME_DAYS * 86_400_000).toISOString().slice(0, 10);
 
 type Role = "core" | "second_order" | "prediction" | "yield" | "leverage";
 /** `leverage`: 1 for everything but a perp, whose leverage the model picks (see `leverageFor`). */
 type Pick = { s: Security; role: Role; weight: number; why: string; side: "long" | "yes" | "no"; purity: string; leverage: number };
 
-/** The most leverage a perp pick can have, and never above its market's own max. */
-const MAX_PERP_LEVERAGE = 5;
-const capFor = (maxLeverage: unknown) => Math.max(1, Math.min(MAX_PERP_LEVERAGE, Math.floor(Number(maxLeverage ?? MAX_PERP_LEVERAGE))));
+/** The most leverage a perp pick can have (rules.ts), and never above its market's own max. */
+const capFor = (maxLeverage: unknown) => Math.max(1, Math.min(MAX_LEVERAGE, Math.floor(Number(maxLeverage ?? MAX_LEVERAGE))));
 const leverageCap = (s: Security) => capFor(s.data?.maxLeverage);
 /** A pick's leverage within its cap: 1 unless it's a perp. */
 const leverageFor = (s: Security, wanted: number) => (s.kind === "perp" ? Math.max(1, Math.min(leverageCap(s), Math.round(wanted) || 1)) : 1);
 /**
- * When there's no model call (the rules fallback, a switch to high risk, an "add" by name): the
- * horizon decides. Longer bets get less, since a leveraged position has longer to hit its
+ * When there's no model call (the rules fallback, a switch to high risk, an "add" by name): 2x.
+ * A take can run up to a year, and a leveraged position held longer has longer to hit its
  * liquidation price on the way.
  */
-const HORIZON_LEVERAGE: Record<string, number> = { "2 weeks": 4, "1 month": 3, "3 months": 2, "6 months": 2 };
-const ruleLeverage = (s: Security, horizon: string) => leverageFor(s, HORIZON_LEVERAGE[horizon] ?? 2);
+const ruleLeverage = (s: Security) => leverageFor(s, RULES_LEVERAGE);
 /**
- * The house rules on the final basket (rules.ts): one pick per name, the 30% perp cap, the
- * horizon's leverage ceiling; then the card rules (cards.ts): one card, at most 20%, never alone,
+ * The house rules on the final basket (rules.ts): one pick per name, the 30% perp cap, the 5x
+ * leverage ceiling; then the card rules (cards.ts): one card, at most 20%, never alone,
  * unless the take is about cards (`cardTake`).
  * The perp cap hands its excess to the other picks, which can lift a card past 20%, and cutting
  * the card can lift a perp, so the two run again until both hold (a few rounds at most). If they
  * can't both hold (a card and a perp only), the card's cap wins.
  */
-const finalize = (ps: Pick[], horizon: string, cardTake = false) => {
+const finalize = (ps: Pick[], cardTake = false) => {
   const house = (xs: Pick[]) =>
-    applyHouseRules(xs, horizon, (p) => ({ kind: p.s.kind, key: key(p.s), weight: p.weight, leverage: p.leverage }), (p, weight, leverage) => ({ ...p, weight, leverage }));
+    applyHouseRules(xs, (p) => ({ kind: p.s.kind, key: key(p.s), weight: p.weight, leverage: p.leverage }), (p, weight, leverage) => ({ ...p, weight, leverage }));
   let out = capCards(house(ps), cardTake);
   for (let round = 0; round < 4 && out.length > 1 && out.some((p) => p.s.kind === "perp" && p.weight > MAX_PERP_WEIGHT); round++) out = capCards(house(out), cardTake);
   return out;
@@ -462,8 +462,8 @@ const RISK_RULES: Record<string, string> = {
   low: "Low risk: up to 4 picks. Spread out, prefer big well-known companies and broad ETFs. Include exactly one cash pick at 20-30%.",
   medium: "Medium risk: up to 5 picks of stocks/ETFs/commodities, fewer when fewer fit directly. Add one prediction market (10-20%) only if one asks about this take.",
   high: "High risk: up to 4 picks, concentrated in the purest names. You may use one perp (max 30%, or the whole basket when it's the only pick) on a name the take is about, in place of that name's stock: never both. " +
-    "Choose its leverage, from 2 up to its max (and at most 5x for 2 weeks, 4x for 1 month, 3x for 3 months, 2x for 6 months): more for a short horizon and a name that IS the take, less for a long horizon or a looser fit, " +
-    "since a leveraged bet held longer is likelier to be liquidated on the way.",
+    "Choose its leverage, from 2 up to its max (at most 5x): more for a name that IS the take, less for a looser fit. " +
+    "The take may be held up to a year, and a leveraged bet held longer is likelier to be liquidated on the way.",
 };
 
 type Picked = {
@@ -524,8 +524,9 @@ const BUILD_SYSTEM = [
   "A take about one event (a game, a title, an election, an award, a review score, an IPO, a deal, a price on a day)",
   "whose market is shown: the basket is that market, alone, or with at most one stock that profits directly from that",
   "exact outcome. Never pad it with loosely related companies; risk_rules' pick counts don't apply to it.",
-  "Of the markets that fit, prefer the one that resolves closest to settles (the day the take ends). One resolving",
-  "earlier is allowed, but it then sits at its result until settles.",
+  "Of the markets that fit, prefer the one on the take's own timeframe when it names one (\"by December\"), and one",
+  "that resolves by ends_by (a year from today, the longest a take runs). One resolving after ends_by is allowed:",
+  "the take exits it at its price then.",
   "side: yes for everything; for a prediction market, yes or no, whichever the take implies. Everything is bought: to",
   "bet against something, use no on its market or an inverse fund, never its stock, and never call a pick a short.",
   "leverage: 1 for everything except a perp.",
@@ -718,10 +719,10 @@ const equalWeights = (rows: Security[]): Pick[] =>
  * No model: the names the take or its source spell out, equal weights, plus the risk's cash or
  * leveraged pick. Nothing named → no basket (better than a guess).
  */
-async function fromRules(index: Index, text: string, risk: string, horizon: string, usPerson: boolean): Promise<Pick[]> {
+async function fromRules(index: Index, text: string, risk: string, usPerson: boolean): Promise<Pick[]> {
   const core = (await named(index, text, usPerson)).slice(0, risk === "medium" ? 4 : 3);
   if (!core.length) return [];
-  return risk === "medium" ? equalWeights(core) : await adjustRisk(equalWeights(core), risk, horizon, usPerson);
+  return risk === "medium" ? equalWeights(core) : await adjustRisk(equalWeights(core), risk, usPerson);
 }
 
 // --- Edits -----------------------------------------------------------------------------------
@@ -750,11 +751,11 @@ const YIELD_WHY = "Money that isn't invested yet earns interest while the take r
 
 /**
  * New risk, same picks: drop the cash / perp pick the old risk added, add the new one's (low: the
- * deepest cash vault; high: the first pick Phoenix lists becomes its perp, at the horizon's
+ * deepest cash vault; high: the first pick Phoenix lists becomes its perp, at the rules'
  * leverage), and keep the rest in proportion. No model call, so it's instant and never touches
  * picks you chose.
  */
-async function adjustRisk(current: Pick[], risk: string, horizon: string, usPerson: boolean, cardTake = false): Promise<Pick[]> {
+async function adjustRisk(current: Pick[], risk: string, usPerson: boolean, cardTake = false): Promise<Pick[]> {
   // A perp stood in for its name's stock (one pick per name): below high risk, the stock comes back.
   const back = await Promise.all(current.filter((p) => p.s.kind === "perp" && p.s.underlying).map(async (p) => {
     const { data } = await db.from("securities").select(SECURITY_COLUMNS).eq("underlying", p.s.underlying!).in("kind", [...SPOT]).eq("liquidity", "tradeable").limit(5);
@@ -774,7 +775,7 @@ async function adjustRisk(current: Pick[], risk: string, horizon: string, usPers
     const lead = kept.find((p) => SPOT.has(p.s.kind) && p.s.underlying);
     const perp = lead ? (await securitiesById([`phoenix:${lead.s.underlying}`]))[0] : undefined;
     if (lead && perp && available(perp, usPerson) && perp.liquidity === "tradeable") {
-      const lev = ruleLeverage(perp, horizon);
+      const lev = ruleLeverage(perp);
       // One pick per name: the perp takes its stock's place (finalize caps it at 30% when other picks aren't perps).
       const swapped: Pick = { s: perp, weight: lead.weight, why: `${displayName(lead.s.name)} at ${lev}x: gains and losses move faster.`, role: "leverage", side: "long", purity: "partial", leverage: lev };
       kept = kept.map((p) => (p === lead ? swapped : p));
@@ -813,9 +814,9 @@ const EDIT_SYSTEM = [
   "its weight. \"remove X\" / \"no X\" drops it (and anything of that type, e.g. \"no crypto\"). \"swap A for B\" replaces A.",
   "Weights sum to 100. Max one pick per company (its stock or its perp, never both), at most 10 picks, at least 1.",
   "side: yes for everything; for a prediction market, yes or no, whichever the take implies. Of the markets that fit,",
-  "prefer the one that resolves closest to settles (the day the take ends).",
+  "prefer one that resolves by ends_by (a year from today, the longest a take runs); a later one is allowed.",
   "leverage: 1 for everything except a perp; keep a kept perp's leverage unless the change is about it; a new perp's,",
-  "from 2 up to its max, more for a short horizon, less for a long one.",
+  "from 2 up to its max (at most 5x), more for a name that IS the take, less for a looser fit.",
   "why: max 12 words, how the pick ties to THIS take; for a kept pick return \"\" to keep its current line.",
   "summary: max 18 words, what has to be true for the take to pay off (keep it unless the basket's idea changed).",
   "verdict: always basket. reason: \"\" if you made the change; otherwise one short sentence saying why not",
@@ -830,7 +831,7 @@ const EDIT_SYSTEM = [
 ].join(" ");
 
 /** No model: "add X" / "remove X" by name, so a slow call still does the obvious thing. */
-async function editByRules(current: Pick[], ask: string, horizon: string, usPerson: boolean): Promise<Pick[] | null> {
+async function editByRules(current: Pick[], ask: string, usPerson: boolean): Promise<Pick[] | null> {
   const a = ask.trim().toLowerCase();
   const add = a.match(/^(?:add|include|plus)\s+(.+)$/);
   const remove = a.match(/^(?:remove|drop|no|without)\s+(.+)$/);
@@ -843,7 +844,7 @@ async function editByRules(current: Pick[], ask: string, horizon: string, usPers
     const share = 100 / (current.length + 1);
     return normalize([
       ...current.map((p) => ({ ...p, weight: p.weight * (1 - share / 100) })),
-      { s, weight: share, why: firstSentence(s.description) ?? "", role: roleFor(s, false), side: "long", purity: "partial", leverage: ruleLeverage(s, horizon) },
+      { s, weight: share, why: firstSentence(s.description) ?? "", role: roleFor(s, false), side: "long", purity: "partial", leverage: ruleLeverage(s) },
     ]);
   }
   if (remove) {
@@ -853,11 +854,11 @@ async function editByRules(current: Pick[], ask: string, horizon: string, usPers
   return null;
 }
 
-async function edit(claim: string, risk: string, horizon: string, current: Pick[], ask: string, usPerson: boolean, source: Source | null, cardTake = false) {
+async function edit(claim: string, risk: string, current: Pick[], ask: string, usPerson: boolean, source: Source | null, cardTake = false) {
   const [index, blocked] = await Promise.all([indexFor(), blockedBy(ask, current.map((p) => p.s), usPerson)]);
   const { shown, listed } = shownFor(index, usPerson);
   const input = {
-    take: claim, risk, horizon, settles: settlesOn(horizon), change: ask, cards: cardRule(cardTake),
+    take: claim, risk, ends_by: endsBy(), change: ask, cards: cardRule(cardTake),
     current: current.map((p) => ({
       n: shown.add(rowOf(p.s)), name: displayName(p.s.name), kind: p.s.kind, weight: p.weight, why: p.why,
       ...(p.s.kind === "prediction" ? { side: p.side } : {}),
@@ -886,7 +887,7 @@ async function edit(claim: string, risk: string, horizon: string, current: Pick[
       return { picks, summary: agent.out.summary, note: blockedNote ?? (unchanged ? (agent.out.reason || "Nothing to change there.") : (agent.out.reason || null)), picker: agent.model, agent };
     }
   }
-  const ruled = await editByRules(current, ask, horizon, usPerson);
+  const ruled = await editByRules(current, ask, usPerson);
   return ruled
     ? { picks: ruled, summary: null, note: null, picker: "rules", agent }
     : { picks: current, summary: null, note: blockedNote ?? "Couldn't make that change. Try saying it another way.", picker: "rules", agent };
@@ -959,7 +960,7 @@ Deno.serve(async (req) => {
   const did = admin ? null : await privyDid(req);
   if (!admin && !did) return json(401, { error: "invalid_privy_token" });
 
-  let body: { claim?: string; risk?: string; horizon?: string; mode?: string; legs?: unknown; ask?: string; include?: unknown; source?: { text?: unknown; label?: unknown; kind?: unknown }; system?: unknown; variant?: unknown };
+  let body: { claim?: string; risk?: string; mode?: string; legs?: unknown; ask?: string; include?: unknown; source?: { text?: unknown; label?: unknown; kind?: unknown }; system?: unknown; variant?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -968,7 +969,6 @@ Deno.serve(async (req) => {
   const claim = String(body.claim ?? "").trim();
   if (claim.length < 5 || claim.length > 280) return json(400, { error: "invalid_claim" });
   const risk = ["low", "medium", "high"].includes(String(body.risk)) ? String(body.risk) : "medium";
-  const horizon = Object.hasOwn(HORIZON_DAYS, String(body.horizon)) ? String(body.horizon) : "3 months";
   const mode = body.mode === "edit" || body.mode === "risk" ? body.mode : "build";
   // What the take copies: an X post, an article, a fund's or trader's holdings ("NVDA 40%, VST 25%, …").
   const sourceText = typeof body.source?.text === "string" ? body.source.text.trim().slice(0, 2000) : "";
@@ -1000,14 +1000,14 @@ Deno.serve(async (req) => {
     lap("load");
 
     if (mode === "risk") {
-      const next = await adjustRisk(picks, risk, horizon, usPerson, cardTake);
+      const next = await adjustRisk(picks, risk, usPerson, cardTake);
       lap("risk");
-      return json(200, { verdict: "basket", summary: null, reason: null, legs: await legsJSON(finalize(next, horizon, cardTake)), note: null, ms, picker: "rules" });
+      return json(200, { verdict: "basket", summary: null, reason: null, legs: await legsJSON(finalize(next, cardTake)), note: null, ms, picker: "rules" });
     }
-    const out = await edit(claim, risk, horizon, normalize(picks), ask, usPerson, source, cardTake);
+    const out = await edit(claim, risk, normalize(picks), ask, usPerson, source, cardTake);
     lap("edit");
     return json(200, {
-      verdict: "basket", summary: out.summary, reason: null, legs: await legsJSON(finalize(out.picks, horizon, cardTake)), note: out.note, ms, picker: out.picker,
+      verdict: "basket", summary: out.summary, reason: null, legs: await legsJSON(finalize(out.picks, cardTake)), note: out.note, ms, picker: out.picker,
       ...(admin ? { debug: { rounds: out.agent?.rounds ?? null, searches: out.agent?.calls ?? [], raw: out.agent?.out ?? null } } : {}),
     });
   }
@@ -1029,9 +1029,9 @@ Deno.serve(async (req) => {
   const keep = must.map((s) => shown.add(rowOf(s)));
   const words = source ? `${claim} ${source.text.slice(0, 400)}` : claim;
   const input = {
-    take: claim, risk, risk_rules: RISK_RULES[risk] ?? RISK_RULES.medium, horizon, cards: cardRule(cardTake),
+    take: claim, risk, risk_rules: RISK_RULES[risk] ?? RISK_RULES.medium, cards: cardRule(cardTake),
     today: new Date().toISOString().slice(0, 10),
-    settles: settlesOn(horizon),
+    ends_by: endsBy(),
     ...(keep.length ? { keep } : {}),
     ...(source ? { source: sourceJSON(source) } : {}),
     ...(v.markets ? { markets: marketsFor(index, shown, words, usPerson, 10) } : {}),
@@ -1078,16 +1078,16 @@ Deno.serve(async (req) => {
   if (!picks.length) {
     picker = "rules";
     summary = claim;
-    picks = copyKeys ? equalWeights(copied.slice(0, MAX_LEGS)) : await fromRules(index, words, risk, horizon, usPerson);
+    picks = copyKeys ? equalWeights(copied.slice(0, MAX_LEGS)) : await fromRules(index, words, risk, usPerson);
     if (!picks.length && !must.length) return noExposure("Couldn't build this one just now. Try again in a moment.");
   }
   // The asset you started from is always in, at a fair share if the model left it out.
   for (const s of must) {
     if (picks.some((p) => p.s.id === s.id)) continue;
     picks = normalize([...picks.map((p) => ({ ...p, weight: p.weight * 0.8 })),
-      { s, weight: picks.length ? 20 : 100, why: firstSentence(s.description) ?? "", role: roleFor(s, false), side: "long", purity: "partial", leverage: ruleLeverage(s, horizon) }]);
+      { s, weight: picks.length ? 20 : 100, why: firstSentence(s.description) ?? "", role: roleFor(s, false), side: "long", purity: "partial", leverage: ruleLeverage(s) }]);
   }
   const note = included.length > must.length ? "That one isn't available in the US yet, so it's not in the basket." : null;
 
-  return json(200, { verdict: "basket", summary, reason: null, legs: await legsJSON(finalize(picks, horizon, cardTake)), note, ms, picker, ...debug });
+  return json(200, { verdict: "basket", summary, reason: null, legs: await legsJSON(finalize(picks, cardTake)), note, ms, picker, ...debug });
 });

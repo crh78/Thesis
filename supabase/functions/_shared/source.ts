@@ -5,8 +5,9 @@
 //   readSource(url, given?)  the page's title, site and text. X posts come from X's public oEmbed
 //                            (no key). Articles are fetched; text the share extension already read
 //                            from Safari wins, since paywalled sites send little to a server.
-//   draftTake(source)        one fast model call: the take in plain words, risk, horizon, and
-//                            whether the source itself makes a market call.
+//   draftTake(source)        one fast model call: the take in plain words, risk, and whether the
+//                            source itself makes a market call. No horizon: a take runs until its
+//                            author sells, or a year at most.
 
 import { FAST_MODEL, jsonCall } from "./openai.ts";
 
@@ -24,7 +25,6 @@ export type Source = {
 export type Draft = {
   claim: string;
   risk: "low" | "medium" | "high";
-  horizon: "2 weeks" | "1 month" | "3 months" | "6 months";
   /** The source itself takes a market view; news with no view is false. */
   is_call: boolean;
 };
@@ -355,17 +355,15 @@ Write the take the way a sharp friend would text it:
 - the view, not the news: "Alphabet's cash burn drags the stock lower" rather than "Alphabet's free cash flow turned negative"
 
 risk: low for a safe, slow view; medium for most; high for a bold or fast one.
-horizon: from the timeframe in the source ("by year end", "this quarter"), else "3 months".
 is_call: true if the source says or implies which way something tradable is heading: a market view, a big move with a reason ("Bitcoin falls below $65,000 as liquidations hit $1.8 billion"), or news that clearly helps or hurts a company, sector or asset. False for jokes, quotes, life updates, politics with no market angle, and data with no direction; still write the most natural take a reader would have.`;
 
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["claim", "risk", "horizon", "is_call"],
+  required: ["claim", "risk", "is_call"],
   properties: {
     claim: { type: "string" },
     risk: { type: "string", enum: ["low", "medium", "high"] },
-    horizon: { type: "string", enum: ["2 weeks", "1 month", "3 months", "6 months"] },
     is_call: { type: "boolean" },
   },
 };
@@ -399,5 +397,5 @@ export async function draftTake(s: Source, opts: { timeoutMs?: number } = {}): P
   }
   // No model: the headline (or the post's first line) is a start the person can edit.
   const fallback = cleanClaim((s.title && s.kind === "link" ? s.title : s.text.split("\n")[0]) || "");
-  return { claim: fallback.length >= 3 ? fallback : "This is going to move markets.", risk: "medium", horizon: "3 months", is_call: false };
+  return { claim: fallback.length >= 3 ? fallback : "This is going to move markets.", risk: "medium", is_call: false };
 }

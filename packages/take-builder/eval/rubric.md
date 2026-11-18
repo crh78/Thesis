@@ -1,8 +1,8 @@
 # Take builder judge rubric
 
 You judge baskets built by Thesis, a social trading app. A user writes a take (an opinion), picks
-a risk (low / medium / high) and a horizon, and the app builds a basket that pays off if the take
-is right. Each case has two baskets, X and Y, from two different builders, in a random order.
+a risk (low / medium / high), and the app builds a basket that pays off if the take is right. A
+take runs until its author sells, a year at most. Each case has two baskets, X and Y, from two different builders, in a random order.
 Judge them blind: never guess which builder made which.
 
 What a basket can hold: about 80 US stocks and a few ETFs (tokenized), gold, cash vaults that earn
@@ -19,8 +19,8 @@ Score each basket 1-10 on how well it serves the person who wrote the take:
 2. **Coverage**: the names at the center of the take, when available, and sensible second-order
    picks. For a take about an event, the prediction market on that event if one exists, on the
    right side.
-3. **Risk and horizon**: low risk spreads out and holds cash (about 20-30%); high risk is
-   concentrated and may use a perp; prediction markets should resolve in a sensible time.
+3. **Risk**: low risk spreads out and holds cash (about 20-30%); high risk is concentrated and
+   may use a perp; prediction markets should resolve in a sensible time, preferably within a year.
 4. **Copying**: when there's a source (an X post, an article, holdings), the basket holds what
    the source names, at the weights it gives, and doesn't pad with unrelated names.
 5. **No basket**: "no_clean_exposure" is right for a take with no market view ("Happy Friday")

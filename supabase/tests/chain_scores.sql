@@ -191,6 +191,28 @@ begin
   if (select (stake, settled_at) from public.chain_positions where address = 'P_W2') is distinct from (10000000::numeric, null::timestamptz) then
     raise exception 'reused address not reset';
   end if;
+
+  -- The author's sale closes and settles a take early (migrations/*_author_sale_closes.sql); a
+  -- backer who sells after that still counts toward what the author made for backers.
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature','k1','ordinal',0,'slot',30,'block_time',t0,'name','takeCreated',
+      'data', jsonb_build_object('take','T3','author','W_WIN')),
+    jsonb_build_object('signature','k2','ordinal',0,'slot',31,'block_time',t0,'name','positionOpened',
+      'data', jsonb_build_object('take','T3','position','P_B3','owner','W_BACK','side','back','stake','100000000','scored',true)),
+    jsonb_build_object('signature','k3','ordinal',0,'slot',32,'block_time',t0,'name','takeClosed',
+      'data', jsonb_build_object('take','T3','author','W_WIN')),
+    jsonb_build_object('signature','k4','ordinal',0,'slot',33,'block_time',t0,'name','takeSettled',
+      'data', jsonb_build_object('take','T3','author','W_WIN','resultBps','1000')),
+    jsonb_build_object('signature','k5','ordinal',0,'slot',34,'block_time',extract(epoch from now()),'name','positionExited',
+      'data', jsonb_build_object('take','T3','position','P_B3','owner','W_BACK','side','back','exitedAt',extract(epoch from now())::bigint::text)),
+    jsonb_build_object('signature','k6','ordinal',0,'slot',35,'block_time',extract(epoch from now()),'name','positionSettled',
+      'data', jsonb_build_object('take','T3','position','P_B3','owner','W_BACK','side','back','returnBps','3000','pnl','30000000','scored',true,'exited',true))));
+  select * into s from public.chain_backer_stats('solana-mainnet-fork') where author = 'W_WIN';
+  if (s.backer_stake, s.backer_pnl, s.backers) is distinct from (550000000::numeric, 45000000::numeric, 2::bigint) then
+    raise exception 'a backer settling after the take settled early must count: %', row_to_json(s);
+  end if;
+  select * into s from public.chain_wallet_stats('solana-mainnet-fork') where owner = 'W_WIN';
+  if s.takes_settled <> 2 then raise exception 'the early-settled take counts as settled: %', row_to_json(s); end if;
   raise notice 'chain_scores: all checks passed';
 end $$;
 rollback;

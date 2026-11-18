@@ -5,10 +5,14 @@
 //   - A perp weighs at most 30% when the basket has picks that aren't perps; the excess goes to
 //     them, in proportion. A basket of perps only (one or several) keeps its weights (chosen after
 //     live builds).
-//   - Leverage stays the model's choice, under a ceiling that falls with the horizon.
+//   - Leverage stays the model's choice, at most 5x (and the market's own max, applied where the
+//     pick is made). Takes have no horizon: they run until the author sells, a year at most.
 
 export const MAX_PERP_WEIGHT = 30;
-export const HORIZON_MAX_LEVERAGE: Record<string, number> = { "2 weeks": 5, "1 month": 4, "3 months": 3, "6 months": 2 };
+/** The most leverage any perp pick gets. */
+export const MAX_LEVERAGE = 5;
+/** A perp's leverage when no model chose it (the rules fallback, a switch to high risk, an add by name). */
+export const RULES_LEVERAGE = 2;
 
 /** What the rules read from a pick: its kind, its name's key (an underlying), weight and leverage. */
 export type RuleView = { kind: string; key: string; weight: number; leverage: number };
@@ -27,14 +31,13 @@ export function normalizeWeights(weights: number[]): number[] {
 /**
  * Applies the house rules. `view` reads a pick; `update` returns it with a new weight and leverage.
  */
-export function applyHouseRules<T>(picks: T[], horizon: string, view: (p: T) => RuleView, update: (p: T, weight: number, leverage: number) => T): T[] {
+export function applyHouseRules<T>(picks: T[], view:(p: T) => RuleView, update: (p: T, weight: number, leverage: number) => T): T[] {
   const stocks = new Set(picks.map(view).filter((v) => v.kind !== "perp").map((v) => v.key));
   const kept = picks.filter((p) => {
     const v = view(p);
     return v.kind !== "perp" || !stocks.has(v.key);
   });
   if (!kept.length) return kept;
-  const ceiling = HORIZON_MAX_LEVERAGE[horizon] ?? 2;
   const views = kept.map(view);
   let weights = normalizeWeights(views.map((v) => v.weight));
   const othersTotal = weights.reduce((a, w, i) => a + (views[i].kind === "perp" ? 0 : w), 0);
@@ -43,5 +46,5 @@ export function applyHouseRules<T>(picks: T[], horizon: string, view: (p: T) => 
     weights = normalizeWeights(weights.map((w, i) =>
       views[i].kind === "perp" ? Math.min(w, MAX_PERP_WEIGHT) : w + over * (w / othersTotal)));
   }
-  return kept.map((p, i) => update(p, weights[i], views[i].kind === "perp" ? Math.min(views[i].leverage, ceiling) : views[i].leverage));
+  return kept.map((p, i) => update(p, weights[i], views[i].kind === "perp" ? Math.min(views[i].leverage, MAX_LEVERAGE) : views[i].leverage));
 }

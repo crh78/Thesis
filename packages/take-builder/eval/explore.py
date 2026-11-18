@@ -53,7 +53,7 @@ def run(concurrency: int, only: set[str], wanted: list[str]) -> None:
         R.warm(fn, sec)
 
     def one(case: dict) -> dict:
-        body = {k: case[k] for k in ("claim", "risk", "horizon", "source") if k in case}
+        body = {k: case[k] for k in ("claim", "risk", "source") if k in case}
         def go(item):
             name, (fn, variant) = item
             reply = R.call(fn, {**body, **({"variant": variant} if variant is not None else {})}, sec)
@@ -106,7 +106,7 @@ def pack(batches: int, only: list[str], tag: str) -> None:
         key[r["case"]["id"]] = dict(zip(labels, names))
         c = r["case"]
         strip = lambda s: {k: s.get(k) for k in ("verdict", "summary", "reason", "error", "legs")}
-        items.append({"id": c["id"], "take": c["claim"], "risk": c["risk"], "horizon": c["horizon"],
+        items.append({"id": c["id"], "take": c["claim"], "risk": c["risk"],
                       **({"source": c["source"]} if "source" in c else {}),
                       "baskets": {l: strip(r["by"][n]) for l, n in zip(labels, names)}})
     rnd.shuffle(items)
