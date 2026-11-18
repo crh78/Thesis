@@ -63,7 +63,14 @@ struct RootView: View {
             }
         }
         .animation(.smooth(duration: 0.22), value: composerActive)
-        .overlay(alignment: .top) { ErrorBanner() }
+        .overlay(alignment: .top) {
+            VStack(spacing: 6) {
+                ErrorBanner()
+                TradeNoticeBanner()
+            }
+        }
+        // Try again from a trade that didn't land after its sheet closed.
+        .sheet(item: $app.retryTrade) { TradeSheet(intent: $0) }
         .task { await connect() }
         .onChange(of: session.snapshot?.profile) { _, profile in
             if let profile { app.updateMe(from: profile) }
@@ -383,6 +390,44 @@ private struct ErrorBanner: View {
                     withAnimation(.smooth) { app.actionError = nil }
                 }
                 .accessibilityAddTraits(.isStaticText)
+        }
+    }
+}
+
+/// A trade or sale that didn't go through after its sheet closed (fork mode), with Try again for
+/// a trade. It stays longer than an error banner, since it's about money.
+private struct TradeNoticeBanner: View {
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        if let notice = app.tradeNotice {
+            HStack(spacing: 12) {
+                Label(notice.message, systemImage: "exclamationmark.circle")
+                    .font(.geist(14, .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let retry = notice.retry {
+                    Button("Try again") {
+                        app.tradeNotice = nil
+                        app.retryTrade = retry
+                    }
+                    .font(.geist(14, .semibold))
+                    .buttonStyle(.glass)
+                    .accessibilityIdentifier("trade-notice-retry")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(minHeight: 44)
+            .glassEffect(.regular, in: .rect(cornerRadius: 22))
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .task(id: notice.id) {
+                try? await Task.sleep(for: .seconds(8))
+                withAnimation(.smooth) { if app.tradeNotice?.id == notice.id { app.tradeNotice = nil } }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("trade-notice")
         }
     }
 }

@@ -247,6 +247,10 @@ final class AppState {
         positions = []
         cashActivity = []
         postStates = [:]
+        pendingTrades = [:]
+        soldPositions = []
+        tradeNotice = nil
+        retryTrade = nil
         feedState = .idle
         homePath = NavigationPath()
         tab = .home
@@ -320,15 +324,16 @@ final class AppState {
         }
     }
 
-    /// Trades or fades a take for `amount`: buys shares at the take's price
-    /// (into your position on that side), and the take's counts go up.
+    /// Mock data: trades or fades a take for `amount`: buys shares at the take's price (into your
+    /// position on that side), and the take's counts go up. Signed in, a trade is
+    /// `prepareTrade` (before the tap) and `commitTrade` (at the tap).
     func trade(_ take: Take, side: Side, amount: Double) async throws {
         if let fork {
             guard amount >= minTrade else { throw SocialAPIError.invalid("below_minimum") }
-            try await fork.trade(take.id, side: side, amount: amount)
-            // The trade has landed: the sheet closes now, and cash, the receipt and the portfolio
-            // catch up in the background (they used to add several seconds before it closed).
-            Task { await refreshAfterTrade(take.id) }
+            let marks = TradeMarks()
+            let built = try await fork.prepareTrade(take.id, side: side, amount: amount)
+            marks.mark("built")
+            _ = try await commitTrade(take, side: side, amount: amount, built: built, marks: marks)
         } else {
             guard amount >= Self.minTrade else { throw SocialAPIError.invalid("below_minimum") }
             guard amount <= balance else { throw SocialAPIError.invalid("insufficient_funds") }
@@ -353,23 +358,186 @@ final class AppState {
         await refreshPortfolio()
     }
 
-    func quoteForkExit(_ take: Take, position: String) async throws -> ForkBuild {
+    // MARK: Fast trades (fork mode)
+    //
+    // A trade sheet builds the trade as it opens (`prepareTrade`, `prepareExit`) and keeps that
+    // build fresh (`refreshPrepared`), so the tap only signs and sends it (`commitTrade`,
+    // `commitExit`). The tap returns once the fork accepted it: the app shows it as placed right
+    // away, and `watch` follows it to confirmation in the background. If it doesn't land, the
+    // change is rolled back and you're told (the sheet if it's still open, a banner otherwise).
+
+    /// A trade or sale the fork accepted, by build id, while it confirms (and how it ended).
+    private(set) var pendingTrades: [String: PendingTrade] = [:]
+    /// Positions sold (or being sold) here: shown as sold before the receipt catches up.
+    private(set) var soldPositions: Set<String> = []
+    /// A trade that didn't go through after its sheet closed: the banner says so, with Try again.
+    var tradeNotice: TradeNotice?
+    /// Try again from that banner: RootView opens the trade sheet again.
+    var retryTrade: TradeIntent?
+    /// Pending trades whose sheet is still open and shows how they end itself.
+    @ObservationIgnored private var shownBySheet: Set<String> = []
+
+    func prepareTrade(_ take: Take, side: Side, amount: Double, prebuild: Bool) async throws -> ForkPrepared {
         guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
-        return try await fork.quoteExit(take.id, position: position)
+        return try await fork.prepareTrade(take.id, side: side, amount: amount, prebuild: prebuild)
     }
 
-    func confirmForkExit(_ quote: ForkBuild) async throws {
+    func prepareExit(_ take: Take, position: String, prebuild: Bool) async throws -> ForkPrepared {
         guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
-        _ = try await fork.signAndSubmit(quote)
-        // A sale with Phoenix legs closed them; their cash comes back to USDC in a second step.
-        // If that fails, it waits on the Cash screen ("Cash out").
-        if quote.phoenixCashOut == true {
-            do { try await fork.cashOutPhoenix() } catch {
-                log.error("phoenix cash-out failed: \(error.localizedDescription, privacy: .public)")
+        return try await fork.prepareExit(take.id, position: position, prebuild: prebuild)
+    }
+
+    /// A build with a fresh blockhash, or nil when it has to be built again.
+    func refreshPrepared(_ built: ForkPrepared) async throws -> ForkPrepared? {
+        guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
+        return try await fork.refresh(built)
+    }
+
+    /// Signs and sends a prepared back or fade. Returns its build id once the fork accepted it;
+    /// your balance and the take's counts move now, and come back if it doesn't land.
+    @discardableResult
+    func commitTrade(_ take: Take, side: Side, amount: Double, built: ForkPrepared, marks: TradeMarks) async throws -> String {
+        guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
+        let sent = try await fork.commit(built.build, marks: marks)
+        let id = built.build.buildId
+        let cost = amount * (1 + (forkFeeRate ?? 0))
+        balance -= cost
+        updateTake(take.id) {
+            if side == .back { $0.backs += 1 } else { $0.fades += 1 }
+            $0.moneyIn += amount
+        }
+        let undo = { [weak self] in
+            guard let self else { return }
+            self.balance += cost
+            self.updateTake(take.id) {
+                if side == .back { $0.backs -= 1 } else { $0.fades -= 1 }
+                $0.moneyIn -= amount
             }
         }
-        await refreshCash()
-        await refreshPortfolio()
+        track(id, PendingTrade(takeID: take.id, kind: .trade(side, amount: amount), status: .confirming), sent, marks: marks,
+              retry: TradeIntent(take: take, side: side), undo: undo) { [weak self] in
+            await self?.refreshAfterTrade(take.id)
+        }
+        return id
+    }
+
+    /// Signs and sends prepared sales (one per on-chain position behind a holding), each once the
+    /// last was accepted. Returns their build ids. Whatever was accepted before a failure stays sold.
+    @discardableResult
+    func commitExit(_ take: Take, positions: [String], built: [ForkPrepared], marks: TradeMarks) async throws -> [String] {
+        guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
+        var ids: [String] = []
+        for (position, sale) in zip(positions, built) {
+            let sent = try await fork.commit(sale.build, marks: marks)
+            let id = sale.build.buildId
+            ids.append(id)
+            soldPositions.insert(position)
+            let cashOut = sale.build.phoenixCashOut == true
+            track(id, PendingTrade(takeID: take.id, kind: .sale, status: .confirming), sent, marks: marks, retry: nil,
+                  undo: { [weak self] in self?.soldPositions.remove(position) }) { [weak self] in
+                guard let self else { return }
+                // A sale with Phoenix legs closed them; their cash comes back to USDC in a second
+                // step once it landed. If that fails, it waits on the Cash screen ("Cash out").
+                if cashOut {
+                    do { try await fork.cashOutPhoenix() } catch {
+                        self.log.error("phoenix cash-out failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+                await self.refreshCash()
+                await self.refreshPortfolio()
+            }
+        }
+        return ids
+    }
+
+    /// A sheet showing this pending trade's outcome itself (while open), or not any more.
+    func sheetShows(_ id: String, _ showing: Bool) {
+        if showing { shownBySheet.insert(id) } else { shownBySheet.remove(id) }
+    }
+
+    /// Follows an accepted trade to the end. Landed: `landed` reloads what it changed. Failed or
+    /// stopped partway: `undo` rolls back what the app showed, and you're told.
+    private func track(_ id: String, _ pending: PendingTrade, _ sent: ForkSubmission, marks: TradeMarks, retry: TradeIntent?,
+                       undo: @escaping () -> Void, landed: @escaping () async -> Void) {
+        track(id, pending, marks: marks, retry: retry, undo: undo, landed: landed) { [weak self] in
+            sent.state == .pending ? await self?.watch(id) : sent
+        }
+    }
+
+    private func track(_ id: String, _ pending: PendingTrade, marks: TradeMarks, retry: TradeIntent?, undo: @escaping () -> Void,
+                       landed: @escaping () async -> Void, outcome: @escaping () async -> ForkSubmission?) {
+        marks.mark("accepted")
+        log.info("trade \(id, privacy: .public) accepted: \(marks.values.description, privacy: .public)")
+        pendingTrades[id] = pending
+        Task {
+            let end = await outcome()
+            let state = end?.state ?? .landed
+            switch state {
+            case .pending, .landed:
+                // Nil (the fork API lost track of it) reads the wallet instead: that is the truth.
+                pendingTrades[id]?.status = .landed
+                await landed()
+            case .failed, .incomplete:
+                let message = state == .incomplete
+                    ? end?.error?.message ?? "That trade stopped partway. Check Cash for what it bought."
+                    : pending.kind == .sale ? Self.saleFailed : Self.tradeFailed
+                withAnimation(.snappy) { undo() }
+                pendingTrades[id]?.status = state == .incomplete ? .incomplete(message) : .failed(message)
+                log.error("trade \(id, privacy: .public) \(state.rawValue, privacy: .public): \(end?.error?.code ?? "", privacy: .public)")
+                if !shownBySheet.contains(id) {
+                    tradeNotice = TradeNotice(message: message, retry: state == .failed ? retry : nil)
+                }
+                // Cash and positions as the chain has them now (a stopped split trade bought some).
+                await refreshCash()
+                await refreshPortfolio()
+            }
+            // Kept a while for a sheet that's still showing it.
+            try? await Task.sleep(for: .seconds(60))
+            pendingTrades[id] = nil
+        }
+    }
+
+    #if DEBUG
+    /// UI tests (`-mockTradeFails`): a mock trade that the "fork" accepts and then doesn't land, to
+    /// check what the app shows and rolls back.
+    static var mockTradesFail: Bool { ProcessInfo.processInfo.arguments.contains("-mockTradeFails") }
+
+    func mockFailingTrade(_ take: Take, side: Side, amount: Double) -> String {
+        let id = UUID().uuidString
+        balance -= amount
+        updateTake(take.id) { if side == .back { $0.backs += 1 } else { $0.fades += 1 } }
+        let undo = { [weak self] in
+            guard let self else { return }
+            self.balance += amount
+            self.updateTake(take.id) { if side == .back { $0.backs -= 1 } else { $0.fades -= 1 } }
+        }
+        track(id, PendingTrade(takeID: take.id, kind: .trade(side, amount: amount), status: .confirming), marks: TradeMarks(),
+              retry: TradeIntent(take: take, side: side), undo: undo, landed: {}) {
+            try? await Task.sleep(for: .milliseconds(400))
+            return ForkSubmission(state: .failed, error: .init(code: "simulation_failed", message: nil))
+        }
+        return id
+    }
+    #endif
+
+    static let tradeFailed = "That trade didn't go through. Nothing left your balance."
+    static let saleFailed = "That sale didn't go through. You still hold the position."
+
+    /// Long-polls a submitted build until it isn't pending (about two minutes at most). Nil when the
+    /// fork API doesn't know it, or never answered.
+    private func watch(_ id: String) async -> ForkSubmission? {
+        guard let fork else { return nil }
+        let deadline = Date.now.addingTimeInterval(120)
+        while Date.now < deadline {
+            do {
+                guard let s = try await fork.submission(id) else { return nil }
+                if s.state != .pending { return s }
+            } catch {
+                log.error("trade \(id, privacy: .public) status: \(error.localizedDescription, privacy: .public)")
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        return nil
     }
 
     /// Moves cash left on Phoenix back to your balance (closing positions left open first).
@@ -387,7 +555,7 @@ final class AppState {
 
     /// Mock data only: sells `amount` dollars of a position at today's price, or all of it when
     /// nil. The money goes back into your balance. Signed in, a sale is a full exit on the fork
-    /// (`quoteForkExit` / `confirmForkExit`).
+    /// (`prepareExit` / `commitExit`).
     @discardableResult
     func sell(_ position: OwnedPosition, amount: Double?) async throws -> SaleResult {
         guard let i = positions.firstIndex(where: { $0.id == position.id }) else {
@@ -1186,6 +1354,35 @@ extension View {
             }
         }
     }
+}
+
+/// A trade or sale the fork accepted (fork mode), while it confirms and once it ended.
+struct PendingTrade: Equatable {
+    enum Kind: Equatable {
+        case trade(Side, amount: Double)
+        case sale
+    }
+
+    enum Status: Equatable {
+        case confirming, landed
+        /// It didn't land: nothing changed (the message says so).
+        case failed(String)
+        /// A split trade that stopped partway: part of it bought.
+        case incomplete(String)
+    }
+
+    let takeID: String
+    let kind: Kind
+    var status: Status
+}
+
+/// A trade that didn't go through after its sheet closed (the banner), and the trade to try again.
+struct TradeNotice: Equatable, Identifiable {
+    let id = UUID()
+    let message: String
+    let retry: TradeIntent?
+
+    static func == (a: TradeNotice, b: TradeNotice) -> Bool { a.id == b.id }
 }
 
 /// The buy-in each posting take was posted with, so Retry (even after a relaunch) sends the same
