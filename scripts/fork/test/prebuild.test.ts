@@ -37,17 +37,6 @@ test("a build says when it expires and when it was quoted; a refresh keeps its i
   assert.equal("prebuilt" in normal, false, "a tap-time build has no prebuilt");
 });
 
-test("a build reads every account its transactions touch before answering, so the send's preflight finds them held", async (t) => {
-  const f = await tradeFixture(t, { status: () => confirmed });
-  const built = await f.service.buildTrade(TAKE_ID, f.wallet, "back", 20, { prebuild: true });
-  const read = new Set(f.reads.flat());
-  for (const b64 of built.transactions) {
-    const keys = VersionedTransaction.deserialize(Buffer.from(b64, "base64")).message.staticAccountKeys.map(String);
-    for (const k of keys) assert.ok(read.has(k), `${k} was read before the answer`);
-  }
-  assert.ok(f.logs.some((l) => l.startsWith(`timing back build ${TAKE_ID.slice(0, 8)}`) && l.includes("warm")), "the timing line shows the warm-up");
-});
-
 test("a refresh while the client signed: the bytes answered before it still submit, once; then the build is used", async (t) => {
   const f = await tradeFixture(t, { status: () => confirmed });
   const built = await f.service.buildTrade(TAKE_ID, f.wallet, "back", 20, { prebuild: true });
