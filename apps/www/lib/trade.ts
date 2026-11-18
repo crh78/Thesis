@@ -3,10 +3,12 @@
 // sends, and "You're in" shows once the fork has accepted the transactions; confirmation finishes
 // in the background and is watched here. A rare trade that doesn't confirm is rolled back on screen.
 //
-// Works against an older fork API too: one that ignores `prebuild` (no `expiresAt` on its builds)
-// gets no more early builds after the first, since each would count against the money limit; one
-// that ignores `until` answers /submit only once it's confirmed (no `status: "pending"`); one with
-// no /builds/:id/refresh answers 404, and the sheet builds again.
+// Works against an older fork API too. Early builds go on only once an early build's answer said
+// `prebuilt: true` (the API served it as a prebuild, its money action counted at submit); a fork API
+// that ignores `prebuild`, or can't defer its money action, answers without it and gets no more early
+// builds after the first (each would count against the money limit), so the tap builds as before.
+// One that ignores `until` answers /submit only once it's confirmed (no `status: "pending"`); one
+// with no /builds/:id/refresh answers 404, and the sheet builds again.
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { fork, ForkError, type Built, type Incomplete } from "./fork";
 
@@ -95,6 +97,11 @@ const EARLY = {
   idleMs: 180_000,
   /** An older fork API's builds last 55 s from the start of the build; this leaves a margin. */
   legacyTtlMs: 45_000,
+  /**
+   * A build is used for at most this long from when it was asked for, whatever its `expiresAt`
+   * says: that's the server's clock, and a phone's can be behind it (blockhashes last about 60 s).
+   */
+  maxLifeMs: 50_000,
   /** After a refused early build (busy, rate-limited), wait this long before another. */
   backoffMs: 20_000,
 };
@@ -103,6 +110,16 @@ const EARLY = {
 const REBUILD = new Set(["quote_stale", "build_gone", "build_expired"]);
 
 type Entry = { built: Built; receivedAt: number; expiresAt: number };
+
+/**
+ * Whether this fork API serves early builds as prebuilds: null until an early build answered,
+ * then true only if that answer said `prebuilt: true`. Shared by every sheet on the page, so an
+ * API that can't defer the money action gets a single early build per page load.
+ */
+let prebuildServed: boolean | null = null;
+/** When a build asked for at `startedAt` (Date.now()) stops being used. */
+export const usableUntil = (built: Built, startedAt: number) =>
+  Math.min(built.expiresAt ?? startedAt + EARLY.legacyTtlMs, startedAt + EARLY.maxLifeMs);
 /** What a tap signs: `at` is when the build was there (performance.now(), before the tap when early). */
 export type Taken = { built: Built; at: number; early: boolean; expiresAt: number };
 
@@ -124,8 +141,6 @@ export function useEarlyBuild(opts: {
   live.current = opts;
   const cache = useRef(new Map<string, Entry>());
   const flying = useRef(new Map<string, Promise<Entry | null>>());
-  // null until the first build says: true when the fork API takes `prebuild` (its builds carry expiresAt).
-  const supported = useRef<boolean | null>(null);
   const current = useRef<string | null>(null);
   // Bumped by reset(): an early build that comes back after it is dropped.
   const gen = useRef(0);
@@ -141,7 +156,7 @@ export function useEarlyBuild(opts: {
   }, []);
 
   const fresh = (e: Entry | null | undefined, leftMs: number): e is Entry => !!e && e.expiresAt - Date.now() > leftMs;
-  const entryOf = (built: Built, startedAt: number): Entry => ({ built, receivedAt: Date.now(), expiresAt: built.expiresAt ?? startedAt + EARLY.legacyTtlMs });
+  const entryOf = (built: Built, startedAt: number): Entry => ({ built, receivedAt: Date.now(), expiresAt: usableUntil(built, startedAt) });
 
   // Refreshes the current key's build 15 s before it runs out, while the page is visible and the
   // sheet was touched in the last 3 minutes. An older API's builds can't be refreshed.
@@ -150,7 +165,7 @@ export function useEarlyBuild(opts: {
     refreshTimer.current = null;
     const key = current.current;
     const entry = key ? cache.current.get(key) : null;
-    if (!key || !entry || !supported.current) return;
+    if (!key || !entry || !prebuildServed) return;
     refreshTimer.current = window.setTimeout(() => {
       refreshTimer.current = null;
       if (!live.current.ready || document.visibilityState !== "visible") return;
@@ -164,10 +179,11 @@ export function useEarlyBuild(opts: {
   const early = useCallback(async (key: string, refreshOf?: Entry) => {
     const o = live.current;
     if (!o.ready || flying.current.has(key) || Date.now() < backoffUntil.current) return;
-    // An older API counts every build against the wallet's money limit: only the first is early.
-    if (supported.current === false) return;
+    // An API that doesn't serve prebuilds counts every build against the wallet's money limit:
+    // only the first is early.
+    if (prebuildServed === false) return;
     // Until the first answer says which API this is, one early build at a time.
-    if (supported.current === null && flying.current.size) return;
+    if (prebuildServed === null && flying.current.size) return;
     const g = gen.current;
     const startedAt = Date.now();
     const job = (async (): Promise<Entry | null> => {
@@ -183,7 +199,7 @@ export function useEarlyBuild(opts: {
           }
         }
         built ??= await o.make(key, true);
-        supported.current = built.expiresAt != null;
+        prebuildServed = built.prebuilt === true;
         if (g !== gen.current) return null;
         const entry = entryOf(built, startedAt);
         cache.current.set(key, entry);
@@ -244,7 +260,6 @@ export function useEarlyBuild(opts: {
     }
     const startedAt = Date.now();
     const built = await live.current.make(key, false);
-    supported.current ??= built.expiresAt != null;
     return { built, at: performance.now(), early: false, expiresAt: entryOf(built, startedAt).expiresAt };
   }, [schedule]);
 

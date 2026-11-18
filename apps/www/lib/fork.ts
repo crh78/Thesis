@@ -10,10 +10,12 @@ import { useSignMessage, useSignTransaction, useWallets } from "@privy-io/react-
 /**
  * `phoenixCashOut`: a sale that closed Phoenix legs; their cash comes back with `cashOutPhoenix`.
  * `closesTake` (sales only): this is the author selling their buy-in, which closes the take.
- * `expiresAt` / `quotedAt` (unix ms): when the build's blockhash runs out, and when its quote was
- * made. An older fork API sends neither (its builds last about a minute and can't be refreshed).
+ * `expiresAt` / `quotedAt` (unix ms, the server's clock): when the build's blockhash runs out, and
+ * when its quote was made. An older fork API sends neither (its builds last about a minute and can't
+ * be refreshed). `prebuilt`: the API served a `prebuild: true` request as a prebuild (its money
+ * action counts at submit); without it the request was a normal build.
  */
-export type Built = { buildId: string; transactions: string[]; feeUsd?: number; phoenixCashOut?: boolean; closesTake?: boolean; expiresAt?: number; quotedAt?: number };
+export type Built = { buildId: string; transactions: string[]; feeUsd?: number; phoenixCashOut?: boolean; closesTake?: boolean; expiresAt?: number; quotedAt?: number; prebuilt?: boolean };
 
 export type PortfolioPosition = {
   address: string;
