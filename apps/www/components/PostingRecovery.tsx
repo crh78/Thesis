@@ -32,9 +32,11 @@ const age = (t: Take) => Date.now() - new Date(t.created_at).getTime();
 /**
  * One posting take. Young ones (under ~2 minutes) say "Posting…" and check themselves once they're
  * old enough; `failed` starts on "Didn't post" (the launch check already asked the fork API).
- * `onChanged` reloads the list (it went live or was discarded).
+ * `onChanged` reloads the list (it went live or was discarded). `stoppedAbove`: Me already shows
+ * this take's stopped buy-in as a card at the top, so the row points there instead of drawing a
+ * second card, and checks the take again once that card is sorted out.
  */
-export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: boolean; onChanged: () => void }) {
+export function PostingRow({ take, failed, stoppedAbove, onChanged }: { take: Take; failed?: boolean; stoppedAbove?: boolean; onChanged: () => void }) {
   const { social } = useSession();
   const { address, wallet, signAndSubmit } = useForkWallet();
   const [state, setState] = useState<State>(failed ? { kind: "failed", message: DIDNT } : { kind: "posting" });
@@ -69,6 +71,16 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
     // Once per take.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [take.id]);
+
+  // Me's card above finished it or swapped it back: see where the take stands now.
+  const wasAbove = useRef(!!stoppedAbove);
+  useEffect(() => {
+    if (wasAbove.current && !stoppedAbove) check();
+    wasAbove.current = !!stoppedAbove;
+    // Only when the card above goes away.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stoppedAbove]);
+  const above = !!stoppedAbove && state.kind !== "working";
 
   // Retry with the stored buy-in; without one (posted on another device), the minimum.
   useEffect(() => {
@@ -115,7 +127,8 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
   }
 
   const status =
-    state.kind === "failed" ? <><b className="down">Didn&apos;t post</b> · {state.message}</>
+    above ? <><b className="down">Buy-in didn&apos;t finish</b> · finish it or swap it back with the card at the top</>
+    : state.kind === "failed" ? <><b className="down">Didn&apos;t post</b> · {state.message}</>
     : state.kind === "unconfirmed" ? <><b>On-chain, not showing yet</b> · your buy-in landed</>
     : state.kind === "unknown" ? <><b>Couldn&apos;t check</b> · whether your buy-in landed. Try again.</>
     : state.kind === "working" ? <><b className="muted">{state.text}</b></>
@@ -130,7 +143,7 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
       <div className="item-main">
         <div className="item-claim">{take.claim}</div>
         {status ? <div className="note">{status}</div> : null}
-        {state.kind === "stopped" && address ? (
+        {above ? null : state.kind === "stopped" && address ? (
           <div className="phx-card">
             <StoppedTrade card address={address} trade={state.trade} retry={state.retry} signAndSubmit={signAndSubmit}
               onDone={(text, outcome) => {
@@ -141,22 +154,22 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
               }} />
           </div>
         ) : null}
-        {state.kind === "failed" ? (
+        {!above && state.kind === "failed" ? (
           <div className="posting-actions">
             <button className="pill small" onClick={retry}>Retry with {money(buyIn).replace(/\.00$/, "")}</button>
             <button className="pill small down" onClick={() => set({ kind: "confirmDiscard" })}>Discard</button>
           </div>
         ) : null}
-        {state.kind === "confirmDiscard" ? (
+        {!above && state.kind === "confirmDiscard" ? (
           <div className="posting-actions">
             <button className="pill small down" onClick={discard}>Discard</button>
             <button className="pill small" onClick={() => set({ kind: "failed", message: DIDNT })}>Keep it</button>
           </div>
         ) : null}
-        {state.kind === "unknown" ? (
+        {!above && state.kind === "unknown" ? (
           <div className="posting-actions"><button className="pill small" onClick={check}>Try again</button></div>
         ) : null}
-        {state.kind === "unconfirmed" ? (
+        {!above && state.kind === "unconfirmed" ? (
           <div className="posting-actions"><button className="pill small" onClick={wait}>Check again</button></div>
         ) : null}
       </div>

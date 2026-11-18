@@ -287,7 +287,7 @@ export default function MePage() {
         {tab === "takes" ? (
           takes.length ? takes.map((t) => (
             t.posting ? (
-              <PostingRow key={t.id} take={t} onChanged={loadSocial} />
+              <PostingRow key={t.id} take={t} stoppedAbove={stopped.some((s) => s.takeId === t.id)} onChanged={loadSocial} />
             ) : (
               <Link key={t.id} href={`/t/${t.id}`} className="item">
                 {/* eslint-disable-next-line @next/next/no-img-element */}

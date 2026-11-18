@@ -90,7 +90,7 @@ Surfpool's `surfnet_writeProgram` writes the ELF straight into the program's acc
 
 ## Pointing surfaces at the fork
 
-- **Apps** talk to the fork API, not the RPC: iOS through `FORK_API_URL` in `apps/ios/Config/Fork.local.xcconfig` ([`apps/ios/README.md`](../../apps/ios/README.md#fork-mode-dogfooding-on-the-mainnet-fork)), the web app through `FORK_API_URL` on its server.
+- **Apps** talk to the fork API, not the RPC: iOS through `FORK_API_URL` in `apps/ios/Config/Fork.local.xcconfig` ([`apps/ios/README.md`](../../apps/ios/README.md#the-fork)), the web app through `FORK_API_URL` on its server.
 - **Anything that reads Solana directly** should use `SOLANA_RPC_URL` / `SOLANA_WS_URL` (browser: `NEXT_PUBLIC_SOLANA_RPC_URL`), so one switch moves it. Local Supabase functions run in Docker: use `http://host.docker.internal:18899`. Program ID and USDC mint are the mainnet ones, so there are no fork-specific code paths.
 - **Privy:** embedded wallets are ordinary addresses (`fork:fund` works). Sign with the embedded wallet (`signTransaction`, which doesn't send) and send through the fork API or fork RPC. Never broadcast through Privy's server-side `signAndSendTransaction` with a mainnet CAIP-2 ID: it sends to Privy's mainnet RPC.
 
