@@ -499,10 +499,13 @@ final class AppState {
 
     #if DEBUG
     /// UI tests (`-mockTradeFails`): a mock trade that the "fork" accepts and then doesn't land, to
-    /// check what the app shows and rolls back.
-    static var mockTradesFail: Bool { ProcessInfo.processInfo.arguments.contains("-mockTradeFails") }
+    /// check what the app shows and rolls back. `-mockTradeFailsLate`: it fails after the sheet
+    /// has closed (the banner's turn).
+    static var mockTradesFail: Bool { mockTradesFailLate || ProcessInfo.processInfo.arguments.contains("-mockTradeFails") }
+    private static var mockTradesFailLate: Bool { ProcessInfo.processInfo.arguments.contains("-mockTradeFailsLate") }
 
     func mockFailingTrade(_ take: Take, side: Side, amount: Double) -> String {
+        let delay: Duration = Self.mockTradesFailLate ? .seconds(4) : .milliseconds(800)
         let id = UUID().uuidString
         balance -= amount
         updateTake(take.id) { if side == .back { $0.backs += 1 } else { $0.fades += 1 } }
@@ -513,7 +516,7 @@ final class AppState {
         }
         track(id, PendingTrade(takeID: take.id, kind: .trade(side, amount: amount), status: .confirming), marks: TradeMarks(),
               retry: TradeIntent(take: take, side: side), undo: undo, landed: {}) {
-            try? await Task.sleep(for: .milliseconds(400))
+            try? await Task.sleep(for: delay)
             return ForkSubmission(state: .failed, error: .init(code: "simulation_failed", message: nil))
         }
         return id

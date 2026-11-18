@@ -96,7 +96,7 @@ The free build shows local alerts when the app checks the inbox (on activation o
 
 Debug builds accept `-screen <name>`: `feed`, `search`, `scores`, `me`, `take`, `back`, `fade`, `comments`, `create`, `building`, `basket`. These skip sign-in.
 
-Onboarding screens with stubbed actions (no network): `welcome`, `email`, `handle`, `location`. Pass `-skipAuth` to go straight to the app on mock data. Add `-mockTradeFails` to make mock trades get accepted and then not land, to see the rollback.
+Onboarding screens with stubbed actions (no network): `welcome`, `email`, `handle`, `location`. Pass `-skipAuth` to go straight to the app on mock data. Add `-mockTradeFails` to make mock trades get accepted and then not land, to see the rollback (`-mockTradeFailsLate`: after the sheet has closed, to see the banner).
 
 ```sh
 xcrun simctl launch booted xyz.yourthesis.app.dev -screen take

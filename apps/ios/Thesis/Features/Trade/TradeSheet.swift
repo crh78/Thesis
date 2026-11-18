@@ -376,7 +376,7 @@ struct TradeSheet: View {
             try await app.trade(take, side: side, amount: amount)
             youreIn = true
             placed.toggle()
-            try? await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(for: .seconds(1))
             dismiss()
         } catch {
             failure = CashErrorText.message(for: error)

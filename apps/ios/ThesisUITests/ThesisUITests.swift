@@ -60,32 +60,41 @@ final class ThesisUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Traded"].waitForExistence(timeout: 5), "The trade shows in activity")
     }
 
-    func testTradeShowsYoureInThenCloses() {
-        onScreen(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Trade"))).tap()
-        XCTAssertTrue(app.staticTexts["Trade Jake's take"].waitForExistence(timeout: 5))
-        button(startingWith: "Trade for $20").tap()
-        XCTAssertTrue(app.buttons["trade-youre-in"].waitForExistence(timeout: 3), "The sheet says the trade is placed")
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["Trade Jake's take"])
-        waitForExpectations(timeout: 5)
-    }
-
-    /// A trade the fork accepts but that doesn't land (`-mockTradeFails`): the sheet says so, offers
-    /// Try again, and the balance comes back.
-    func testTradeThatDoesntLandRollsBack() {
+    /// Relaunches with a mock trade that's accepted and then doesn't land, and opens the Trade sheet.
+    private func openTradeSheetThatFails(_ flag: String) {
         app.terminate()
-        app.launchArguments += ["-mockTradeFails"]
+        app.launchArguments += [flag]
         app.launch()
         XCTAssertTrue(app.staticTexts["thesis"].waitForExistence(timeout: 10), "Feed should load")
         onScreen(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Trade"))).tap()
         XCTAssertTrue(app.staticTexts["Trade Jake's take"].waitForExistence(timeout: 5))
         app.buttons["$50"].tap()
+    }
+
+    /// Accepted, then it doesn't land while the sheet is still open (`-mockTradeFails`): the sheet
+    /// says so, offers Try again, and the balance comes back.
+    func testTradeThatDoesntLandRollsBack() {
+        openTradeSheetThatFails("-mockTradeFails")
         button(startingWith: "Trade for $50").tap()
-        XCTAssertTrue(app.buttons["trade-youre-in"].waitForExistence(timeout: 3), "Placed as soon as it's accepted")
         XCTAssertTrue(element(containing: "That trade didn't go through. Nothing left your balance.").waitForExistence(timeout: 5))
         XCTAssertTrue(button(startingWith: "Try again").exists, "Offers another try")
         XCTAssertTrue(element(containing: "$132.40 left").exists, "The $50 is back: $182.40 − $50 left after another try")
         app.buttons["Close"].tap()
         XCTAssertTrue(app.buttons["Balance $182.40. Add cash"].waitForExistence(timeout: 5), "Nothing left the balance")
+    }
+
+    /// Shown as placed, the sheet closes, and then it doesn't land (`-mockTradeFailsLate`): a banner
+    /// says so, the balance comes back, and Try again opens the sheet again.
+    func testTradeThatFailsAfterTheSheetClosedShowsABanner() {
+        openTradeSheetThatFails("-mockTradeFailsLate")
+        button(startingWith: "Trade for $50").tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["Trade Jake's take"])
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(element(containing: "That trade didn't go through. Nothing left your balance.").waitForExistence(timeout: 8),
+                      "The banner says it didn't land")
+        XCTAssertTrue(app.buttons["Balance $182.40. Add cash"].waitForExistence(timeout: 5), "Nothing left the balance")
+        app.buttons["trade-notice-retry"].tap()
+        XCTAssertTrue(app.staticTexts["Trade Jake's take"].waitForExistence(timeout: 5), "Try again opens the sheet")
     }
 
     func testTradeAmountOverBalanceOffersAddCash() {
