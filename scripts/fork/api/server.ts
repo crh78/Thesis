@@ -1,8 +1,11 @@
 // HTTP in front of ForkService. JSON in and out; errors are { error, message } with a status.
 //
 //   GET  /health
-//   GET  /takes/:id?viewer=<wallet>                 the on-chain receipt (or what would be on-chain)
-//   POST /takes/:id/trades   { owner, side, usd }   → { buildId, transactions[], included, excluded, feeUsd }
+//   GET  /takes/:id?viewer=<wallet>                 the on-chain receipt (or what would be on-chain): status
+//                                                     open | closed (its author sold) | settled, closedAt
+//   POST /takes/:id/trades   { owner, side, usd }   → { buildId, transactions[], included, excluded, feeUsd };
+//                                                     409 take_closed once the take isn't open
+//   POST /takes/:id/positions/:pos/exit  { owner }  → a sale's build, with closesTake (the author's buy-in)
 //   POST /takes/:id/publish  { author, usd }        → same, for posting an app take with the author's buy-in
 //   POST /takes/:id/confirm                         → { onChain, take?, relayed }: is the author's publish
 //                                                     on-chain here? If so, its events go to the backend again

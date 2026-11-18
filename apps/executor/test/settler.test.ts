@@ -6,7 +6,7 @@ import { LEG_KIND, FADE_VIA, type ExitAccount, type PositionAccount, type Profil
 import { underlyingIdHex } from "@thesis/venues/bank";
 import { canonicalJson, sourceHash } from "../src/settler/audit.ts";
 import { staticBankIndex } from "../src/settler/bank.ts";
-import { boughtTokens, earnedBadges, missingLegs, pricedMask, settleReady } from "../src/settler/crank.ts";
+import { boughtTokens, earnedBadges, missingLegs, pricedMask, settleReady, takeSettleReady } from "../src/settler/crank.ts";
 import { AlpacaStocks, JupiterPrices } from "../src/settler/sources.ts";
 import { pack, type Item } from "../src/settler/tx.ts";
 
@@ -72,6 +72,45 @@ test("sold positions settle on their sale prices, before the take; the author's 
   const buyIn = position({ id: new BN(0), owner: author });
   assert.equal(settleReady(open, buyIn, exit(0b0001), 6_000, delay), "waiting_for_take");
   assert.equal(settleReady(settled, buyIn, exit(0b0001), 10_050, delay), "ready");
+});
+
+test("the author's sale closes the take: it settles on the sale, held positions run to the horizon", () => {
+  const author = Keypair.generate().publicKey;
+  const base = { ...take, author, horizonEnd: new BN(10_000), closedAt: new BN(0) };
+  const open = { ...base, status: { open: {} } } as unknown as TakeAccount;
+  const closed = { ...base, closedAt: new BN(5_000), status: { closed: {} } } as unknown as TakeAccount;
+  const settled = { ...closed, status: { settled: {} } } as unknown as TakeAccount;
+  const buyIn = { id: new BN(0), owner: author, legsMask: 0b0001, entrySet: 0b0001, exitSet: 0 } as unknown as PositionAccount;
+  const exit = (priceSet: number) => ({ exitedAt: new BN(5_000), priceSet }) as unknown as ExitAccount;
+  const delay = 100;
+
+  // Open: due at the horizon, on the buy-in's horizon prices.
+  assert.equal(takeSettleReady(open, buyIn, null, 9_999, delay), "not_due");
+  assert.equal(takeSettleReady(open, buyIn, null, 10_050, delay), "waiting_for_prices");
+  assert.equal(takeSettleReady(open, { ...buyIn, exitSet: 0b0001 } as PositionAccount, null, 10_050, delay), "ready");
+  assert.equal(takeSettleReady(open, buyIn, null, 10_101, delay), "ready");
+  // Closed: due at once, on the sale's prices, or at 0% once the grace period after the sale is over.
+  assert.equal(takeSettleReady(closed, buyIn, exit(0), 5_050, delay), "waiting_for_prices");
+  assert.equal(takeSettleReady(closed, buyIn, exit(0b0001), 5_050, delay), "ready");
+  assert.equal(takeSettleReady(closed, buyIn, exit(0), 5_101, delay), "ready");
+  // The take's own closedAt stands in while the exit account can't be read.
+  assert.equal(takeSettleReady(closed, buyIn, null, 5_050, delay), "waiting_for_prices");
+  assert.equal(takeSettleReady(closed, buyIn, null, 5_101, delay), "ready");
+  assert.equal(takeSettleReady(settled, buyIn, exit(0b0001), 5_050, delay), "not_due");
+
+  // After the early settlement: a held backer runs on quietly until the horizon, then waits for
+  // its horizon prices; a seller settles on the sale.
+  const backer = { id: new BN(1), owner: Keypair.generate().publicKey, legsMask: 0b0001, entrySet: 0b0001, exitSet: 0 } as unknown as PositionAccount;
+  assert.equal(settleReady(closed, backer, null, 6_000, delay), "waiting_for_take");
+  assert.equal(settleReady(settled, backer, null, 6_000, delay), "running");
+  assert.equal(settleReady(settled, backer, null, 10_050, delay), "waiting_for_prices");
+  assert.equal(settleReady(settled, { ...backer, exitSet: 0b0001 } as PositionAccount, null, 10_050, delay), "ready");
+  const sold = (priceSet: number) => ({ exitedAt: new BN(7_000), priceSet }) as unknown as ExitAccount;
+  assert.equal(settleReady(settled, backer, sold(0), 7_050, delay), "waiting_for_prices");
+  assert.equal(settleReady(settled, backer, sold(0b0001), 7_050, delay), "ready");
+  // The author's sold buy-in settles once the take has.
+  assert.equal(settleReady(closed, buyIn, exit(0b0001), 5_050, delay), "waiting_for_take");
+  assert.equal(settleReady(settled, buyIn, exit(0b0001), 5_050, delay), "ready");
 });
 
 test("badges mirror the program's catalog", () => {

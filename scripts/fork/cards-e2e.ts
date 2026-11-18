@@ -17,6 +17,7 @@ import type { AppTake } from "./api/service.ts";
 import { startForkService } from "./api.ts";
 import { loadBankState } from "@thesis/venues/bank";
 import { main, syncClock } from "./lib.ts";
+import { TAKE_LIFETIME_SECS } from "@thesis/chain";
 
 const CARD = process.env.CARDS_E2E_CARD ?? Object.values((await loadBankState()).venues.cards?.picked ?? {}).find((c) => c.insuredValueUsd)?.cardId;
 if (!CARD) throw new Error("No card to trade: set CARDS_E2E_CARD, or build a take with a card so the asset bank tracks one.");
@@ -24,7 +25,7 @@ const TAKE: AppTake = {
   id: randomUUID(),
   claim: "Cards e2e: graded Pokémon keep climbing",
   risk: "medium",
-  settles_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+  settles_at: new Date(Date.now() + TAKE_LIFETIME_SECS * 1000).toISOString(),
   author: { handle: "cards-e2e" },
   legs: [
     { name: "NVIDIA", kind: "Stock", weight: 80, fade_how: "Bets the stock falls", asset_id: "jup:Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh" },

@@ -17,7 +17,11 @@ export function getJson(url: string, headers: Record<string, string> = {}): Prom
 
 // --- What's open -------------------------------------------------------------------------------
 
-export type OpenTake = { id: string; created_at: string; settles_at: string; legs: Leg[] };
+/**
+ * `frozen`: the author has sold (the take closed, or settled on that sale). Its headline and pick
+ * marks stay at the sale; only positions still open on it are marked.
+ */
+export type OpenTake = { id: string; created_at: string; settles_at: string; legs: Leg[]; frozen: boolean };
 
 export class Db {
   url: string;
@@ -32,18 +36,24 @@ export class Db {
     return getJson(`${this.url}/rest/v1/${path}`, this.#h);
   }
 
-  /** Takes still running (before their horizon, not settled on chain), with their picks. */
+  /** False until a read shows chain_takes has closed_at (the author's sale). */
+  hasClosedColumn = true;
+
+  /**
+   * Takes before their horizon, with their picks. Takes closed by their author's sale, or settled
+   * on it, come back `frozen`: backers and faders who haven't sold keep running on them.
+   */
   async openTakes(limit = 500): Promise<OpenTake[]> {
     const now = new Date().toISOString();
     const takes: { id: string; created_at: string; settles_at: string }[] = await this.get(`takes?select=id,created_at,settles_at&settles_at=gt.${now}&order=created_at.desc&limit=${limit}`);
     if (!takes.length) return [];
     const ids = takes.map((t) => t.id);
-    const settled = new Set<string>();
+    const frozen = new Set<string>();
     const legs: (Leg & { take_id: string })[] = [];
     const cols = "take_id,idx,name,kind,weight,asset_id,ret_pct";
     for (let i = 0; i < ids.length; i += 80) {
       const chunk = ids.slice(i, i + 80).join(",");
-      for (const c of await this.get(`chain_takes?select=take_id,settled&take_id=in.(${chunk})`)) if (c.settled) settled.add(c.take_id);
+      for (const c of await this.chainTakes(chunk)) if (c.settled || c.closed_at) frozen.add(c.take_id);
       let rows: any[];
       try {
         rows = await this.get(`take_legs?select=${cols},base_price,base_at,base_source,mark_price&take_id=in.(${chunk})&order=take_id,idx`);
@@ -61,7 +71,20 @@ export class Db {
       list.push(l);
       byTake.set(l.take_id, list);
     }
-    return takes.filter((t) => !settled.has(t.id)).map((t) => ({ ...t, legs: byTake.get(t.id) ?? [] }));
+    return takes.map((t) => ({ ...t, legs: byTake.get(t.id) ?? [], frozen: frozen.has(t.id) }));
+  }
+
+  /** Takes' chain state; before the migration that adds closed_at, without it. */
+  async chainTakes(chunk: string): Promise<{ take_id: string; settled: boolean; closed_at?: string | null }[]> {
+    if (this.hasClosedColumn) {
+      try {
+        return await this.get(`chain_takes?select=take_id,settled,closed_at&take_id=in.(${chunk})`);
+      } catch (e) {
+        if (!/column|42703|PGRST/.test(String(e))) throw e;
+        this.hasClosedColumn = false;
+      }
+    }
+    return this.get(`chain_takes?select=take_id,settled&take_id=in.(${chunk})`);
   }
 
   async securities(ids: string[]): Promise<Map<string, Security>> {

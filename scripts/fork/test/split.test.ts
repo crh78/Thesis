@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import BN from "bn.js";
 import { Keypair, PublicKey, TransactionInstruction, VersionedTransaction, type Connection } from "@solana/web3.js";
-import { THESIS_PROGRAM_ID, thesisProgram, ticketAddress } from "@thesis/chain";
+import { THESIS_PROGRAM_ID, thesisProgram, ticketAddress, TAKE_LIFETIME_SECS } from "@thesis/chain";
 import { emptyState } from "../../../packages/venues/bank/src/state.ts";
 import type { GeminiContract } from "@thesis/venues/gemini";
 import { ApiError, base58, type AppTake, type IncompleteTrade } from "../api/common.ts";
@@ -192,7 +192,7 @@ async function fixture(t: TestContext, o: {
     id: TAKE_ID,
     claim: "Chips keep going up",
     risk: "medium",
-    settles_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    settles_at: new Date(Date.now() + TAKE_LIFETIME_SECS * 1000).toISOString(),
     status: "posting",
     author: { handle: "someone" },
     author_wallet: owner.publicKey.toBase58(),

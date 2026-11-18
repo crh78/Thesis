@@ -1,9 +1,12 @@
 // The settler crank. Each tick:
 //   1. signs entry prices for positions that lack them, sale prices for positions their owners
-//      sold, and exit prices once a take's horizon has passed (pricing.ts decides which price);
-//   2. settles takes whose author prices are in (or whose grace period has passed);
+//      sold, and exit prices for held positions once a take's horizon has passed (pricing.ts
+//      decides which price);
+//   2. settles takes whose author prices are in (or whose grace period has passed): a closed take
+//      (its author sold) on the author's sale prices, an open one at its horizon;
 //   3. settles each position that's ready, which closes it and refunds its rent: a sold one as
-//      soon as its sale prices are in, the rest (and the author's buy-in) once their take settles;
+//      soon as its sale prices are in, the author's buy-in once its take settles, and a held one
+//      once its take has settled and the horizon's prices are in;
 //   4. mints any badge an author has earned but doesn't hold yet.
 // Steps 2-4 need no settler signature; the settler key just pays for them. What each tick loads
 // comes from open-set.ts: the open positions the database lists, with a full scan every 10 minutes.
@@ -86,30 +89,60 @@ export function missingLegs(take: TakeAccount, p: PositionAccount, moment: Momen
   return take.legs.map((_, i) => i).filter((i) => need & (1 << i));
 }
 
-/** The author's buy-in: it sets the take's headline, so it always takes horizon prices. */
+/** The author's buy-in: it sets the take's headline, so it settles only after its take. */
 const isAuthorBuyIn = (take: TakeAccount, p: PositionAccount) => p.id.isZero() && p.owner.equals(take.author);
 
-/** Whether `settle_position` will accept this position now. Mirrors the program. */
+/**
+ * Whether `settle_position` will accept this position now. Mirrors the program. "running": a
+ * held position on a take that settled early (its author sold), which runs on until its owner
+ * sells or the horizon passes; nothing to wait for or report.
+ */
 export function settleReady(
   take: TakeAccount,
   p: PositionAccount,
   exit: ExitAccount | null,
   now: number,
   maxDelay: number,
-): "ready" | "waiting_for_take" | "waiting_for_prices" {
+): "ready" | "running" | "waiting_for_take" | "waiting_for_prices" {
   if ((!exit || isAuthorBuyIn(take, p)) && !("settled" in take.status)) return "waiting_for_take";
+  if (!exit && now < take.horizonEnd.toNumber()) return "running";
   const scoreAt = exit ? "sale" : "exit";
   const from = exit ? exit.exitedAt.toNumber() : take.horizonEnd.toNumber();
   const priced = !missingLegs(take, p, "entry").length && !missingLegs(take, p, scoreAt, exit).length;
   return priced || now > from + maxDelay ? "ready" : "waiting_for_prices";
 }
 
+/**
+ * Whether `settle_take` will accept this take now. Mirrors the program: a closed take (its author
+ * sold) settles on the author's sale prices, an open one at its horizon on the buy-in's horizon
+ * prices; either at 0% once the grace period after the sale (or the horizon) has passed.
+ * "not_due": an open take before its horizon, or one already settled. With no author's buy-in
+ * read, the program decides ("ready").
+ */
+export function takeSettleReady(
+  take: TakeAccount,
+  author: PositionAccount | undefined,
+  authorExit: ExitAccount | null,
+  now: number,
+  maxDelay: number,
+): "ready" | "not_due" | "waiting_for_prices" {
+  if ("settled" in take.status) return "not_due";
+  const closed = "closed" in take.status;
+  if (!closed && now < take.horizonEnd.toNumber()) return "not_due";
+  if (!author) return "ready";
+  const scoreAt = closed ? "sale" : "exit";
+  const from = closed ? (authorExit?.exitedAt ?? take.closedAt).toNumber() : take.horizonEnd.toNumber();
+  const priced = (!closed || authorExit != null) && !missingLegs(take, author, "entry").length && !missingLegs(take, author, scoreAt, authorExit).length;
+  return priced || now > from + maxDelay ? "ready" : "waiting_for_prices";
+}
+
 /** The moments this position still needs prices for, and when each is. */
 function priceMoments(take: TakeAccount, p: PositionAccount, exit: ExitAccount | null, now: number): [Moment, number][] {
   const out: [Moment, number][] = [["entry", p.openedAt.toNumber()]];
+  // A sold position scores on its sale (the author's buy-in too: it sets the take's headline),
+  // so only held positions need horizon prices.
   if (exit) out.push(["sale", exit.exitedAt.toNumber()]);
-  // A sold position scores on its sale, so only the author's buy-in still needs horizon prices.
-  if (now >= take.horizonEnd.toNumber() && (!exit || isAuthorBuyIn(take, p))) out.push(["exit", take.horizonEnd.toNumber()]);
+  else if (now >= take.horizonEnd.toNumber()) out.push(["exit", take.horizonEnd.toNumber()]);
   return out;
 }
 
@@ -239,19 +272,22 @@ export class Settler {
     }
     const prices = await sendAll(connection, this.#o.settler, priceItems);
 
-    // 2. Takes.
-    ({ positions, takes } = await this.#load(false));
-    const byKey = new Map(positions.map((p) => [p.publicKey.toBase58(), p.account]));
-    const horizonPriced = (take: TakeAccount, p: PositionAccount) =>
-      !missingLegs(take, p, "entry").length && !missingLegs(take, p, "exit").length;
+    // 2. Takes: closed ones (the author sold) on the sale, open ones at their horizon.
+    ({ positions, takes, exits } = await this.#load(false));
+    const authorOf = new Map<string, Keyed<PositionAccount>>();
+    for (const p of positions) {
+      const take = takes.get(p.account.take.toBase58());
+      if (take && isAuthorBuyIn(take, p.account)) authorOf.set(p.account.take.toBase58(), p);
+    }
     const takeItems: Item[] = [];
     const takeAuthors = new Map<string, PublicKey>();
     for (const [key, take] of takes) {
-      if (!("open" in take.status) || now < take.horizonEnd.toNumber()) continue;
-      const authorPos = [...byKey.values()].find((p) => p.take.toBase58() === key && p.owner.equals(take.author) && p.id.isZero());
-      const graceOver = now > take.horizonEnd.toNumber() + maxDelay;
-      if (authorPos && !horizonPriced(take, authorPos) && !graceOver) {
-        waiting.push(`take ${key}: waiting for the author's prices`);
+      const author = authorOf.get(key);
+      const authorExit = author ? (exits.get(author.publicKey.toBase58()) ?? null) : null;
+      const ready = takeSettleReady(take, author?.account, authorExit, now, maxDelay);
+      if (ready === "not_due") continue;
+      if (ready === "waiting_for_prices") {
+        waiting.push(`take ${key}: waiting for the author's ${"closed" in take.status ? "sale " : ""}prices`);
         continue;
       }
       takeItems.push({
@@ -273,7 +309,7 @@ export class Settler {
       if (!take) continue;
       const exit = exits.get(publicKey.toBase58()) ?? null;
       const ready = settleReady(take, p, exit, now, maxDelay);
-      if (ready === "waiting_for_take") continue;
+      if (ready === "waiting_for_take" || ready === "running") continue;
       if (ready === "waiting_for_prices") {
         waiting.push(`position ${publicKey}: waiting for ${exit ? "sale prices" : "prices"}`);
         continue;

@@ -1,7 +1,8 @@
 // pnpm fork:settler-e2e — the settler's whole job on the fork, with made-up prices.
 //
-// Posts a two-leg take (NVDA 60%, SPY 40%) with a one-hour horizon and backs it, each buying the
-// legs' issuer tokens through Jupiter (a receipt needs a real trade behind it), then runs the
+// Posts a two-leg take (NVDA 60%, SPY 40%) whose author never sells, so it runs its full year, and
+// backs it, each buying the legs' issuer tokens through Jupiter (a receipt needs a real trade
+// behind it), then runs the
 // settler crank: entry prices and the "first take" badge, a time jump past the horizon, then
 // exit prices, settlement of the take and its positions, and the "+50%" badge. Entry prices are
 // the tokens' real Jupiter prices (the settler checks the tokens received are worth the stake);
@@ -16,12 +17,13 @@
 // With SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY set and the fork relay running, the settler reads
 // its open positions from chain_positions (the Stream's table) only, with no program scan at all,
 // so the database path is what settles everything. Without them it scans, as before.
-// Needs the asset bank and moves the fork's clock days ahead, so it refuses to start without
+// Needs the asset bank and moves the fork's clock a year ahead, so it refuses to start without
 // `--move-clock` (the shared fork is public): run it only with the fork maintainer's OK, then restart the fork.
 import BN from "bn.js";
 import { TOKEN_2022_PROGRAM_ID, getTokenMetadata } from "@solana/spl-token";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import {
+  TAKE_LIFETIME_SECS,
   AUTHOR_POSITION_ID,
   FADE_VIA,
   LEG_KIND,
@@ -55,8 +57,9 @@ const BASKET: BasketLeg[] = [
   { key: "etf:US:SPY", weightBps: 4_000, kind: "spot" },
 ];
 
-// The program allows 1 hour at least; the trades take a minute or two before create_take lands.
-const HORIZON_SECS = 3_600 + 300;
+// Every take runs a year unless its author sells (the config allows a day either side, which
+// covers the minute or two the trades take before create_take lands).
+const HORIZON_SECS = TAKE_LIFETIME_SECS;
 /** Made-up moves from entry to the horizon: 60% × +100% + 40% × +10% = +64%. */
 const MOVES: Record<string, number> = { NVDA: 2, SPY: 1.1 };
 
@@ -100,7 +103,7 @@ async function e2e(): Promise<void> {
   const create = await createTakeIx(program, {
     author: author.publicKey,
     id,
-    claimHash: claimHash("AI chips beat the market this hour (settler e2e)"),
+    claimHash: claimHash("AI chips beat the market this year (settler e2e)"),
     risk: RISK.medium,
     horizonEnd: new BN(horizonEnd),
     legs: [leg("equity:US:NVDA", 6_000), leg("etf:US:SPY", 4_000)],

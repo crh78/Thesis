@@ -15,6 +15,7 @@ import { forkApiServer } from "./api/server.ts";
 import type { AppTake } from "./api/service.ts";
 import { startForkService } from "./api.ts";
 import { main, syncClock } from "./lib.ts";
+import { TAKE_LIFETIME_SECS } from "@thesis/chain";
 
 /**
  * A take made up for the run, with the legs of the seeded "AI power demand" take. It never reaches
@@ -24,7 +25,7 @@ const TAKE: AppTake = {
   id: randomUUID(),
   claim: "API e2e: AI power demand",
   risk: "medium",
-  settles_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+  settles_at: new Date(Date.now() + TAKE_LIFETIME_SECS * 1000).toISOString(),
   author: { handle: "api-e2e" },
   legs: [
     { name: "NVIDIA", kind: "Stock", weight: 40, fade_how: "Bets the stock falls", asset_id: "jup:Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh" },
@@ -53,6 +54,7 @@ async function e2e(): Promise<void> {
 
     const config = await call("GET", "/config");
     checks.push(["config: the program's fee (10 bps, 5 to the creator) and $10 minimum", config.status === 200 && config.json.feeRate === 0.001 && config.json.creatorFeeBps === 5 && config.json.minStakeUsd === 10]);
+    checks.push(["config: takes run a year unless their author sells", config.json.takeLifetimeSecs === TAKE_LIFETIME_SECS]);
 
     const dep = await call("POST", `/wallets/${me}/deposits`, { usd: 200 });
     checks.push(["deposit: 200 USDC on the fork", dep.status === 200 && dep.json.usdc === 200]);
