@@ -2,7 +2,7 @@
 // The iOS feed's TakeRow: avatar column, then the take. The claim, return, sparkline and allocation
 // bar open the take page; Trade / Fade open it with that sheet up; then comments, save and share.
 import Link from "next/link";
-import { pct, SERIES, type Take } from "@/lib/data";
+import { authorName, isDeleted, pct, SERIES, type Take } from "@/lib/data";
 import Avatar from "./Avatar";
 
 export type FeedTake = Take & { tags?: string[]; history?: number[]; topic?: string; money_in?: number; posting?: boolean };
@@ -50,7 +50,9 @@ const Arrow = ({ down }: { down?: boolean }) => (
 export default function TakeRow({ take, saved, onSave, mine = false }: { take: FeedTake; saved: boolean; onSave: (on: boolean) => void; mine?: boolean }) {
   const up = take.ret >= 0;
   const href = `/t/${take.id}`;
-  const profile = take.author.handle ? `/u/${take.author.handle}` : href;
+  // A deleted author has no profile: their name and avatar open the take instead.
+  const gone = isDeleted(take.author);
+  const profile = gone ? href : `/u/${take.author.handle}`;
 
   async function share() {
     const url = new URL(href, window.location.origin).toString();
@@ -62,12 +64,12 @@ export default function TakeRow({ take, saved, onSave, mine = false }: { take: F
 
   return (
     <article className="trow">
-      <Link href={profile} aria-label={take.author.display_name ?? take.author.handle ?? "Author"}><Avatar person={take.author} size={42} /></Link>
+      <Link href={profile} aria-label={authorName(take.author)}><Avatar person={take.author} size={42} /></Link>
       <div className="trow-main">
         <div className="trow-head">
           <Link href={profile} className="trow-who">
-            <b>{take.author.display_name ?? take.author.handle}</b>
-            <span className="muted">@{take.author.handle} · {age(take.created_at)}</span>
+            <b>{authorName(take.author)}</b>
+            <span className="muted">{gone ? "" : `@${take.author.handle} · `}{age(take.created_at)}</span>
           </Link>
           <span className="caps trow-tag">{RISK[take.risk] ?? take.risk} · {take.horizon.toUpperCase()}</span>
         </div>

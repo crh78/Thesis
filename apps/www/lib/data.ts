@@ -29,7 +29,16 @@ export type Person = {
   backers_made?: number;
   backers_pct?: number;
   takes?: number;
+  /** A deleted account's placeholder (take_json, comments): no handle, "Deleted account", no profile. */
+  deleted?: boolean;
 };
+
+/** An author who deleted their account (or has no handle): shown as "Deleted account", never linked. */
+export const isDeleted = (p: Pick<Person, "handle" | "deleted">) => !!p.deleted || !p.handle;
+export const DELETED_NAME = "Deleted account";
+/** An author's name: their display name, else @handle; "Deleted account" once they're gone. */
+export const authorName = (p: Pick<Person, "display_name" | "handle" | "deleted">) =>
+  isDeleted(p) ? DELETED_NAME : p.display_name || `@${p.handle}`;
 
 export type Profile = Person & { followers?: number; following?: number };
 
@@ -215,7 +224,7 @@ export function since(iso: string): string {
 
 export const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-export const nameOf = (p: Pick<Person, "display_name" | "handle">) => p.display_name || (p.handle ? `@${p.handle}` : "Someone");
+export const nameOf = (p: Pick<Person, "display_name" | "handle" | "deleted">) => p.deleted ? DELETED_NAME : p.display_name || (p.handle ? `@${p.handle}` : "Someone");
 
 /** A take's on-chain receipt, read by the server (pages, link previews) with the service key. */
 export async function getReceipt(id: string): Promise<Receipt | null> {

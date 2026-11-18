@@ -546,7 +546,9 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
 
   useEffect(() => {
     if (state.kind === "live") {
-      // A chat bot's draft now points at your take, so its link opens the live take.
+      // A chat bot's draft now points at your take, so its link opens the live take. Best effort:
+      // an X draft made for another account answers 403 draft_for_other_account, and your take
+      // is posted and yours either way (only the draft's link keeps showing the draft).
       if (draft.draftId) source("PUT", `drafts/${draft.draftId}`, { take_id: state.id }).catch(() => {});
       const id = window.setTimeout(() => { onClose(); router.push(`/t/${state.id}`); }, 900);
       return () => window.clearTimeout(id);

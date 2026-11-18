@@ -67,6 +67,9 @@ const ERRORS: Record<string, string> = {
   copy_limit: "You can copy up to 10 accounts. Stop copying one to add another.",
   unsupported_image_type: "Use a JPEG or PNG photo.",
   already_posting: "You're already posting this take. It's in My takes on Me: it goes live once its buy-in lands, or after about 2 minutes you can retry or discard it there.",
+  // PUT drafts/:id from someone other than the X account an X draft was made for (DraftActions
+  // already says who it's for; this is the server's word for it).
+  draft_for_other_account: "This take was made for another X account.",
   invalid_leg_name: "One of your picks has a name too long to post. Remove it or swap it for another and try again.",
 };
 
@@ -117,7 +120,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [attempt, setAttempt] = useState(0);
   const loadedFor = useRef<string | null>(null);
 
-  // Money calls to the fork API carry this person's Privy token (the fork API's abuse guard).
+  // Fork API calls carry this person's Privy token (money calls are checked; reads count per user).
   useEffect(() => {
     setForkAuth(authenticated ? () => getAccessToken() : null);
     return () => setForkAuth(null);

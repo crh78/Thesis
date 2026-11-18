@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
-import { getReceipt, getTake, HORIZON, pct, SERIES } from "@/lib/data";
+import { authorName, getReceipt, getTake, HORIZON, isDeleted, pct, SERIES } from "@/lib/data";
 import { ogCache } from "@/lib/og";
 
 export const size = { width: 1200, height: 630 };
@@ -21,7 +21,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   ]);
   const claim = take?.claim ?? "A take on Thesis";
   const ret = receipt?.onChain && receipt.returnBps != null ? receipt.returnBps / 100 : take?.ret ?? 0;
-  const who = take ? `${take.author.display_name ?? take.author.handle} · @${take.author.handle}` : "";
+  const who = !take ? "" : isDeleted(take.author) ? authorName(take.author) : `${authorName(take.author)} · @${take.author.handle}`;
   const legs = take?.legs ?? [];
   return new ImageResponse(
     (
