@@ -17,7 +17,7 @@ const ok = () => Promise.resolve("ok");
 
 test("prebuilds and route checks leave the last 6 requests to taps; taps may use them all", async () => {
   const t = 1_000_000;
-  const budget = new JupiterBudget({}, () => t);
+  const budget = new JupiterBudget({ prebuildWaitMs: 0 }, () => t);
   for (let i = 0; i < 4; i++) await budget.run(i % 2 ? 2 : 3, ok);
   await assert.rejects(budget.run(2, ok), isBusy);
   await assert.rejects(budget.run(3, ok), isBusy);
@@ -25,6 +25,25 @@ test("prebuilds and route checks leave the last 6 requests to taps; taps may use
   assert.equal(budget.tokens, 0);
   assert.deepEqual(budget.stats.calls, [0, 6, 2, 2]);
   assert.deepEqual(budget.stats.refused, [0, 0, 1, 1]);
+});
+
+test("a prebuild short only of spare requests waits for the bucket; a route check doesn't", async () => {
+  // 10 a second: the 7th request back is 100 ms away.
+  const budget = new JupiterBudget({ perMinute: 600, burst: 7, reserve: 6 });
+  await budget.run(2, ok);
+  await assert.rejects(budget.run(3, ok), isBusy, "a route check is still refused at once");
+  const started = Date.now();
+  assert.equal(await budget.run(2, ok), "ok", "the prebuild waited for the bucket instead");
+  assert.ok(Date.now() - started >= 90, "it waited for the refill");
+});
+
+test("a prebuild doesn't wait longer than prebuildWaitMs, nor after a 429", async () => {
+  const slow = new JupiterBudget({ perMinute: 6, burst: 7, reserve: 6, prebuildWaitMs: 1_000 });
+  await slow.run(2, ok);
+  await assert.rejects(slow.run(2, ok), isBusy, "10 s to the next request: refused at once");
+  const paused = new JupiterBudget({ perMinute: 600, burst: 10, reserve: 6 });
+  paused.rateLimited();
+  await assert.rejects(paused.run(2, ok), isBusy, "after a 429: refused at once");
 });
 
 test("the bucket refills at 30 a minute, up to a burst of 10", async () => {
@@ -260,7 +279,7 @@ test("after 20 seconds a trade routes afresh", async (t) => {
 test("a prebuild refused after routing still leaves the routing to the tap, which makes its own swap call", async (t) => {
   const calls = jupiter(t, routes);
   // Lane 2 may take one request (the quote), not a second (the swap instructions).
-  const router = routerWith(new JupiterBudget({ reserve: 9 }));
+  const router = routerWith(new JupiterBudget({ reserve: 9, prebuildWaitMs: 0 }));
   const a = Keypair.generate().publicKey;
   await assert.rejects(router.venueLegs([leg], a, 20, undefined, undefined, { lane: 2 }), isBusy);
   assert.equal(calls.length, 1);
