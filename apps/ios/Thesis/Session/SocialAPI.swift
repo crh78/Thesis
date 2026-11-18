@@ -470,6 +470,8 @@ struct PersonDTO: Decodable {
     let following: Int?
     let showFollowers: Bool?
     let showFollowing: Bool?
+    /// A deleted account's placeholder author (nil id, no handle, "Deleted account").
+    let deleted: Bool?
 
     var privacy: FollowPrivacy {
         FollowPrivacy(showFollowing: showFollowing ?? true, showFollowers: showFollowers ?? true)
@@ -481,7 +483,8 @@ struct PersonDTO: Decodable {
                made: made, returnPct: returnPct, takes: takes,
                bio: bio ?? "", remoteID: id, avatarURL: avatarUrl,
                followsYou: followsYou ?? false,
-               backersMade: backersMade ?? 0, backersPct: backersPct ?? 0)
+               backersMade: backersMade ?? 0, backersPct: backersPct ?? 0,
+               deleted: deleted ?? false)
     }
 }
 

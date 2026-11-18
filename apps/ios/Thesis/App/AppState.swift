@@ -742,7 +742,7 @@ final class AppState {
     }
 
     func toggleFollow(_ person: Person) {
-        guard !isMe(person) else { return }
+        guard !isMe(person), !person.deleted else { return }
         let on = !isFollowing(person)
         let before = (following, followingPeople, followingFeed)
         if on {

@@ -361,10 +361,10 @@ private extension ProfileItem {
         self.init(topic: p.take.topic, claim: p.take.claim,
                   kind: p.side == .back ? "Traded" : "Faded",
                   kindColor: p.side == .back ? Palette.up : Palette.down,
-                  meta: "\(p.take.author.handle) · \(Fmt.usd(p.amount, cents: true)) in",
+                  meta: p.take.author.handle(then: "\(Fmt.usd(p.amount, cents: true)) in"),
                   value: Fmt.usd(p.value, cents: true), ret: p.ret, take: p.take,
                   share: CallCard(takeID: p.take.id, claim: p.take.claim, ret: p.ret, faded: p.side == .fade,
-                                  author: p.take.author.id, name: me.name, handle: me.id, avatar: me.avatar,
+                                  author: p.take.author.handleID, name: me.name, handle: me.id, avatar: me.avatar,
                                   since: p.take.since, legs: p.take.legs))
     }
 

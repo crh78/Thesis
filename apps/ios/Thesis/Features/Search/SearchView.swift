@@ -295,7 +295,7 @@ struct TakeListRow: View {
                     .font(.serif(18))
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("\(take.author.handle) · \(take.risk.short) · \(take.tags.joined(separator: " / ").uppercased())")
+                Text(take.author.handle(then: "\(take.risk.short) · \(take.tags.joined(separator: " / ").uppercased())"))
                     .font(.mono(11))
                     .foregroundStyle(Palette.muted)
             }

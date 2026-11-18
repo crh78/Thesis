@@ -9,7 +9,10 @@ struct PersonLink<Label: View>: View {
     @ViewBuilder var label: Label
 
     var body: some View {
-        if app.isMe(person) {
+        if person.deleted {
+            // A deleted account has no profile to open.
+            label
+        } else if app.isMe(person) {
             Button { app.go(to: .me) } label: { label }
                 .buttonStyle(.plain)
                 .accessibilityHint("Opens your profile")

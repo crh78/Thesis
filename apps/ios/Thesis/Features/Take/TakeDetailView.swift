@@ -134,7 +134,9 @@ struct TakeDetailView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             HStack(spacing: 4) {
                                 Text(take.author.name).font(.geist(15, .semibold))
-                                Text(take.author.handle).font(.geist(15)).foregroundStyle(Palette.muted)
+                                if !take.author.deleted {
+                                    Text(take.author.handle).font(.geist(15)).foregroundStyle(Palette.muted)
+                                }
                             }
                             HStack(spacing: 4) {
                                 Text("Made").foregroundStyle(Palette.muted)
@@ -147,7 +149,7 @@ struct TakeDetailView: View {
                     }
                 }
                 Spacer()
-                if !app.isMe(take.author) {
+                if !app.isMe(take.author) && !take.author.deleted {
                     let following = app.isFollowing(take.author)
                     Button(following ? "Following" : "Follow") {
                         withAnimation(.snappy) { app.toggleFollow(take.author) }

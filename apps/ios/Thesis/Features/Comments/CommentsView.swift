@@ -240,7 +240,7 @@ struct CommentRow: View {
                         Text(position.label)
                             .font(.geist(12, .semibold))
                             .foregroundStyle(position.color)
-                    } else {
+                    } else if !comment.author.deleted {
                         Text(comment.author.handle).font(.geist(12)).foregroundStyle(Palette.muted)
                     }
                     Text("· \(comment.age)").font(.geist(12)).foregroundStyle(Palette.muted)

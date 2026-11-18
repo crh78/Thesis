@@ -19,10 +19,18 @@ struct Person: Identifiable, Hashable {
     /// (faders and the person's own positions not counted). From the chain; 0 elsewhere.
     var backersMade: Double = 0
     var backersPct: Double = 0
+    /// The account was deleted: its takes and comments stay, under a placeholder author
+    /// ("Deleted account", no handle). Nothing to open or follow.
+    var deleted = false
 
     /// What follows, saves and comments are keyed by.
     var profileID: String { remoteID ?? id }
-    var handle: String { "@\(id)" }
+    /// "@handle", or empty for a deleted account.
+    var handle: String { deleted ? "" : "@\(id)" }
+    /// The handle, then " · " and `rest` ("@sam · 2h"); just `rest` for a deleted account.
+    func handle(then rest: String) -> String { deleted ? rest : "\(handle) · \(rest)" }
+    /// The handle without @, or nil for a deleted account (share cards).
+    var handleID: String? { deleted ? nil : id }
     /// Bundled images only for mock people and explicit `asset:` URLs, so a real
     /// user whose handle matches a demo name doesn't get the demo picture.
     var avatar: String {
