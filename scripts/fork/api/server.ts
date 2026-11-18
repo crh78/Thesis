@@ -184,15 +184,6 @@ export function forkApiServer(
     prebuilds.set(wallet, recent);
     if (prebuilds.size > 10_000) for (const [k, list] of prebuilds) if (!list.some((at) => at > now - 60_000)) prebuilds.delete(k);
   };
-  /** Builds that call Jupiter wait their turn behind the guard's queue (the wait is step `queue`). */
-  const queued = <T>(work: () => Promise<T>, t?: Timings) => {
-    if (!guard) return work();
-    const waiting = Date.now();
-    return guard.build(() => {
-      t?.add("queue", Date.now() - waiting);
-      return work();
-    });
-  };
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const started = Date.now();
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -240,7 +231,7 @@ export function forkApiServer(
           const prebuild = b.prebuild === true;
           await buildLimits(req, owner, "trades", prebuild);
           const t = timed();
-          return send(200, await queued(() => service.buildTrade(parts[1], owner, side, usd, { timings: t, prebuild }), t));
+          return send(200, await service.buildTrade(parts[1], owner, side, usd, { timings: t, prebuild }));
         }
         if (m === "POST" && parts[2] === "positions" && parts[3] && parts[4] === "exit" && parts.length === 5) {
           const b = await body(req);
@@ -248,7 +239,7 @@ export function forkApiServer(
           const prebuild = b.prebuild === true;
           await buildLimits(req, owner, "sell", prebuild);
           const t = timed();
-          return send(200, await queued(() => service.buildExit(parts[1], parts[3], owner, { timings: t, prebuild }), t));
+          return send(200, await service.buildExit(parts[1], parts[3], owner, { timings: t, prebuild }));
         }
         if (m === "POST" && parts[2] === "confirm" && parts.length === 3) {
           // Harmless (it only re-delivers a landed publish), so it counts as a read.
@@ -262,7 +253,7 @@ export function forkApiServer(
           const prebuild = b.prebuild === true;
           await buildLimits(req, author, "publish", prebuild);
           const t = timed();
-          return send(200, await queued(() => service.buildPublish(parts[1], author, usd, { timings: t, prebuild }), t));
+          return send(200, await service.buildPublish(parts[1], author, usd, { timings: t, prebuild }));
         }
       }
       // No token needed: the API only sends what it built, and checks the owner's signature on it.
@@ -319,7 +310,7 @@ export function forkApiServer(
         if (m === "POST" && parts[2] !== "incomplete") {
           const position = optionalStr((await body(req)).position, "position");
           await money(req, parts[1], parts[2]);
-          return send(200, await queued<unknown>(() => (parts[2] === "retry" ? service.buildRetry(parts[1], position) : service.buildSweep(parts[1], position))));
+          return send(200, await (parts[2] === "retry" ? service.buildRetry(parts[1], position) : service.buildSweep(parts[1], position)));
         }
       }
       if (parts[0] === "wallets" && parts[1]) {

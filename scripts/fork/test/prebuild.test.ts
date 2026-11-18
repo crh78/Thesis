@@ -20,6 +20,7 @@ test("a build says when it expires and when it was quoted; a refresh keeps its i
   const built = await f.service.buildTrade(TAKE_ID, f.wallet, "back", 20, { prebuild: true });
   assert.ok(built.expiresAt > before && built.expiresAt <= Date.now() + 55_000);
   assert.ok(typeof built.quotedAt === "number" && built.quotedAt >= before);
+  assert.ok(f.logs.some((l) => l.startsWith(`timing back build ${TAKE_ID.slice(0, 8)}`) && l.includes("jupiter lane 2, 0 calls")), "a prebuild is in Jupiter's prebuild lane, and says what it used");
   const fresh = await f.service.refreshBuild(built.buildId);
   assert.equal(fresh.buildId, built.buildId);
   assert.equal(fresh.quotedAt, built.quotedAt, "the same quotes");

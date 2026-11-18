@@ -142,7 +142,7 @@ Keeping load down (every RPC read of an account the fork doesn't have goes to He
 | Money actions per wallet | 10 a minute, 100 a day | `429 rate_limited` with `Retry-After`, in every auth mode (unverified callers count per IP and wallet) |
 | Reads (GETs and `/confirm`) per signed-in user, else per IP | 120 a minute | `FORK_API_READ_LIMIT=enforce`: `429`; `report` (default) logs. Service keys aren't counted |
 | `POST /digests` | service key only | `401 service_key_required` |
-| Builds that call Jupiter | 2 at once, 6 waiting | `503 busy` with `Retry-After` (the shared Jupiter key would otherwise hang). While builds run or wait, the API touches the asset bank's `trade-builds.busy` every 5 s, so the poller's probes pause |
+| Jupiter calls (builds, sales, sweeps, route checks) | 30 a minute, bursts of 10; 8 in flight, 24 queued | Lanes: a tap-time build waits up to 8 s for its turn, then `503 busy` with `Retry-After`; prebuilds and route checks fail fast with `503 busy` when fewer than 6 are left. While calls run or wait, the API touches the asset bank's `trade-builds.busy` every 5 s, so the poller's probes pause |
 
 **Who a read counts against:** a read carrying a valid Privy token (`Authorization: Bearer <token>`, as on money routes) counts against that Privy user, so people sharing an IP don't share a limit. A valid token is trusted for a minute (never past its expiry) without checking its signature again; an invalid one is ignored and the read counts per IP.
 
@@ -159,7 +159,7 @@ To spare Vercel function invocations, the web app's browser can call the fork AP
 
 ### How it behaves
 
-- **Timings:** every build, sale build, publish and submit logs one `timing …` line with each step's milliseconds (funds, take, mirror, legs, compose, queue, lock, refresh, send, confirm, bookkeeping, cleanup, relay; routing may add its own), whether it worked or not, and answers with a `Server-Timing` header carrying the same steps and a `total`. `pnpm fork:latency-bench` reads them.
+- **Timings:** every build, sale build, publish, refresh and submit logs one `timing …` line with each step's milliseconds (funds, take, mirror, legs, jupiter wait, markets, compose, lock, refresh, send, confirm, bookkeeping, cleanup, relay) and its Jupiter use (lane, calls, quotes, instructions, issuer-winner hits, shared template, 429s), whether it worked or not, and answers with a `Server-Timing` header carrying the same steps and a `total`. `pnpm fork:latency-bench` reads them.
 - **Latency:** Jupiter's free key (10 requests per 10 s) is shared by this API, the settler and the bank. A back costs a quote and a swap-instructions call per leg; the winning issuer is cached 2 minutes. On a 429 the API waits for `x-ratelimit-reset`.
 - **Signing:** build → the wallet signs each transaction without sending → submit. Users never need SOL. A trade build can end with a short transaction cancelling the owner's abandoned tickets; sign it too (it's sent after the trade lands).
 - **Prediction legs:** `asset_id` `gemini:<instrumentSymbol>` maps to that contract on the pick's side. Tradable while open, resolving at least an hour out, two-sided on the side held. Live reads through the `gemini` proxy (`api/gemini-live.ts`, once per event per 30 s): a trade leaves the leg out without one; receipts and marks fall back to the bank's sweep. A sale returns the escrow.

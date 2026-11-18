@@ -47,7 +47,7 @@ import {
   type TakeAccount,
   type ThesisProgram,
 } from "@thesis/chain";
-import { JupiterClient, cardLeg, underlyingIdHex, type BankState } from "@thesis/venues/bank";
+import { cardLeg, underlyingIdHex, type BankState } from "@thesis/venues/bank";
 import { cardIdHex } from "@thesis/venues/collector-crypt";
 import { jupiterBuy, jupiterLendRedeem, type VenueLeg } from "@thesis/venues/jupiter";
 import { PHOENIX_LEG_CU } from "@thesis/venues/phoenix";
@@ -86,7 +86,8 @@ import { dailyDigests } from "./digests.ts";
 import { PortfolioHistory } from "./history.ts";
 import { contractResolver, escrowedKind, mapLegs, nameResolver, onChainLegs, perpResolver, sameLegs, type AppLeg, type ContractResolver, type MappedLeg, type NameResolver, type PerpResolver } from "./legs.ts";
 import { PhoenixDesk } from "./phoenix.ts";
-import { Router, escrowShare, type TradeKind, type TradeLeg } from "./routing.ts";
+import { LANE, newUse, type JupiterUse, type Lane } from "./guard.ts";
+import { Router, TEMPLATE_TTL_MS, escrowShare, type TradeLeg } from "./routing.ts";
 import { SendFailed, fates, refusedByPreflight, sendBackToBack, type Fate } from "./send.ts";
 import { SplitTrades, afterFailure, deserializeIx, incompleteView, serializeIx, sweepLegs } from "./split.ts";
 import { StateStore } from "./store.ts";
@@ -169,14 +170,22 @@ function submissionView(buildId: string, s: Pick<Submission, "status" | "signatu
   };
 }
 
+/** The Jupiter lane of a build (api/guard.ts): a prebuild's may fail fast (503 busy); a tap's waits its turn. */
+const laneOf = (prebuild?: boolean): Lane => (prebuild ? LANE.prebuild : LANE.tap);
+
 /**
- * Routing's options for a trade build: the side and paper rules, the request's timings (routing
- * may add its steps and lower `quotedAt`), and the Jupiter lane (routing.ts: 1 tap-time, 2 prebuild).
- * Passed as a variable, so it compiles whether or not routing declares `timings` and `lane` yet.
+ * What a build's Jupiter use goes in its timings as: the wait for the budget as a step, the rest
+ * as notes. A shared routing ("hit", "wait") was quoted up to TEMPLATE_TTL_MS before this build:
+ * its quotedAt says so, so a refresh doesn't keep those quotes past their age.
  */
-function routeKind(kind: TradeKind, timings: Timings, prebuild = false): TradeKind {
-  const o: TradeKind & { timings: Timings; lane: 1 | 2 } = { ...kind, timings, lane: prebuild ? 2 : 1 };
-  return o;
+function noteUse(t: Timings, use: JupiterUse) {
+  if (use.waitedMs) t.add("jupiter wait", use.waitedMs);
+  t.note("jupiter", `lane ${use.lane}, ${use.calls} calls (${use.quotes} quotes, ${use.instructions} instructions)`);
+  if (use.winnerHits || use.winnerMisses) t.note("winners", `${use.winnerHits} hit, ${use.winnerMisses} miss`);
+  if (use.template) t.note("template", `${use.template}${use.templatedLegs ? `, ${use.templatedLegs} legs` : ""}`);
+  if (use.rateLimited) t.note("429s", use.rateLimited);
+  if (use.refused) t.note("refused", use.refused.code);
+  if (use.template === "hit" || use.template === "wait") t.quotedAt = Math.min(t.quotedAt ?? Date.now(), Date.now() - TEMPLATE_TTL_MS);
 }
 
 /** The signed transactions' bytes, hashed: what tells a repeat of a submit from a different one. */
@@ -862,7 +871,10 @@ export class ForkService {
       if (balance < amount) throw new ApiError(409, "insufficient_tokens", "Your wallet no longer holds all the tokens this position bought.");
     }));
     t.add("inventory", Date.now() - inventoryStarted);
-    const jupiter = new JupiterClient(this.#o.jupiterApiKey, 0);
+    // Every Jupiter call of the sale goes through the budget, in the build's lane.
+    const use = newUse(laneOf(o.prebuild));
+    const jupiter = this.#router.jupiter(use.lane, use);
+    const access = { apiKey: jupiter.apiKey, fetchFn: jupiter.fetchFn, max429WaitMs: jupiter.max429WaitMs };
     const payer = this.#o.appPayer.publicKey;
     const usdc = USDC_MINT_MAINNET.toBase58();
     const config = await this.#config();
@@ -894,7 +906,7 @@ export class ForkService {
     };
     const [shareValue, redeemLegs] = await t.time("redeems", () => Promise.all([
       redeems.length ? redeemValue() : Promise.resolve(0),
-      Promise.all(redeems.map(({ amount }) => jupiterLendRedeem({ user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey! }))),
+      Promise.all(redeems.map(({ amount }) => jupiterLendRedeem({ ...access, user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey! }))),
     ]));
     if (shareValue == null) throw new ApiError(422, "no_exit_route", "Couldn't price this position's yield shares.");
     // Phoenix legs: close each child's position. The cash stays in the child until the app sweeps
@@ -909,7 +921,7 @@ export class ForkService {
       const swaps = await t.time("quotes", () => Promise.all(inventory.filter((l) => !l.isYield).map(async ({ mint, amount }) => {
         const { quote } = await jupiter.quoteExactIn(mint, usdc, amount, { ...this.#router.route, maxAccounts });
         if (!quote || quote.inputMint !== mint || quote.outputMint !== usdc || quote.inAmount !== amount.toString()) throw new ApiError(422, "no_exit_route", "No route to sell every token in this position.");
-        return { quote, venue: await jupiterBuy({ quote, user: owner, payer, label: `Sell ${tokens[mint].symbol}`, apiKey: this.#o.jupiterApiKey }) };
+        return { quote, venue: await jupiterBuy({ ...access, quote, user: owner, payer, label: `Sell ${tokens[mint].symbol}` }) };
       })));
       t.quotedAt ??= Date.now();
       const venues: VenueLeg[] = [...closes, ...swaps.map((q) => q.venue), ...redeemLegs];
@@ -936,7 +948,9 @@ export class ForkService {
     } catch (error) {
       if (!(error instanceof ApiError) || error.code !== "exit_too_large") throw error;
       // Try simpler Jupiter routes before giving up on an atomic exit.
-      return quoteExit(20);
+      return await quoteExit(20);
+    } finally {
+      noteUse(t, use);
     }
   }
 
@@ -1080,12 +1094,12 @@ export class ForkService {
     const { address, take } = existing;
     // Authors can't fade their own take. The program refuses it too; this says why before a build.
     if (side === "fade" && take.author.equals(owner)) throw new ApiError(409, "cannot_fade_own_take", FADE_OWN_TAKE);
-    const kind = routeKind({ side, paper: maxLegs === undefined }, t, prebuild);
+    const use = newUse(laneOf(prebuild));
     const [{ venue, included, excluded }, config] = await t.time("legs", () => Promise.all([
       // The Blink (maxLegs) buys spot and yield legs only: Gemini legs are in the app.
-      this.#router.venueLegs(onChainLegs(this.#mapLegs(app.legs), take.legs), owner, usd, payer, maxLegs, kind),
+      this.#router.venueLegs(onChainLegs(this.#mapLegs(app.legs), take.legs), owner, usd, payer, maxLegs, { side, paper: maxLegs === undefined, lane: use.lane, use }),
       this.#config(),
-    ]));
+    ])).finally(() => noteUse(t, use));
     t.quotedAt ??= Date.now();
     const mask = included.reduce((m, i) => m | (1 << i), 0);
     const id = randomPositionId();
@@ -1332,7 +1346,7 @@ export class ForkService {
     const legs = mapped.filter((l) => rec.included.includes(l.index));
     // Only a definite "can't be bought now" ends the retry; Jupiter being busy or slow (503, 502)
     // leaves it for another try. Building doesn't use the retry up: sending it does.
-    const venue = await this.#router.rebuild(legs, owner, rec.usd, rec.side, new Set(rec.remaining), this.#phoenix?.legsOf(position) ?? []).catch((e: unknown) => {
+    const venue = await this.#router.rebuild(legs, owner, rec.usd, rec.side, new Set(rec.remaining), this.#phoenix?.legsOf(position) ?? [], undefined, { lane: LANE.tap }).catch((e: unknown) => {
       if (e instanceof ApiError && e.code === "retry_unavailable") throw toSweep(422, e.code, e.message);
       throw e;
     });
@@ -1367,7 +1381,8 @@ export class ForkService {
     const payer = this.#o.appPayer.publicKey;
     const usdc = USDC_MINT_MAINNET.toBase58();
     const tokens = this.#o.bank().tokens;
-    const jupiter = new JupiterClient(this.#o.jupiterApiKey, 0);
+    const jupiter = this.#router.jupiter(LANE.tap);
+    const access = { apiKey: jupiter.apiKey, fetchFn: jupiter.fetchFn, max429WaitMs: jupiter.max429WaitMs };
     const sells = (await Promise.all(sweepLegs(ticket, rec).map(async (l) => {
       const info = await conn.getAccountInfo(l.account, "confirmed");
       if (!info) return null; // closed since: nothing left to sell
@@ -1379,7 +1394,7 @@ export class ForkService {
       const symbol = tokens[mint]?.symbol ?? (l.lend ? "jlUSDC" : mint.slice(0, 4));
       if (l.lend) {
         if (!this.#o.jupiterApiKey) throw new ApiError(422, "no_exit_route", "Jupiter Lend needs JUPITER_API_KEY.");
-        const venue = await jupiterLendRedeem({ user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey });
+        const venue = await jupiterLendRedeem({ ...access, user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey });
         const perShare = await this.#valuation.lendShareValue(mint).catch(() => null);
         const usd = perShare === null ? null : (Number(amount) / 1e6) * perShare; // vault shares have USDC's 6 decimals
         return { leg: l.leg, mint, symbol, amount, venue, usd, minimum: usd };
@@ -1388,7 +1403,7 @@ export class ForkService {
       if (!quote || quote.inputMint !== mint || quote.outputMint !== usdc || quote.inAmount !== amount.toString()) {
         throw new ApiError(422, "no_exit_route", `No route to sell ${symbol} back to USDC right now. Try again in a moment.`);
       }
-      const venue = await jupiterBuy({ quote, user: owner, payer, label: `Sell ${symbol}`, apiKey: this.#o.jupiterApiKey });
+      const venue = await jupiterBuy({ ...access, quote, user: owner, payer, label: `Sell ${symbol}` });
       return { leg: l.leg, mint, symbol, amount, venue, usd: Number(BigInt(quote.outAmount)) / USD, minimum: Number(BigInt(quote.otherAmountThreshold)) / USD };
     }))).filter((s) => s !== null);
     const quotedAt = Date.now();
@@ -1538,8 +1553,9 @@ export class ForkService {
     const stopped = this.#split.list(authorKey.toBase58()).find(([, t]) => t.publishTakeId === takeId);
     if (stopped) throw incompleteError(stopped[0], stopped[1], 409);
     await t.time("funds", () => this.#checkFunds(authorKey, usd));
-    const kind = routeKind({}, t, o.prebuild);
-    const [{ venue, included, excluded }, config] = await t.time("legs", () => Promise.all([this.#router.venueLegs(this.#mapLegs(app.legs), authorKey, usd, undefined, undefined, kind), this.#config()]));
+    const use = newUse(laneOf(o.prebuild));
+    const [{ venue, included, excluded }, config] = await t.time("legs", () => Promise.all([this.#router.venueLegs(this.#mapLegs(app.legs), authorKey, usd, undefined, undefined, { lane: use.lane, use }), this.#config()]))
+      .finally(() => noteUse(t, use));
     t.quotedAt ??= Date.now();
     const { ix, address } = await this.#createIx(app, authorKey, usd, included);
     const position = { take: address, address: positionAddress(address, authorKey, 0n), publishTakeId: takeId };
