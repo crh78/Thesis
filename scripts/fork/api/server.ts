@@ -43,7 +43,7 @@ const header = (req: IncomingMessage, name: string) => {
 
 /** What a browser may send and read across origins (the README's "Direct browser calls"). */
 export const CORS = {
-  methods: "GET, POST, DELETE, OPTIONS",
+  methods: "GET, POST, OPTIONS",
   headers: "authorization, content-type, x-thesis-wallet-auth",
   expose: "retry-after",
   /** Seconds a browser may reuse a preflight (Chrome caps it at 7,200). */

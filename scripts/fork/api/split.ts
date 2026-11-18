@@ -90,7 +90,7 @@ export function incompleteView(position: string, t: IncompleteTrade) {
     takeId: t.takeId,
     side: t.side,
     usd: t.usd,
-    /** "retry": POST .../incomplete/:position/retry; "sweep": POST .../incomplete/:position/sweep. */
+    /** "retry": POST /wallets/:address/retry { position }; "sweep": POST /wallets/:address/sweep { position }. */
     next: t.next,
     landed: t.signatures.length,
     signatures: t.signatures,
@@ -151,15 +151,10 @@ export class SplitTrades {
     this.#store.saveNow();
   }
 
-  /**
-   * Forgets an incomplete trade: it finished, or its sweep cancelled the ticket. `ticketLeft`:
-   * the ticket may still be open, so the owner's next build looks for it.
-   */
-  delete(position: string, ticketLeft = false) {
-    const t = this.#store.state.incomplete?.[position];
-    if (!t) return;
+  /** Forgets an incomplete trade: it finished, or its ticket is gone (a sweep cancelled it). */
+  delete(position: string) {
+    if (!this.#store.state.incomplete?.[position]) return;
     delete this.#all[position];
-    if (ticketLeft) this.#suspects.add(t.owner);
     this.#store.save();
   }
 

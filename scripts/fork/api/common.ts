@@ -114,6 +114,8 @@ export type ServiceOpts = {
   bank: () => BankState;
   takes: TakeSource;
   stocks: StockSource | null;
+  /** The asset bank's prices file (api/valuation.ts): default next to its file sink; null: none (tests). */
+  pricesFile?: string | null;
   /**
    * Each position leg's entry basis, from the settler's audit log: live marks use the same source
    * as the entry (the token the owner bought, or the stock), so a return compares like with like.
@@ -205,6 +207,24 @@ export function logSlow(log: (m: string) => void, what: string, totalMs: number,
   if (totalMs < SLOW_MS) return;
   const s = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
   log(`slow ${what} ${s(totalMs)}: ${Object.entries(parts).map(([k, ms]) => `${k} ${s(ms)}`).join(", ")}`);
+}
+
+const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/** Base58 (Bitcoin alphabet), as Solana writes signatures. */
+export function base58(bytes: Uint8Array): string {
+  let n = 0n;
+  for (const b of bytes) n = n * 256n + BigInt(b);
+  let out = "";
+  while (n > 0n) {
+    out = BASE58[Number(n % 58n)] + out;
+    n /= 58n;
+  }
+  for (const b of bytes) {
+    if (b !== 0) break;
+    out = "1" + out;
+  }
+  return out;
 }
 
 export function errorText(e: unknown): string {

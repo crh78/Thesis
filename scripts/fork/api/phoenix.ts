@@ -285,10 +285,13 @@ export class PhoenixDesk {
 
   /**
    * Phoenix positions still open whose Thesis position is over (settled at the horizon, or sold
-   * while a close failed): the app's "Cash out" closes them.
+   * while a close failed): the app's "Cash out" closes them. Not a split trade that stopped
+   * partway (api/split.ts): its position doesn't exist yet, and a retry may still need the leg.
+   * Once it's swept, cash-out closes it.
    */
   async strays(owner: PublicKey): Promise<{ sub: number; symbol: string; baseLots: bigint }[]> {
-    const kids = (await this.children(owner)).filter((c) => c.trader.positions.length);
+    const stopped = new Set(Object.keys(this.#store.state.incomplete ?? {}));
+    const kids = (await this.children(owner)).filter((c) => c.trader.positions.length && !stopped.has(c.position));
     if (!kids.length) return [];
     const accounts = await this.#program.account.position.fetchMultiple(kids.map((k) => new PublicKey(k.position)));
     return kids.filter((_, i) => !accounts[i] || accounts[i]!.exited).map((k) => ({ sub: k.sub, symbol: k.symbol, baseLots: k.trader.positions[0].baseLots }));

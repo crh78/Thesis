@@ -15,10 +15,13 @@
 //   route checks a token's signature once, not on every request.
 // - Builds that call Jupiter wait their turn: a few at once, a short queue, then 503 `busy` with
 //   Retry-After instead of hanging (the free Jupiter key is shared by everything on the fork).
+//   While builds run or wait, the asset bank's `trade-builds.busy` file is touched every few
+//   seconds (`busyFile`), so the poller's probes leave the Jupiter key to trades.
 //
 // Limits are kept in memory, so they reset when the API restarts.
 import { createPublicKey, timingSafeEqual, verify, type KeyObject } from "node:crypto";
 import type { IncomingMessage } from "node:http";
+import { markBuildsBusy } from "@thesis/venues/bank";
 import { ApiError } from "./common.ts";
 
 export type Mode = "off" | "report" | "enforce";
@@ -33,6 +36,8 @@ export type GuardOptions = {
   /** Privy app values; without them no token can be checked (every token reads as missing). */
   privy: { appId: string; verificationKey: string; appSecret: string } | null;
   limits?: Partial<Limits>;
+  /** The asset bank's busy file (buildsBusyFileFor), touched while builds run or wait; null: none. */
+  busyFile?: string | null;
   log?: (m: string) => void;
   fetch?: typeof fetch;
   now?: () => number;
@@ -45,6 +50,9 @@ export type Limits = {
   buildsAtOnce: number;
   buildQueue: number;
 };
+
+/** How often the busy signal repeats while builds run or wait (the bank's hold is 15 s). */
+export const BUSY_EVERY_MS = 5_000;
 
 export const DEFAULT_LIMITS: Limits = { moneyPerMinute: 10, moneyPerDay: 100, readsPerMinute: 120, buildsAtOnce: 2, buildQueue: 6 };
 
@@ -173,7 +181,8 @@ export class Guard {
     this.#moneyMinute = new Window(MINUTE, this.limits.moneyPerMinute);
     this.#moneyDay = new Window(DAY, this.limits.moneyPerDay);
     this.#reads = new Window(MINUTE, this.limits.readsPerMinute);
-    this.#gate = new BuildGate(this.limits.buildsAtOnce, this.limits.buildQueue, o.log);
+    const busyFile = o.busyFile;
+    this.#gate = new BuildGate(this.limits.buildsAtOnce, this.limits.buildQueue, o.log, busyFile ? () => void markBuildsBusy(busyFile).catch(() => {}) : undefined);
     setInterval(() => this.sweep(), 10 * MINUTE).unref();
   }
 
@@ -347,6 +356,7 @@ export class Guard {
 /**
  * At most `atOnce` builds run together and `queue` wait; anyone past that gets 503 `busy` with a
  * Retry-After from how long builds have been taking. Logs the queue whenever someone waits.
+ * `onBusy` runs when a build is let in or queued, and every BUSY_EVERY_MS while any runs or waits.
  */
 export class BuildGate {
   #running = 0;
@@ -355,11 +365,34 @@ export class BuildGate {
   readonly atOnce: number;
   readonly queue: number;
   readonly log?: (m: string) => void;
+  readonly onBusy?: () => void;
+  #busyTimer: NodeJS.Timeout | null = null;
 
-  constructor(atOnce: number, queue: number, log?: (m: string) => void) {
+  constructor(atOnce: number, queue: number, log?: (m: string) => void, onBusy?: () => void) {
     this.atOnce = atOnce;
     this.queue = queue;
     this.log = log;
+    this.onBusy = onBusy;
+  }
+
+  /** Whether a build is running or waiting. */
+  get busy(): boolean {
+    return this.#running > 0 || this.#waiting.length > 0;
+  }
+
+  /** Signals busy now, and keeps signalling while builds run or wait. */
+  #markBusy() {
+    if (!this.onBusy) return;
+    this.onBusy();
+    this.#busyTimer ??= setInterval(() => {
+      if (!this.busy) {
+        clearInterval(this.#busyTimer!);
+        this.#busyTimer = null;
+        return;
+      }
+      this.onBusy!();
+    }, BUSY_EVERY_MS);
+    this.#busyTimer.unref?.();
   }
 
   async run<T>(work: () => Promise<T>): Promise<T> {
@@ -371,10 +404,13 @@ export class BuildGate {
         e.headers = { "retry-after": String(s) };
         throw e;
       }
-      await new Promise<void>((resolve) => this.#waiting.push(resolve));
+      const turn = new Promise<void>((resolve) => this.#waiting.push(resolve));
+      this.#markBusy();
+      await turn;
       this.log?.(`builds queue: ${this.#running} running, ${this.#waiting.length} still waiting`);
     } else {
       this.#running++;
+      this.#markBusy();
     }
     const started = Date.now();
     try {

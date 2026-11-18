@@ -5,7 +5,7 @@ import type { IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { ApiError } from "../api/common.ts";
-import { BuildGate, Guard, parseServiceKeys, verifyPrivyToken, type GuardOptions } from "../api/guard.ts";
+import { BUSY_EVERY_MS, BuildGate, Guard, parseServiceKeys, verifyPrivyToken, type GuardOptions } from "../api/guard.ts";
 import { CORS, corsHeaders, forkApiServer, parseCorsOrigins } from "../api/server.ts";
 import type { ForkService } from "../api/service.ts";
 
@@ -144,6 +144,31 @@ test("reads in report mode are logged, not refused", () => {
   const { g, logs } = guard({ readLimit: "report" });
   for (let i = 0; i < 125; i++) g.checkRead(req());
   assert.equal(logs.filter((l) => l.includes("read limit (report only)")).length, 1);
+});
+
+test("builds signal busy (for the asset bank's probes) when let in or queued, and while they last", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let marks = 0;
+  const gate = new BuildGate(1, 2, undefined, () => marks++);
+  const release: (() => void)[] = [];
+  const work = () => gate.run(() => new Promise<void>((r) => release.push(r)));
+  const a = work();
+  assert.equal(marks, 1, "let in");
+  const b = work();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(marks, 2, "queued");
+  t.mock.timers.tick(BUSY_EVERY_MS);
+  assert.equal(marks, 3, "again while they last");
+  release.shift()!();
+  await a;
+  await new Promise((r) => setImmediate(r));
+  release.shift()!();
+  await b;
+  assert.equal(gate.busy, false);
+  t.mock.timers.tick(BUSY_EVERY_MS);
+  const after = marks;
+  t.mock.timers.tick(3 * BUSY_EVERY_MS);
+  assert.equal(marks, after, "quiet once nothing runs or waits");
 });
 
 test("builds: a few at once, a short queue, then 503 busy with Retry-After", async () => {

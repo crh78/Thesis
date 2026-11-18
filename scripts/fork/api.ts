@@ -16,7 +16,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AlpacaStocks, AuditBases } from "@thesis/executor/settler";
-import { loadBankState, type BankState } from "@thesis/venues/bank";
+import { FileSink, buildsBusyFileFor, defaultSink, loadBankState, type BankState } from "@thesis/venues/bank";
 import { fetchGeminiEvent, geminiProxy } from "@thesis/venues/gemini";
 import { envVar } from "../../packages/venues/registry/src/lib/env.ts";
 import { quicknodeHeaders, relayTransactions, webhookConfigured } from "../../infra/quicknode/fork-relay.ts";
@@ -184,6 +184,16 @@ function digestTime(now: Date) {
   };
 }
 
+/** The asset bank's `trade-builds.busy`, next to its file sink's bank (null with the Supabase sink). */
+function bankBusyFile(): string | null {
+  try {
+    const sink = defaultSink();
+    return sink instanceof FileSink ? buildsBusyFileFor(sink.path) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The public fork's abuse limits from the environment (see api/guard.ts and the README's "Abuse
  * limits"): FORK_API_AUTH, FORK_API_READ_LIMIT, FORK_API_SERVICE_KEYS, FORK_API_PROXY_KEY and the
@@ -199,7 +209,7 @@ export function forkGuard(log: (m: string) => void): Guard {
   if (auth === "enforce" && !privy) throw new Error("FORK_API_AUTH=enforce needs PRIVY_APP_ID, PRIVY_VERIFICATION_KEY and PRIVY_APP_SECRET");
   const serviceKeys = parseServiceKeys(envVar("FORK_API_SERVICE_KEYS"));
   log(`abuse limits: auth ${auth}${privy ? "" : " (no Privy values: tokens can't be checked)"}, read limit ${readLimit}, ${serviceKeys.size} service key(s)`);
-  return new Guard({ auth, readLimit, serviceKeys, proxyKey: envVar("FORK_API_PROXY_KEY"), privy, log });
+  return new Guard({ auth, readLimit, serviceKeys, proxyKey: envVar("FORK_API_PROXY_KEY"), privy, log, busyFile: bankBusyFile() });
 }
 
 async function serve(): Promise<void> {

@@ -20,6 +20,12 @@ const ROUTE = { maxAccounts: MAX_ACCOUNTS, minPooledUsd: PRICEABLE_MIN_POOLED_US
 /** How long a build reuses the last best issuer of an underlying instead of quoting every issuer. */
 const WINNER_TTL_MS = 2 * 60_000;
 const NO_ROUTE = "no liquid tokenized version to buy right now";
+/**
+ * A quote that failed rather than found no route (bestIssuer notes it as `no quote: <error>`): a
+ * rate limit, a timeout, a server error or no connection. Jupiter's own "no route" answers
+ * (COULD_NOT_FIND_ANY_ROUTE, HTTP 400/404, empty route) don't match.
+ */
+export const TRANSIENT_QUOTE = /429|rate.?limit|timeout|timed out|abort|ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|socket|network|HTTP 5\d\d/i;
 /** How long a leg with no Jupiter route is skipped before it's quoted again. */
 const NO_ROUTE_TTL_MS = 10 * 60_000;
 
@@ -301,7 +307,8 @@ export class Router {
     return (await Promise.all(traded.map(async (l, j): Promise<TradeLeg[]> => {
       if (!remaining.has(l.index)) return [];
       const why = this.leftOut(l, now, side);
-      if (why) throw unavailable(l, why);
+      // A remembered "no route" may come from a failed quote: a swap leg is quoted afresh below.
+      if (why && !(why === NO_ROUTE && l.how === "swap" && side === "back")) throw unavailable(l, why);
       if (side === "fade" || l.how === "perp") {
         const sub = recorded.find((r) => r.leg === l.index)?.sub;
         if (sub === undefined) throw unavailable(l, "its Phoenix account isn't known");
@@ -309,10 +316,28 @@ export class Router {
       }
       if (l.how === "lend") return this.#legFor(l, parts[j], "lend", user, payer, side);
       const usdPart = Number(parts[j]) / USD;
-      const quote = (onlyMints?: string[]) =>
-        bestIssuer(l.key!, usdPart, { state: this.#o.bank(), ...this.route, onlyMints }).then((r) => r.winner).catch(() => null);
+      // Only a definite "no route" ends the retry: a quote that failed (Jupiter busy, slow, down)
+      // answers 503 busy and leaves the retry for another try.
+      let pooled = false;
+      try {
+        pooled = issuerPool(l.key!, this.#o.bank(), this.route).pool.length > 0;
+      } catch {
+        // not in the bank at all
+      }
+      if (!pooled) throw unavailable(l, NO_ROUTE);
+      let transient = false;
+      const quote = async (onlyMints?: string[]) => {
+        const r = await bestIssuer(l.key!, usdPart, { state: this.#o.bank(), ...this.route, onlyMints }).catch(() => null);
+        if (!r || (!r.winner && r.skipped.some((s) => TRANSIENT_QUOTE.test(s.reason)))) transient = true;
+        return r?.winner ?? null;
+      };
       const known = this.#winners.get(l.key!);
       const w = (known && known.at > now - WINNER_TTL_MS ? await quote([known.mint]) : null) ?? await quote();
+      if (!w && transient) {
+        const e = new ApiError(503, "busy", `Couldn't quote ${l.name} right now. Try again in a moment.`);
+        e.headers = { "retry-after": "5" };
+        throw e;
+      }
       if (!w) throw unavailable(l, NO_ROUTE);
       return this.#legFor(l, parts[j], w, user, payer, side);
     }))).flat();

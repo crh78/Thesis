@@ -51,6 +51,7 @@ import { jupiterBuy, jupiterLendRedeem, type VenueLeg } from "@thesis/venues/jup
 import { PHOENIX_LEG_CU } from "@thesis/venues/phoenix";
 import {
   ApiError,
+  base58,
   FADE_BLOCKED,
   FADE_NO_MARKET,
   FADE_OWN_TAKE,
@@ -102,13 +103,24 @@ type TradeContext = {
  */
 class SendFailed extends ApiError {
   readonly landed: string[];
-  constructor(e: ApiError, landed: string[]) {
+  /** The failed transaction's fate is unknown (it may still land): never counted as not landed. */
+  readonly unknown: boolean;
+  constructor(e: ApiError, landed: string[], unknown = false) {
     super(e.status, e.code, e.message);
     this.headers = e.headers;
     this.body = e.body;
     this.landed = landed;
+    this.unknown = unknown;
   }
 }
+
+/** How often, and at most how long, an unconfirmed transaction's status is polled. */
+const SETTLE_POLL_MS = 2_000;
+const SETTLE_MAX_MS = 90_000;
+
+/** A send refused before it reached the chain: the preflight simulation failed. */
+const refusedByPreflight = (e: unknown) =>
+  Array.isArray((e as { logs?: unknown })?.logs) || /simulation failed|preflight/i.test(e instanceof Error ? e.message : String(e));
 
 /** The answer to a split trade that stopped partway: 422 `trade_incomplete` (see the README). */
 function incompleteError(position: string, t: IncompleteTrade, status = 422, code = "trade_incomplete", message?: string): ApiError {
@@ -237,7 +249,7 @@ export class ForkService {
     this.#log = o.log ?? (() => {});
     this.#store = new StateStore(o.statePath, o.lookupTable, (m) => (o.log ?? console.error)(m));
     this.#split = new SplitTrades(this.#store);
-    this.#valuation = new Valuation(o, this.#store);
+    this.#valuation = new Valuation(o, this.#store, { pricesFile: o.pricesFile });
     this.#router = new Router(o);
     this.#phoenix = o.phoenix ? new PhoenixDesk(o, o.phoenix, this.#store, this.#program) : null;
     this.#router.phoenix = this.#phoenix;
@@ -1054,9 +1066,11 @@ export class ForkService {
     const position = build.position.address.toBase58();
     let record: IncompleteTrade;
     if (build.retry) {
-      // The one retry failed: what's left is a sweep. (Gone: it finished or was swept meanwhile.)
-      if (!this.#split.get(build.owner, position)) return e;
-      record = { ...build.retry, signatures: [...build.retry.signatures, ...landed], next: "sweep" };
+      // The one retry failed: what's left is a sweep. Merged into the record as it is now (a
+      // sweep may have noted what it sold); gone: it finished or was swept meanwhile.
+      const current = this.#split.get(build.owner, position);
+      if (!current) return e;
+      record = { ...current, signatures: [...current.signatures, ...landed], next: "sweep" };
     } else {
       if (!landed.length) return e;
       const { remaining, split } = afterFailure(build.txLegs ?? [], landed.length);
@@ -1073,7 +1087,8 @@ export class ForkService {
         receipt: serializeIx(trade.receipt),
         receiptCu: trade.receiptCu,
         signatures: landed,
-        next: split ? "sweep" : "retry",
+        // A transaction whose fate is unknown may still land: no retry, the sweep reads the ticket.
+        next: split || (e instanceof SendFailed && e.unknown) ? "sweep" : "retry",
         publishTakeId: build.position.publishTakeId,
         at: Date.now(),
       };
@@ -1119,7 +1134,7 @@ export class ForkService {
     const owner = parseKey(wallet);
     const [position, rec] = this.#incomplete(owner, address, "retry");
     const key = position.toBase58();
-    if (rec.next !== "retry") throw incompleteError(key, rec, 409, "retry_used", "This trade was retried already. Sell what it bought back to cash.");
+    if (rec.next !== "retry" || rec.swept?.length) throw incompleteError(key, rec, 409, "retry_used", "This trade was retried or swept already. Sell what it bought back to cash.");
     const toSweep = (status: number, code: string, message: string) => {
       const next = { ...rec, next: "sweep" as const };
       this.#split.set(key, next);
@@ -1141,6 +1156,8 @@ export class ForkService {
       mapped = onChainLegs(mapped, onChain.legs);
     }
     const legs = mapped.filter((l) => rec.included.includes(l.index));
+    // Only a definite "can't be bought now" ends the retry; Jupiter being busy or slow (503, 502)
+    // leaves it for another try. Building doesn't use the retry up: sending it does.
     const venue = await this.#router.rebuild(legs, owner, rec.usd, rec.side, new Set(rec.remaining), this.#phoenix?.legsOf(position) ?? []).catch((e: unknown) => {
       if (e instanceof ApiError && e.code === "retry_unavailable") throw toSweep(422, e.code, e.message);
       throw e;
@@ -1168,6 +1185,8 @@ export class ForkService {
       if ((await this.#ticketGone(position)) === "complete") throw new ApiError(409, "trade_complete", "This trade went through after all.");
       return { done: true as const, phoenixCashOut: false };
     }
+    // Once a sweep is built, the trade isn't retried any more.
+    if (rec.next === "retry") this.#split.set(position.toBase58(), { ...rec, next: "sweep" });
     const conn = this.#o.connection;
     const payer = this.#o.appPayer.publicKey;
     const usdc = USDC_MINT_MAINNET.toBase58();
@@ -1213,10 +1232,44 @@ export class ForkService {
     };
   }
 
+  /** Drops every open build for `position` (a retry or sweep of it is being sent: the others are stale). */
+  #dropBuildsFor(position: PublicKey) {
+    for (const [id, b] of this.#builds) if (b.position.address.equals(position)) this.#builds.delete(id);
+  }
+
+  /**
+   * A retry's submit, inside the wallet's queue before anything is sent: the trade must still be
+   * waiting for this retry (no other retry or sweep sent since, nothing more landed), and no leg it
+   * buys may be on the ticket. Then the retry is used up, and other builds for the trade dropped.
+   */
+  async #admitRetry(build: Build & { retry: IncompleteTrade }) {
+    const position = build.position.address.toBase58();
+    const current = this.#split.get(build.owner, position);
+    const stale = () => new ApiError(409, "trade_changed", "This trade changed since the build. Build again.");
+    if (!current) throw stale();
+    if (current.next !== "retry" || current.swept?.length || current.signatures.length !== build.retry.signatures.length) {
+      throw incompleteError(position, current, 409, "retry_used", "This trade was retried or swept already. Sell what it bought back to cash.");
+    }
+    const ticket = await this.#ticket(new PublicKey(build.owner), build.position.address);
+    if (!ticket) throw stale();
+    if (current.remaining.some((leg) => ticket.named & (1 << leg))) {
+      const next = { ...current, next: "sweep" as const };
+      this.#split.set(position, next);
+      throw incompleteError(position, next, 409, "retry_unavailable", "Part of this trade landed after all. Sell what it bought back to cash.");
+    }
+    this.#split.set(position, { ...current, next: "sweep" });
+    this.#dropBuildsFor(build.position.address);
+  }
+
   /** Sends a sweep. When it lands the trade is over; a partly landed one notes what it sold. */
   async #submitSweep(build: Build, txs: VersionedTransaction[]) {
     const position = build.position.address.toBase58();
     const signatures = await this.#store.withWallet(build.owner, async () => {
+      // Re-checked here, after any earlier submit for this wallet: the trade must still be stopped.
+      if (!this.#split.get(build.owner, position) || !(await this.#ticket(new PublicKey(build.owner), build.position.address))) {
+        throw new ApiError(409, "trade_changed", "This trade changed since the build. Build again.");
+      }
+      this.#dropBuildsFor(build.position.address);
       try {
         return await this.#send(txs, build.market);
       } catch (e) {
@@ -1298,6 +1351,10 @@ export class ForkService {
     if (!app.author_wallet) throw new ApiError(409, "no_author_wallet", "This take's author has no wallet yet.");
     if (app.author_wallet !== author) throw new ApiError(403, "not_author", "Only the take's author can post it.");
     if (app.status === "live") throw new ApiError(409, "already_live");
+    // A publish of this take that stopped partway: a fresh one would start its ticket over
+    // (begin_trade) and lose what the landed part recorded. Retry or sweep it first.
+    const stopped = this.#split.list(authorKey.toBase58()).find(([, t]) => t.publishTakeId === takeId);
+    if (stopped) throw incompleteError(stopped[0], stopped[1], 409);
     await this.#checkFunds(authorKey, usd);
     const [{ venue, included, excluded }, config] = await Promise.all([this.#router.venueLegs(this.#mapLegs(app.legs), authorKey, usd), this.#config()]);
     const { ix, address } = await this.#createIx(app, authorKey, usd, included);
@@ -1358,6 +1415,7 @@ export class ForkService {
         const held = await this.#program.account.position.fetchNullable(build.position.address, "confirmed");
         if (!held || held.exited) throw new ApiError(409, "already_exited", "This position has already been sold.");
       }
+      if (build.retry) await this.#admitRetry(build as Build & { retry: IncompleteTrade });
       this.#wallets.forgetActivity(build.owner);
       let sent: string[];
       try {
@@ -1536,36 +1594,71 @@ export class ForkService {
     await this.#o.fork.refreshMarkets(market);
     const times: Record<string, number> = { [`refresh ${market.length} accounts`]: Date.now() - started };
     const out: string[] = [];
+    let unknown = false;
     try {
       for (const [i, tx] of txs.entries()) {
         const sent = Date.now();
-        const sig = await conn.sendTransaction(tx, { skipPreflight: false }).catch((e) => {
-          throw new ApiError(502, "send_failed", errorText(e));
-        });
-        const confirming = Date.now();
         // Confirm against the transaction's own blockhash: once its last valid block passes, it can't
         // land any more. (A fresh blockhash would keep waiting ~60 s past that.)
         const own = tx.message.recentBlockhash;
         const lastValid = this.#blockhashes.get(own);
         const { blockhash, lastValidBlockHeight } = lastValid !== undefined ? { blockhash: own, lastValidBlockHeight: lastValid } : await conn.getLatestBlockhash("confirmed");
-        const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed").catch(async (e) => {
-          // Expired, or the RPC failed: whether it landed decides what comes next (a split
-          // trade's retry must not buy a leg twice).
-          const status = (await conn.getSignatureStatuses([sig]).catch(() => null))?.value[0];
-          if (status && !status.err && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) return { value: { err: null } };
-          this.#log(`confirming ${sig} failed: ${errorText(e)}`);
-          throw new ApiError(502, "transaction_failed", `${sig}: not confirmed`);
+        // The fee payer's signature is the transaction's id, known before it's sent.
+        const sig = base58(tx.signatures[0]);
+        let fate: "landed" | "failed" | "unknown" | null = null;
+        await conn.sendTransaction(tx, { skipPreflight: false }).catch(async (e) => {
+          if (refusedByPreflight(e)) throw new ApiError(502, "send_failed", errorText(e));
+          // The RPC failed: the transaction may have gone out all the same.
+          this.#log(`sending ${sig} failed (${errorText(e)}); waiting to see if it landed`);
+          fate = await this.#settle(sig, lastValidBlockHeight);
+          if (fate !== "landed") {
+            unknown = fate === "unknown";
+            throw new ApiError(502, "send_failed", errorText(e));
+          }
         });
-        if (res.value.err) throw new ApiError(502, "transaction_failed", `${sig}: ${JSON.stringify(res.value.err)}`);
+        const confirming = Date.now();
+        if (fate !== "landed") {
+          const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed").catch(async (e) => {
+            // Expired, or the RPC failed: whether it landed decides what comes next (a split
+            // trade's retry must not buy a leg twice). Unknown is never "didn't land".
+            this.#log(`confirming ${sig} failed (${errorText(e)}); waiting to see if it landed`);
+            const settled = await this.#settle(sig, lastValidBlockHeight);
+            if (settled === "landed") return { value: { err: null } };
+            unknown = settled === "unknown";
+            throw new ApiError(502, "transaction_failed", `${sig}: ${settled === "unknown" ? "not confirmed yet" : "not confirmed"}`);
+          });
+          if (res.value.err) throw new ApiError(502, "transaction_failed", `${sig}: ${JSON.stringify(res.value.err)}`);
+        }
         times[`send ${i + 1}`] = confirming - sent;
         times[`confirm ${i + 1}`] = Date.now() - confirming;
         out.push(sig);
       }
     } catch (e) {
-      throw new SendFailed(e instanceof ApiError ? e : new ApiError(502, "send_failed", errorText(e)), out);
+      throw new SendFailed(e instanceof ApiError ? e : new ApiError(502, "send_failed", errorText(e)), out, unknown);
     }
     logSlow(this.#log, `send of ${txs.length} transaction(s)`, Date.now() - started, times);
     return out;
+  }
+
+  /**
+   * Polls a transaction's status until it's known: "landed" (confirmed without an error), "failed"
+   * (landed with an error, or its blockhash expired unseen), or "unknown" after SETTLE_MAX_MS
+   * without an answer.
+   */
+  async #settle(sig: string, lastValidBlockHeight: number): Promise<"landed" | "failed" | "unknown"> {
+    const conn = this.#o.connection;
+    const until = Date.now() + SETTLE_MAX_MS;
+    for (;;) {
+      const status = (await conn.getSignatureStatuses([sig], { searchTransactionHistory: true }).catch(() => null))?.value?.[0];
+      if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) return status.err ? "failed" : "landed";
+      if (!status) {
+        const height = await conn.getBlockHeight("confirmed").catch(() => null);
+        // Its blockhash is past: it can't land any more.
+        if (height !== null && height > lastValidBlockHeight) return "failed";
+      }
+      if (Date.now() >= until) return "unknown";
+      await new Promise((r) => setTimeout(r, SETTLE_POLL_MS));
+    }
   }
 
   // --- Demo mirrors -----------------------------------------------------------------------

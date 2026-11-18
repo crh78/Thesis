@@ -31,6 +31,7 @@ function walletFixture(t: TestContext) {
     bank: emptyState,
     takes: async () => null,
     stocks: null,
+    pricesFile: null,
     bases: null,
     jupiterApiKey: null,
     statePath,
