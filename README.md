@@ -121,18 +121,18 @@ UI, latency and trade testing across the web app, the iOS app and the fork: ever
 Anyone can sign up, reply "@yourthesisxyz back $20" under a post on X, and trade play money on the shared fork. Public users come in through the web app; the iOS app runs only as a development build on the team's phones until phase 3.
 
 **Needed before opening it up**
-- **Production launch:** the web app's Vercel deploy with its settings (`apps/www/.env.example`), `FORK_API_PROXY_KEY` set in Vercel and on the VM, a phone test of production, then the fork API's auth and read limits switched to enforce.
+- **Production launch:** mostly done. The web app is live on Vercel at `yourthesis.xyz`, `FORK_API_PROXY_KEY` is set in Vercel and on the VM, and the fork API's auth enforces (a Privy token on every money call). Still to do: a production deploy that picks up the proxy key and `NEXT_PUBLIC_X_LOGIN`, a phone test of production, then `FORK_API_READ_LIMIT=enforce` on the VM.
 - **The web app as the public product** (`apps/www`): built: the iOS look and tabs, desktop with a QR code, Google and email sign-in, Me with both scores and the $1,000 cap, feed, leaderboards, Search, comments, notifications, Copy from X, install prompt, web push, the composer, card legs, and the Privy token on fork money calls. Still to do:
-  - switch on X login in Privy, then set `NEXT_PUBLIC_X_LOGIN=on` in Vercel;
+  - X login: on in Privy, and `NEXT_PUBLIC_X_LOGIN=on` is set in Vercel (live with the next deploy);
   - the spending-limit consent screen (`apps/www/app/limits`, built with the session signers);
-  - switch the fork API to enforce once it's been tested in production.
+  - the read limit's switch to enforce, once production has the proxy key.
 - **X reply agent** (replaces the Blink): "@thesis back $20" or "@thesis fade $50" under any X post. It reads the post, builds a basket with the take builder, trades from the replier's Privy wallet within their limits, and replies with what it bought. The take is the replier's, quoting the post; others can back and fade it, and the replier earns the creator share. Replies carry no link (X charges $0.20 for a reply with a URL, $0.015 without); someone who hasn't signed up gets one reply pointing to the link in the bot's bio.
 - **Privy session signers:** per-trade and daily limits the user approves once and can revoke. The X agent, auto-copy and iMessage all use them.
 - **Abuse limits** (built; see [`scripts/fork/README.md`](scripts/fork/README.md#abuse-limits)):
   - a Privy token on the fork API's money endpoints, in report mode until enforced after the production deploy; a service key for the X agent;
   - $1,000 of play money per account, no top-ups, no withdrawals;
   - rate limits: 10 money actions a minute and 100 a day per wallet, "busy" when the shared Jupiter key is backed up, 120 reads a minute per IP (logged only until the production proxy sends the visitor's IP);
-  - still to do: at most 10 bot replies per user per day (trades, score lookups and help together), plus a hard monthly cap in the X console.
+  - the X bot answers each person at most 10 times a day (every reply counts), 3 times per thread and 100 times in total (`apps/x`); still to do: a hard monthly cap in the X console.
 - **No resets once it's public:** no program changes and no clock-moving suites while it's open. Policy in [`scripts/fork/README.md`](scripts/fork/README.md#resets).
 - **A clean feed:** done (e2e suites trade only made-up takes from hidden accounts).
 - **Own-take fades:** the fork API refuses fading your own take; the program-level check waits for the next program change.
@@ -144,7 +144,7 @@ Anyone can sign up, reply "@yourthesisxyz back $20" under a post on X, and trade
 - **Track records:** "@thesis score @handle" scores an X account's posted calls as baskets priced at posting time, forward only.
 - **Auto-copy:** Thesis backs a copied account's new calls within the user's limits (one-tap copying is built).
 - **Share to Messages (the public share path):** iOS won't list a web app in the share sheet and the native extension needs the App Store, but Messages is always there. A link shared to the Thesis contact becomes a drafted take through the `source` function, and the agent replies with it. Part of iMessage trading.
-- **Web domain:** register `yourthesis.xyz` and point `WEB_URL` at it.
+- **Web domain: done:** `yourthesis.xyz` serves the web app.
 - **X cost limits:** read each post once and share the result; track an account only once someone scores or copies it; fetch only posts that look like calls; cache share-sheet results per URL.
 - **iMessage trading:** create, back and fade by text through the session signers (the BlueBubbles adapter is built but untested on a real install); also takes shared links.
 - **Thesis MCP server:** score an account, build a take from a post, back, fade, sell and list positions, within the user's limits.
@@ -175,7 +175,7 @@ No users and no money in; just a real program ID and real activity ([launch chec
 ### Account-owner setup
 
 - **X developer app:** pay-per-use credits, a hard monthly cap in the X console, and the bot's handle.
-- **Privy:** sign-in with X and session signers, set up by the Privy account's owner (needed for the X agent, auto-copy and iMessage trading).
+- **Privy: done:** sign-in with X and session signers are on.
 - **Phoenix on a phone:** dogfood it with a development build.
 
 ### Open decisions
