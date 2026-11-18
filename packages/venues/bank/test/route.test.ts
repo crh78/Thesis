@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PRICEABLE_MIN_POOLED_USD, bestIssuer, breakTies, issuerPool, type Candidate } from "../src/route.ts";
+import { MINT_READ_TTL_MS, PRICEABLE_MIN_POOLED_USD, bestIssuer, breakTies, cachedMintReads, issuerPool, type Candidate } from "../src/route.ts";
 import type { JupQuote } from "../src/jupiter.ts";
 import { NOW, bySymbol, fixtureQuote, fixtureState } from "./helpers.ts";
 
@@ -163,4 +163,28 @@ test("maxPriceImpactPct drops fills that move the price too much", async () => {
   assert.ok(!r.runnersUp.some((c) => c.symbol === "NVDAon"));
   assert.match(r.skipped.find((s) => s.symbol === "NVDAon")!.reason, /^price impact \d+\.\d\d% is over 1%$/);
   assert.ok([r.winner!, ...r.runnersUp].every((c) => c.priceImpactPct <= 1));
+});
+
+test("live mint reads are reused for a minute: only mints not read since are fetched", async () => {
+  let now = 1_000_000;
+  const asked: string[][] = [];
+  const scaled = { multiplier: 1.01, newMultiplier: 1.01, newMultiplierEffectiveAt: 0 };
+  const read = cachedMintReads(async (mints) => {
+    asked.push(mints);
+    return new Map(mints.map((m) => [m, m === "a" ? scaled : null]));
+  }, MINT_READ_TTL_MS, () => now);
+  assert.deepEqual([...(await read(["a", "b"])).entries()], [["a", scaled], ["b", null]]);
+  now += MINT_READ_TTL_MS - 1;
+  assert.deepEqual([...(await read(["b", "a", "c"])).keys()], ["b", "a", "c"]);
+  assert.deepEqual(asked, [["a", "b"], ["c"]], "a and b are reused, only c is read");
+  now += 1;
+  await read(["a"]);
+  assert.deepEqual(asked.at(-1), ["a"], "read again once a minute old");
+
+  // A failed read caches nothing.
+  const failing = cachedMintReads(async () => {
+    throw new Error("rpc down");
+  });
+  await assert.rejects(failing(["a"]), /rpc down/);
+  await assert.rejects(failing(["a"]), /rpc down/);
 });

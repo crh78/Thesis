@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Connection, Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import idl from "../idl/thesis.json" with { type: "json" };
-import { MAX_TX_BYTES, composeTransactions, v0Size } from "../src/compose.ts";
+import { LOOKUP_TABLE_TTL_MS, MAX_TX_BYTES, composeTransactions, loadLookupTables, v0Size } from "../src/compose.ts";
 import { thesisLookupTableAddresses } from "../src/lookup-table.ts";
 
 const payer = Keypair.generate().publicKey;
@@ -150,4 +150,41 @@ test("proof of trade: a continued trade (a retry) opens every transaction with t
   const [step, receiptIx] = thesisIxs(alone.tx);
   assert.deepEqual([...step.subarray(0, 11)], [...disc("trade_step"), 1, 0, 0]);
   assert.deepEqual(receiptIx.subarray(0, 8), disc("back"));
+});
+
+/** A lookup table account's data holding `addresses` (the address-lookup-table program's layout). */
+function tableData(addresses: PublicKey[]): Buffer {
+  const meta = Buffer.alloc(56);
+  meta.writeUInt32LE(1, 0); // a lookup table
+  meta.writeBigUInt64LE(2n ** 64n - 1n, 4); // not deactivated
+  return Buffer.concat([meta, ...addresses.map((a) => a.toBuffer())]);
+}
+
+test("lookup tables are read once and reused per connection until they're 10 minutes old", async () => {
+  const table = Keypair.generate().publicKey;
+  const addresses = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+  let reads = 0;
+  const conn = {
+    getMultipleAccountsInfo: async (keys: PublicKey[]) => {
+      reads += keys.length;
+      return keys.map((k) => (k.equals(table) ? { data: tableData(addresses) } : null));
+    },
+  } as unknown as Connection;
+  const t0 = 1_000_000;
+  const first = await loadLookupTables(conn, [table, table], { now: t0 });
+  assert.deepEqual(first.get(table.toBase58())!.state.addresses.map(String), addresses.map(String));
+  assert.equal(reads, 1, "the same table named twice is read once");
+  await loadLookupTables(conn, [table], { now: t0 + LOOKUP_TABLE_TTL_MS - 1 });
+  assert.equal(reads, 1, "reused while fresh");
+  await loadLookupTables(conn, [table], { now: t0 + LOOKUP_TABLE_TTL_MS });
+  assert.equal(reads, 2, "read again once it's 10 minutes old");
+  await loadLookupTables({ ...conn } as Connection, [table], { now: t0 + LOOKUP_TABLE_TTL_MS });
+  assert.equal(reads, 3, "another connection reads its own");
+  await loadLookupTables(conn, [table], { now: t0 + LOOKUP_TABLE_TTL_MS, maxAgeMs: 0 });
+  assert.equal(reads, 4, "maxAgeMs 0 reads afresh");
+
+  const missing = Keypair.generate().publicKey;
+  await assert.rejects(loadLookupTables(conn, [missing], { now: t0 }), /not found/);
+  await assert.rejects(loadLookupTables(conn, [missing], { now: t0 }), /not found/, "a missing table isn't cached");
+  assert.equal(reads, 6);
 });
