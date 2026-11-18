@@ -4,6 +4,7 @@
 // sign-in, then onboarding (profile → photo → location → follows), then the app.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
+import { useCreateWallet } from "@privy-io/react-auth/solana";
 import { setForkAuth } from "./fork";
 import { disablePush } from "./push";
 
@@ -97,10 +98,20 @@ function stepFor(s: Snapshot): Step | null {
 }
 
 /** X's picture URLs end in `_normal` (48px); `_400x400` is the full-size one. */
+/** The Privy-made Solana wallet the fork trades from (lib/fork.ts useForkWallet reads the same one). */
+const hasEmbeddedSolana = (user: { linkedAccounts?: unknown[] }) =>
+  ((user.linkedAccounts ?? []) as Array<{ type: string; chainType?: string; walletClientType?: string }>)
+    .some((a) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy");
+
 const bigXPhoto = (url: string | null | undefined) => (url ? url.replace(/_normal(\.\w+)$/, "_400x400$1") : null);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, user, getAccessToken, logout: privyLogout } = usePrivy();
+  // Privy hands back a new createWallet on every render: read it through a ref, so it isn't an
+  // effect dependency (that re-ran the session effect on every render, forever).
+  const { createWallet } = useCreateWallet();
+  const createWalletRef = useRef(createWallet);
+  createWalletRef.current = createWallet;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "launching" });
   const [attempt, setAttempt] = useState(0);
@@ -145,6 +156,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     loadedFor.current = key;
     setPhase({ kind: "settingUp" });
     (async () => {
+      // Every user gets a wallet without ever seeing one, like the iOS app. Privy's create-on-login
+      // didn't make one for web sign-ups (X and Google accounts had none, so Add cash did nothing).
+      // Not fatal: the session function picks the address up on a later load.
+      if (!hasEmbeddedSolana(user)) {
+        await createWalletRef.current().catch((e) => console.warn("wallet creation failed", e));
+      }
       try {
         const r = await fetch("/api/session", { headers: { "privy-token": await token() }, cache: "no-store" });
         if (!r.ok) throw await readError(r);

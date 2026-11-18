@@ -29,6 +29,21 @@ export function CapLine({ summary }: { summary: WalletSummary | null }) {
   );
 }
 
+/** Add cash tapped before this account has its wallet (Privy creates it at sign-in; a reload retries). */
+export function WalletPending({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="sheet-wrap" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet" role="dialog" aria-labelledby="wallet-pending-title">
+        <button className="x" aria-label="Close" onClick={onClose}>×</button>
+        <h3 id="wallet-pending-title">Setting up your account</h3>
+        <p className="muted">Your Thesis balance is still being set up. Reload the page in a moment, then add cash.</p>
+        <button className="obtn filled" style={{ marginTop: 14 }} onClick={() => window.location.reload()}>Reload</button>
+        <button className="obtn plain" onClick={onClose}>Not now</button>
+      </div>
+    </div>
+  );
+}
+
 export function AddCash({ address, summary, onClose, onDone }: { address: string; summary: WalletSummary | null; onClose: () => void; onDone: (s: WalletSummary) => void }) {
   const { left } = depositLeft(summary);
   const chips = [50, 100, 250, 500].filter((c) => c <= left);

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { rpcNow, money } from "@/lib/data";
 import { fork, useForkWallet, type WalletSummary } from "@/lib/fork";
 import { useSession } from "@/lib/session";
-import { AddCash } from "./CashSheets";
+import { AddCash, WalletPending } from "./CashSheets";
 import { ProfileMenuButton } from "./Drawer";
 import NotificationsBell from "./Notifications";
 import SuggestedFollows from "./SuggestedFollows";
@@ -87,10 +87,12 @@ export default function Feed({ initial }: { initial: FeedTake[] }) {
     <main className="page feed" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div className="feed-top">
         <header className="topbar">
-          <ProfileMenuButton open={drawer} onOpenChange={setDrawer} />
+          <div className="feed-actions feed-left">
+            <ProfileMenuButton open={drawer} onOpenChange={setDrawer} />
+            <NotificationsBell />
+          </div>
           <span className="brand">thesis</span>
           <div className="feed-actions">
-          <NotificationsBell />
           <button className="balance-pill glass" onClick={() => setAdding(true)} aria-label={`Balance ${money(balance ?? 0)}. Add cash`}>
             <span className="mono">{balance == null ? "—" : money(balance)}</span>
             <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 2v8M2 6h8" /></svg>
@@ -128,8 +130,10 @@ export default function Feed({ initial }: { initial: FeedTake[] }) {
         )
       ) : null}
 
-      {adding && address ? (
-        <AddCash address={address} summary={wallet} onClose={() => setAdding(false)} onDone={setWallet} />
+      {adding ? (
+        address
+          ? <AddCash address={address} summary={wallet} onClose={() => setAdding(false)} onDone={setWallet} />
+          : <WalletPending onClose={() => setAdding(false)} />
       ) : null}
     </main>
   );

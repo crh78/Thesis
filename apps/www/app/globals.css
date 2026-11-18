@@ -41,7 +41,8 @@
   }
 }
 @media (min-width: 980px) {
-  :root { --col: 440px; }
+  /* The phone column grows a little on tall windows (full screen), so it never looks lost. */
+  :root { --col: clamp(440px, 48vh, 520px); }
 }
 
 * { box-sizing: border-box; }
@@ -181,6 +182,21 @@ a.author-link:hover { opacity: 0.85; }
 .welcome-note { text-align: center; margin: 14px 0 0; }
 
 .hero { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 14px; padding: 24px 0; min-height: 300px; transition: opacity 0.45s; }
+/* The welcome screen fits the window's height exactly: type, spacing and buttons scale with it,
+   and the story above the title gives way first, so nobody has to scroll to sign in. */
+.welcome { height: 100dvh; min-height: 0; overflow: hidden; }
+.welcome-top { height: clamp(40px, 6vh, 60px); flex: none; }
+.welcome .brand { font-size: clamp(24px, 3.4vh, 34px) !important; }
+.welcome-title { font-size: clamp(30px, 4.6vh, 54px); flex: none; }
+.welcome-sub { font-size: clamp(14px, 2vh, 19px); margin: clamp(6px, 1.4vh, 16px) 0 clamp(14px, 3vh, 34px); flex: none; }
+.welcome .signin { gap: clamp(8px, 1.4vh, 14px); flex: none; }
+.welcome .obtn { height: clamp(44px, 6.6vh, 62px); font-size: clamp(15px, 2.1vh, 19px); }
+.welcome-note { margin-top: clamp(8px, 1.6vh, 16px); flex: none; }
+.welcome .hero { flex: 1 1 0; min-height: 0; overflow: hidden; padding: clamp(6px, 2.6vh, 30px) 0; gap: clamp(8px, 1.6vh, 18px); }
+.welcome .hero-claim { font-size: clamp(19px, 3.2vh, 34px); }
+.welcome .hero-leg { font-size: clamp(12px, 1.7vh, 16px); }
+@media (max-height: 640px) { .welcome .hero-trades { display: none; } }
+@media (max-height: 540px) { .welcome .hero { display: none; } .welcome-title { margin-top: auto; } }
 .hero-claim { position: relative; font-family: var(--font-serif); font-size: 26px; line-height: 1.2; }
 .hero-claim .ghost { visibility: hidden; }
 .hero-claim .typed { position: absolute; inset: 0; }
@@ -395,6 +411,7 @@ button.menu-item:hover { background: var(--glass-on); }
 .compose-bar textarea { flex: 1; min-width: 0; background: none; border: 0; outline: none; resize: none; font-size: 16px; padding: 6px 0; max-height: 120px; }
 .send { width: 34px; height: 34px; border-radius: 50%; background: var(--text); color: var(--bg); display: grid; place-items: center; flex: none; }
 .feed-actions { display: flex; gap: 8px; align-items: center; justify-self: end; }
+.feed-actions.feed-left { justify-self: start; }
 /* Phones: the bell and the balance pill crowded the wordmark (5 px apart at 375). */
 @media (max-width: 400px) {
   .feed-top .brand { font-size: 21px; }

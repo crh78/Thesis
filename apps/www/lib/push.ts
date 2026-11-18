@@ -10,6 +10,17 @@ export const isStandalone = () =>
   (window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
 
 export const isIOS = () => typeof navigator !== "undefined" && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+/** Which browser on an iPhone or iPad: they all add to the home screen, from different places. */
+export type IOSBrowser = "safari" | "chrome" | "firefox" | "edge" | "other";
+export function iosBrowser(): IOSBrowser {
+  if (typeof navigator === "undefined") return "other";
+  const ua = navigator.userAgent;
+  if (/CriOS/.test(ua)) return "chrome";
+  if (/FxiOS/.test(ua)) return "firefox";
+  if (/EdgiOS/.test(ua)) return "edge";
+  if (/Safari/.test(ua) && !/(OPiOS|GSA|DuckDuckGo|YaBrowser)/.test(ua)) return "safari";
+  return "other";
+}
 export const isPhone = () => typeof navigator !== "undefined" && (/iPhone|iPod|Android.+Mobile/.test(navigator.userAgent) || (isIOS() && navigator.maxTouchPoints > 1));
 export const pushSupported = () => typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 
