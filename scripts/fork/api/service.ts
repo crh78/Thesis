@@ -809,10 +809,10 @@ export class ForkService {
    */
   async buildExit(takeId: string, address: string, wallet: string, o: BuildOpts = {}) {
     const t = o.timings ?? new Timings();
-    return this.#timed(`sale build ${takeId.slice(0, 8)}`, t, () => this.#buildExit(takeId, address, wallet, t));
+    return this.#timed(`sale build ${takeId.slice(0, 8)}`, t, async () => this.#keep(await this.#buildExit(takeId, address, wallet, t, o)));
   }
 
-  async #buildExit(takeId: string, address: string, wallet: string, t: Timings) {
+  async #buildExit(takeId: string, address: string, wallet: string, t: Timings, o: BuildOpts) {
     const owner = parseKey(wallet);
     const position = parseKey(address);
     const mirror = this.#state.takes[takeId];
@@ -915,7 +915,7 @@ export class ForkService {
       const venues: VenueLeg[] = [...closes, ...swaps.map((q) => q.venue), ...redeemLegs];
       // A sale with Phoenix closes may take several transactions (each order is ~640 bytes);
       // the exit is recorded in the last one.
-      const built = await this.#compose(venues, ix, THESIS_COMPUTE_UNITS.exitPosition, owner, "exit", { take: takeKey, address: position, exit }, false, closes.length > 0, { timings: t });
+      const built = await this.#compose(venues, ix, THESIS_COMPUTE_UNITS.exitPosition, owner, "exit", { take: takeKey, address: position, exit }, false, closes.length > 0, { timings: t, quotedAt: t.quotedAt, prebuilt: o.prebuild });
       const swapped = (k: "outAmount" | "otherAmountThreshold") => Number(swaps.reduce((n, q) => n + BigInt(q.quote[k]), 0n)) / USD;
       // The sale pays the escrow back in full, in the same transaction. Phoenix legs close at
       // most 1% from the mid (DEFAULT_SLIPPAGE).
@@ -1760,6 +1760,8 @@ export class ForkService {
         if (!held || held.exited) throw new ApiError(409, "already_exited", "This position has already been sold.");
       }
       if (build.retry) await this.#admitRetry(build as Build & { retry: IncompleteTrade });
+      // Its Phoenix children are its own from here (a rebuild may have given them to another build).
+      if (build.kind === "back" || build.kind === "publish") this.#phoenix?.commit(build.position.address);
       this.#wallets.forgetActivity(build.owner);
       let sent: string[];
       try {
