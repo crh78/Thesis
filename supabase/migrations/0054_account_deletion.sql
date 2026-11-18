@@ -24,6 +24,10 @@
 
 -- Schema -------------------------------------------------------------------------------------------
 
+-- The changes below take exclusive locks on takes and comments: fail fast rather than queue
+-- behind a relay insert (both tables are small, so this shouldn't trip).
+set lock_timeout = '5s';
+
 alter table public.takes alter column author_id drop not null;
 alter table public.takes drop constraint takes_author_id_fkey;
 alter table public.takes add constraint takes_author_id_fkey
