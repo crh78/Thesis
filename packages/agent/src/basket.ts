@@ -30,6 +30,8 @@ export type DraftMeta = {
   originRef?: string;
   /** What the take copies: an X post's text, shown on the take as "via …". */
   source?: { text: string; url: string; label: string };
+  /** The X bot's asker: the draft waits for them in the web app once they sign in with this X account. */
+  forX?: string;
 };
 
 type Leg = { id: string; name: string; kind: string; weight: number; side?: string | null; why: string };
@@ -77,7 +79,7 @@ export async function buildBasket(cfg: BasketConfig, args: BasketArgs, meta: Dra
     headers: { "content-type": "application/json", "x-bot-secret": cfg.botSecret },
     body: JSON.stringify({
       claim, risk: args.risk, horizon: args.horizon,
-      origin: meta.origin, context: meta.context, origin_ref: meta.originRef,
+      origin: meta.origin, context: meta.context, origin_ref: meta.originRef, for_x: meta.forX,
       ...(meta.source ? { source: { text: meta.source.text.slice(0, 2000), url: meta.source.url, label: meta.source.label, kind: "x" } } : {}),
     }),
     signal: AbortSignal.timeout(35_000),

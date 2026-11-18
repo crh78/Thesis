@@ -13,6 +13,8 @@ export type State = {
   replies: number;
   byAuthor: Record<string, number>;
   byConversation: Record<string, number>;
+  /** X user ids who said "stop" (kept across days, until they say "start"). */
+  optedOut: Record<string, true>;
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -31,6 +33,7 @@ export function loadState(path: string): State {
     replies: fresh ? 0 : s.replies ?? 0,
     byAuthor: fresh ? {} : s.byAuthor ?? {},
     byConversation: fresh ? {} : s.byConversation ?? {},
+    optedOut: s.optedOut ?? {},
   };
 }
 

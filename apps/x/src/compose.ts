@@ -39,14 +39,32 @@ function pickLine(picks: Pick[], room: number): string {
   return `${parts.length} picks`;
 }
 
-export function takeReply(claim: string, picks: Pick[], link: string): string | null {
+/**
+ * No link: a reply with a URL costs $0.20 on X, without one $0.015. The draft is saved for the
+ * asker, and the web app (link in the bot's bio) shows it once they sign in with that X account.
+ */
+export const TAKE_TAIL = "Saved for you: sign in with X at the link in our bio to post it as your take.";
+
+export function takeReply(claim: string, picks: Pick[]): string | null {
   if (picks.some((p) => NEVER.test(p.name))) return null;
   const head = `${claim}.`;
-  const tail = `Post it as your take: ${link}`;
+  const tail = TAKE_TAIL;
   const room = MAX - xLength(head) - xLength(tail) - 4;
   const text = cleanReply(`${head}\n\n${pickLine(picks, room)}\n\n${tail}`);
   return xLength(text) <= MAX ? text : null;
 }
 
 export const NO_EXPOSURE = "No clean way to trade that one yet. Try a sharper take, like which companies win if you're right.";
-export const EXPLAIN = "Thesis turns a take into a basket of real investments. Reply to any post with @yourthesisxyz and I'll build one you can post and trade.";
+export const EXPLAIN = "Thesis turns a take into a basket of real investments. Reply to any post with @yourthesisxyz and I'll build one you can post and trade. Mention me with \"stop\" to opt out.";
+
+// Opting out, as X's automation rules require: "stop" ends replies to that person, "start" brings them back.
+export const OPTED_OUT = "Got it, I won't reply to you anymore. Mention me with \"start\" to turn replies back on.";
+export const OPTED_IN = "Welcome back. Reply to any post with @yourthesisxyz and I'll build a take from it.";
+
+/** "stop" / "start" (the whole mention, handles already stripped), else null. */
+export function optCommand(text: string): "stop" | "start" | null {
+  const t = text.trim().toLowerCase().replace(/[.!]+$/, "");
+  if (/^(stop|unsubscribe|opt ?out)$/.test(t)) return "stop";
+  if (/^(start|opt ?in)$/.test(t)) return "start";
+  return null;
+}

@@ -10,6 +10,7 @@ import { ProfileMenuButton } from "./Drawer";
 import NotificationsBell from "./Notifications";
 import SuggestedFollows from "./SuggestedFollows";
 import TakeRow, { type FeedTake } from "./TakeRow";
+import XDrafts from "./XDrafts";
 
 type Page = "forYou" | "following";
 
@@ -106,6 +107,7 @@ export default function Feed({ initial }: { initial: FeedTake[] }) {
         </div>
       </div>
 
+      {page === "forYou" ? <XDrafts /> : null}
       {page === "following" ? <SuggestedFollows onChange={loadFollowing} /> : null}
 
       {takes == null ? <p className="muted feed-empty">Loading takes…</p> : null}

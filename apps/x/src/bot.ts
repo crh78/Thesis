@@ -6,7 +6,7 @@ import type { Mention, Vet } from "./vet.ts";
 
 export type Plan =
   | { kind: "skip"; reason: string }
-  | { kind: "reply"; text: string; what: "take" | "no_exposure" | "explain"; link?: string };
+  | { kind: "reply"; text: string; what: "take" | "no_exposure" | "explain" | "opt_out" | "opt_in"; link?: string };
 
 export type MentionInput = Mention & {
   /** The mention's post id: the draft's origin_ref, so a retry reuses its draft. */
@@ -27,6 +27,7 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
   const out = await buildBasket(deps.basket, { claim, risk: v.risk, horizon: v.horizon }, {
     origin: "x",
     originRef: m.id,
+    forX: m.author.username,
     context: fromParent && m.parent!.username.toLowerCase() !== m.author.username.toLowerCase()
       ? `@${m.author.username} asked about @${m.parent!.username}'s post`.slice(0, 80)
       : `@${m.author.username} on X`.slice(0, 80),
@@ -35,7 +36,7 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
   if (out.verdict === "error") return { kind: "skip", reason: `build failed: ${out.reason}` };
   if (out.verdict === "no_clean_exposure") return { kind: "reply", text: NO_EXPOSURE, what: "no_exposure" };
 
-  const text = takeReply(claim, out.legs, out.link);
+  const text = takeReply(claim, out.legs);
   if (!text) return { kind: "skip", reason: "reply failed the checks" };
   return { kind: "reply", text, what: "take", link: out.link };
 }
