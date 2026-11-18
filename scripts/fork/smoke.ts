@@ -8,6 +8,7 @@
 import BN from "bn.js";
 import { Keypair, PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import {
+  TAKE_LIFETIME_SECS,
   AUTHOR_POSITION_ID,
   FADE_VIA,
   LEG_KIND,
@@ -57,7 +58,7 @@ async function smoke(): Promise<void> {
     id,
     claimHash: claimHash("NVDA outperforms this week (fork smoke test)"),
     risk: RISK.medium,
-    horizonEnd: new BN(Math.floor(Date.now() / 1000) + 7 * 24 * 3600),
+    horizonEnd: new BN(Math.floor(Date.now() / 1000) + TAKE_LIFETIME_SECS),
     legs: [
       {
         kind: LEG_KIND.spot,

@@ -159,6 +159,19 @@ export const staleDemo = (m: Mirror | undefined) => Boolean(m?.demoAuthorKey) &&
 export const FADE_NOTHING = "None of this take's legs can be faded right now: a prediction leg needs a market on its other side, and other legs need a Phoenix market to short.";
 export const FADE_NO_MARKET = "Gemini has no market on the other side of this take's prediction legs right now. Try again in a moment.";
 export const FADE_OWN_TAKE = "You can't fade your own take.";
+export const TAKE_CLOSED = "This take has closed: its author sold. Positions already in it stay open until their owners sell.";
+export const TAKE_ENDED = "This take has reached its end: positions settle at today's prices.";
+
+/** A take's status as the receipt shows it: "closed" once its author sold, until it settles. */
+export const takeStatusName = (take: TakeAccount): "open" | "closed" | "settled" =>
+  "settled" in take.status ? "settled" : "closed" in take.status ? "closed" : "open";
+
+/** Open to new backs and fades: not closed by its author's sale, and before its horizon. */
+export const takeOpen = (take: TakeAccount, nowSec = Date.now() / 1000) => "open" in take.status && take.horizonEnd.toNumber() > nowSec;
+
+/** The 409 a back or fade gets on a take that isn't open. */
+export const takeClosedError = (take: TakeAccount | null | undefined) =>
+  new ApiError(409, "take_closed", take && "open" in take.status ? TAKE_ENDED : TAKE_CLOSED);
 export const TAKE_MISSING = "This take was posted on an earlier version of the fork, so it can't be traded here. Its author can post it as a new take.";
 export const FADE_BLOCKED = "None of this take's legs can be faded: a fade holds the other side of prediction legs, or a Phoenix short of stock and crypto legs Phoenix lists";
 

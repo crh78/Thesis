@@ -14,7 +14,7 @@ import { createPrivateKey, randomUUID, sign } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
-import { USDC_MINT_MAINNET, thesisProgram } from "@thesis/chain";
+import { USDC_MINT_MAINNET, thesisProgram, TAKE_LIFETIME_SECS } from "@thesis/chain";
 import { forkApiServer } from "./api/server.ts";
 import type { AppTake } from "./api/service.ts";
 import { creatorFeesAuthMessage } from "./api/creator-fees.ts";
@@ -41,7 +41,7 @@ async function e2e(): Promise<void> {
     id: randomUUID(),
     claim: `Creator fees e2e ${run} #${i + 1}: NVIDIA keeps leading`,
     risk: "medium",
-    settles_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    settles_at: new Date(Date.now() + TAKE_LIFETIME_SECS * 1000).toISOString(),
     author: { handle: "fees-e2e" },
     // Only the first take is faded: Phoenix lists NVIDIA, so its fade is a short there.
     legs: [{ name: "NVIDIA", kind: "Stock", weight: 100, fade_how: i === 0 ? "Bets the stock falls" : null }],

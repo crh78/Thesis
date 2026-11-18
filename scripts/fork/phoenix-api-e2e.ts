@@ -18,7 +18,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { AddressInfo } from "node:net";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
-import { USDC_MINT_MAINNET, profileAddress, thesisProgram } from "@thesis/chain";
+import { USDC_MINT_MAINNET, profileAddress, thesisProgram, TAKE_LIFETIME_SECS } from "@thesis/chain";
 import { decodeTrader, positionSize } from "@thesis/venues/phoenix";
 import type { AppTake } from "./api/common.ts";
 import { forkApiServer } from "./api/server.ts";
@@ -43,7 +43,7 @@ async function e2e(): Promise<void> {
     id: randomUUID(),
     claim: "Phoenix e2e: AI compute keeps compounding",
     risk: "high",
-    settles_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    settles_at: new Date(Date.now() + TAKE_LIFETIME_SECS * 1000).toISOString(),
     author: { handle: "phoenix-e2e" },
     legs: [
       { name: "NVIDIA", kind: "Stock", weight: 50, fade_how: "Bets the stock falls" },

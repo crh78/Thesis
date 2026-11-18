@@ -16,6 +16,7 @@ import BN from "bn.js";
 import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import {
+  TAKE_LIFETIME_SECS,
   AUTHOR_POSITION_ID,
   FADE_VIA,
   LEG_KIND,
@@ -75,7 +76,7 @@ async function e2e(): Promise<void> {
     leverage: 1,
     fadeVia: l.kind === "spot" ? FADE_VIA.phoenixShort : FADE_VIA.none,
   }));
-  const horizonEnd = new BN(Math.floor(Date.now() / 1000) + 7 * 86_400);
+  const horizonEnd = new BN(Math.floor(Date.now() / 1000) + TAKE_LIFETIME_SECS);
 
   // 1. The author's buy-in.
   const authorStake = 30_000_000n;

@@ -25,6 +25,7 @@ import {
   BADGE_KIND_INDEX,
   BADGE_META,
   RISK,
+  TAKE_LIFETIME_SECS,
   THESIS_COMPUTE_UNITS,
   USDC_MINT_MAINNET,
   backIx,
@@ -34,6 +35,7 @@ import {
   claimHash,
   composeTransactions,
   createTakeIx,
+  exitAddress,
   exitPositionIx,
   fetchConfig,
   positionAddress,
@@ -55,6 +57,8 @@ import {
   FADE_BLOCKED,
   FADE_NO_MARKET,
   FADE_OWN_TAKE,
+  TAKE_CLOSED,
+  TAKE_ENDED,
   TAKE_MISSING,
   FADE_NOTHING,
   MIRROR_VERSION,
@@ -67,6 +71,9 @@ import {
   parseKey,
   randomPositionId,
   staleDemo,
+  takeClosedError,
+  takeOpen,
+  takeStatusName,
   type AppTake,
   type ExitReceipt,
   type IncompleteTrade,
@@ -318,6 +325,8 @@ export class ForkService {
       maxLegs: p.maxLegs,
       minHorizonSecs: p.minHorizonSecs.toNumber(),
       maxHorizonSecs: p.maxHorizonSecs.toNumber(),
+      /** A take auto-settles this long after posting unless its author sells first. */
+      takeLifetimeSecs: TAKE_LIFETIME_SECS,
       paused: p.paused,
     };
   }
@@ -410,9 +419,16 @@ export class ForkService {
     const positions = await positionsP;
     const author = positions.find((p) => p.account.owner.equals(take.author) && p.account.id.isZero());
     const mine = viewer ? positions.filter((p) => p.account.owner.toBase58() === viewer) : [];
-    // Authors can't fade their own take (the program doesn't check it yet).
+    // Authors can't fade their own take (the program refuses it too).
     const viewerIsAuthor = viewer === take.author.toBase58();
-    const [marks, config] = await Promise.all([this.#valuation.marks(take, legs, [...(author ? [author] : []), ...mine]), this.#config()]);
+    const status = takeStatusName(take);
+    const open = takeOpen(take);
+    // Closed: the headline is the author's sale, read from their exit account once it's priced.
+    const [marks, config, authorExit] = await Promise.all([
+      this.#valuation.marks(take, legs, [...(author ? [author] : []), ...mine]),
+      this.#config(),
+      status === "closed" && author ? this.#program.account.exit.fetchNullable(exitAddress(author.publicKey, this.#program.programId)).catch(() => null) : null,
+    ]);
     /**
      * A position's return at current prices: each leg marked on the source its entry was priced
      * on. Null while a priced leg has no entry or no mark (never a -100% from a missing price).
@@ -429,23 +445,43 @@ export class ForkService {
         prices: p.account.prices.map((x, i) => ({ entry: BigInt(x.entry.toString()), exit: m[i] ?? 0n })),
       });
     };
+    /** The author's sale's return, null until every leg's sale price is in. */
+    const sold = (): number | null => {
+      if (!author || !authorExit) return null;
+      const a = author.account;
+      const priced = take.legs.every((_, i) => !(a.legsMask & (1 << i)) || (a.entrySet & (1 << i) && authorExit.priceSet & (1 << i)));
+      if (!priced) return null;
+      return positionReturnBps(take.legs, {
+        side: a.side,
+        legsMask: a.legsMask,
+        prices: a.prices.map((x, i) => ({ entry: BigInt(x.entry.toString()), exit: BigInt(authorExit.prices[i].toString()) })),
+      });
+    };
     const authorMarks = author ? (marks.get(author.publicKey.toBase58()) ?? []) : [];
-    const settled = "settled" in take.status;
+    const settled = status === "settled";
+    const closedAt = take.closedAt.isZero() ? null : take.closedAt.toNumber();
     return {
       takeId,
       onChain: true as const,
       address: address.toBase58(),
       author: take.author.toBase58(),
-      status: settled ? "settled" : "open",
+      /** "closed": the author sold, so no new backs or fades; it settles on that sale. */
+      status,
       createdAt: take.createdAt.toNumber(),
+      /** When it auto-settles if the author never sells. */
       horizonEnd: take.horizonEnd.toNumber(),
+      /** When the author sold their buy-in (closing the take), or null. Stays set once settled. */
+      closedAt,
       backers: take.backers,
       faders: take.faders,
       totalBackedUsd: take.totalBacked.toNumber() / USD,
       totalFadedUsd: take.totalFaded.toNumber() / USD,
       creatorFeesUnclaimedUsd: take.creatorFeesUnclaimed.toNumber() / USD,
-      /** Settled: the take's result. Open: the author's position at current prices, once entry prices are in. */
-      returnBps: settled ? take.resultBps.toNumber() : author ? live(author) : null,
+      /**
+       * Settled: the take's result. Closed: the author's sale, once its prices are in. Open: the
+       * author's position at current prices, once entry prices are in.
+       */
+      returnBps: settled ? take.resultBps.toNumber() : status === "closed" ? sold() : author ? live(author) : null,
       legs: legView(take).map((l, i) => ({
         ...l,
         authorEntryUsd: author && author.account.entrySet & (1 << i) ? author.account.prices[i].entry.toNumber() / 1e8 : null,
@@ -461,7 +497,8 @@ export class ForkService {
             address: p.publicKey.toBase58(),
             side: "back" in p.account.side ? "back" : "fade",
             exited,
-            canExit: !exited && !settled && take.horizonEnd.toNumber() > Date.now() / 1000 &&
+            // In any take status: holders can sell after the author has, until the horizon.
+            canExit: !exited && take.horizonEnd.toNumber() > Date.now() / 1000 &&
               take.legs.every((leg, i) => !(p.account.legsMask & (1 << i)) || SELLABLE(leg.kind)),
             /** The prediction share held in escrow; it comes back in full at a sale or when the position settles. */
             escrowedUsd: Number(BigInt(p.account.escrowed.toString())) / USD,
@@ -486,9 +523,9 @@ export class ForkService {
         })),
         ...(viewer ? this.#settledExits(address, viewer, new Set(mine.map((p) => p.publicKey.toBase58()))) : []),
       ],
-      canBack: !settled && canBuy,
-      canFade: !settled && fadeable && !viewerIsAuthor,
-      fadeBlocked: settled ? "This take has settled." : viewerIsAuthor ? FADE_OWN_TAKE : fadeBlocked,
+      canBack: open && canBuy,
+      canFade: open && fadeable && !viewerIsAuthor,
+      fadeBlocked: closedAt !== null ? TAKE_CLOSED : !open ? TAKE_ENDED : viewerIsAuthor ? FADE_OWN_TAKE : fadeBlocked,
     };
   }
 
@@ -665,7 +702,10 @@ export class ForkService {
     ]);
     if (!holding?.owner.equals(owner) || !holding.take.equals(takeKey)) throw new ApiError(404, "position_missing");
     if (holding.exited) throw new ApiError(409, "already_exited", "This position has already been sold.");
-    if (!take || !("open" in take.status) || take.horizonEnd.toNumber() <= Date.now() / 1000) throw new ApiError(409, "take_closed");
+    // Any status before the horizon: holders can sell after the author has (the take closed or settled).
+    if (!take || take.horizonEnd.toNumber() <= Date.now() / 1000) throw new ApiError(409, "take_closed", TAKE_ENDED);
+    // The author's own buy-in: selling it closes the take to new backs and fades.
+    const closesTake = holding.id.isZero() && holding.owner.equals(take.author) && "open" in take.status;
     const legs = take.legs.filter((_, i) => holding.legsMask & (1 << i));
     if (!legs.length || legs.some((leg) => !SELLABLE(leg.kind))) {
       throw new ApiError(422, "not_sellable", "Only spot, yield, perp, prediction and card legs can be sold on the fork.");
@@ -755,6 +795,8 @@ export class ForkService {
       return {
         ...built,
         escrowUsd,
+        /** This sale is the author's buy-in on an open take: it closes the take, and its result is final at the sale. */
+        closesTake,
         expectedUsd: swapped("outAmount") + shareValue + escrowUsd + phx.expected,
         minimumUsd: swapped("otherAmountThreshold") + shareValue + escrowUsd + phx.minimum,
         /** Phoenix legs closed: once this lands, build `phoenix/cash-out` to move their cash back to USDC. */
@@ -905,12 +947,12 @@ export class ForkService {
     const mirrorStarted = Date.now();
     const existing = maxLegs === undefined ? await this.#ensureOnChain(takeId, app) : await this.#existingBlinkTake(takeId, app);
     const mirrorMs = Date.now() - mirrorStarted;
-    if (!existing || !("open" in existing.take.status) || existing.take.horizonEnd.toNumber() <= Math.floor(Date.now() / 1000)) {
-      throw new ApiError(409, "take_closed", maxLegs === undefined ? undefined : "This take is not open on the fork.");
+    if (!existing || !takeOpen(existing.take)) {
+      if (maxLegs !== undefined) throw new ApiError(409, "take_closed", "This take is not open on the fork.");
+      throw takeClosedError(existing?.take);
     }
     const { address, take } = existing;
-    // Authors can't fade their own take. The program doesn't check it yet
-    // (program changes are frozen while the fork is public), so this API does, for every client.
+    // Authors can't fade their own take. The program refuses it too; this says why before a build.
     if (side === "fade" && take.author.equals(owner)) throw new ApiError(409, "cannot_fade_own_take", FADE_OWN_TAKE);
     const [{ venue, included, excluded }, config] = await Promise.all([
       // The Blink (maxLegs) buys spot and yield legs only: Gemini legs are in the app.
@@ -1700,13 +1742,15 @@ export class ForkService {
     return { address, take };
   }
 
-  async #createIx(app: AppTake, author: PublicKey, usd: number, included: number[]) {
+  /**
+   * `create_take` for a take. Its horizon is the app's settles_at (posting + 365 days, which the
+   * go-live trigger matches against takeCreated); a demo mirror runs a year from now.
+   */
+  async #createIx(app: AppTake, author: PublicKey, usd: number, included: number[], o: { demo?: boolean } = {}) {
     const legs = this.#mapLegs(app.legs);
     const id = this.#onChainId(app);
     const now = Math.floor(Date.now() / 1000);
-    let horizon = Math.floor(Date.parse(app.settles_at) / 1000);
-    // Demo takes whose date has passed (or is too close) get a fresh 30-day horizon on the fork.
-    if (!(horizon > now + 2 * 3_600)) horizon = now + 30 * 86_400;
+    const horizon = o.demo ? now + TAKE_LIFETIME_SECS : Math.floor(Date.parse(app.settles_at) / 1000);
     const ix = await createTakeIx(this.#program, {
       author,
       payer: this.#o.appPayer.publicKey,
@@ -1751,7 +1795,7 @@ export class ForkService {
     for (let attempt = 1; ; attempt++) {
       try {
         const { venue, included } = await this.#router.venueLegs(this.#mapLegs(app.legs), author.publicKey, DEMO_AUTHOR_BUY_IN_USD);
-        const created = await this.#createIx(app, author.publicKey, DEMO_AUTHOR_BUY_IN_USD, included);
+        const created = await this.#createIx(app, author.publicKey, DEMO_AUTHOR_BUY_IN_USD, included, { demo: true });
         address = created.address;
         this.#recordPhoenix(positionAddress(address, author.publicKey, 0n), author.publicKey, venue);
         const ix = created.ix;

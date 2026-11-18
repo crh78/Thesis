@@ -10,6 +10,7 @@ import { ApiError, type AppTake, type Snapshot } from "../api/common.ts";
 import { downsample } from "../api/history.ts";
 import { ForkService, type ServiceOpts } from "../api/service.ts";
 import { SAVE_DEBOUNCE_MS, SAVE_RETRY_MS, StateStore } from "../api/store.ts";
+import { TAKE_LIFETIME_SECS } from "@thesis/chain";
 
 const TAKE_ID = "00000000-0000-4000-8000-0000000000cc";
 
@@ -49,7 +50,7 @@ const appTake = (authorWallet: string | null): AppTake => ({
   id: TAKE_ID,
   claim: "Chips keep going up",
   risk: "medium",
-  settles_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+  settles_at: new Date(Date.now() + TAKE_LIFETIME_SECS * 1000).toISOString(),
   status: "posting",
   author: { handle: "someone" },
   author_wallet: authorWallet,

@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { Keypair, Transaction, VersionedTransaction, sendAndConfirmTransaction } from "@solana/web3.js";
-import { beginTradeIx, thesisProgram, ticketAddress, tradeStepIx } from "@thesis/chain";
+import { beginTradeIx, thesisProgram, ticketAddress, tradeStepIx, TAKE_LIFETIME_SECS } from "@thesis/chain";
 import { forkApiServer } from "./api/server.ts";
 import type { AppTake } from "./api/service.ts";
 import { startForkService } from "./api.ts";
@@ -20,7 +20,7 @@ async function e2e(): Promise<void> {
     id: randomUUID(),
     claim: "Ticket e2e: NVIDIA",
     risk: "medium",
-    settles_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    settles_at: new Date(Date.now() + TAKE_LIFETIME_SECS * 1000).toISOString(),
     author: { handle: "ticket-e2e" },
     legs: [{ name: "NVIDIA", kind: "Stock", weight: 100, fade_how: null }],
   };

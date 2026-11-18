@@ -7,8 +7,12 @@
 //   - the program marked the position sold and created its exit account;
 //   - the receipt shows it sold and the portfolio no longer lists it;
 //   - a second sale is refused.
-// With `--settle` it then runs the real settler until the sale is priced and settled, before the
-// take's horizon, and checks the position and its exit account closed into a scored profile.
+// Then an author posts a take of the same legs and a holder backs it. The author's sale closes the
+// take: the quote says so, the receipt shows it closed, new backs and fades get 409 take_closed,
+// and the holder can still sell.
+// With `--settle` it then runs the real settler until the sales are priced and settled, before the
+// take's horizon: the first position and its exit account close into a scored profile, and the
+// author's take settles on the author's sale.
 //
 // Needs the asset bank and `JUPITER_API_KEY`, like fork:api-e2e.
 import { execFileSync } from "node:child_process";
@@ -17,7 +21,7 @@ import type { AddressInfo } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
-import { USDC_MINT_MAINNET, exitAddress, profileAddress, thesisProgram } from "@thesis/chain";
+import { USDC_MINT_MAINNET, exitAddress, profileAddress, thesisProgram, TAKE_LIFETIME_SECS } from "@thesis/chain";
 import { forkApiServer } from "./api/server.ts";
 import type { AppTake } from "./api/service.ts";
 import { startForkService } from "./api.ts";
@@ -42,7 +46,7 @@ const TAKE: AppTake = {
   id: randomUUID(),
   claim: "Exit e2e: mortgage rates dip under 6%",
   risk: "low",
-  settles_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+  settles_at: new Date(Date.now() + TAKE_LIFETIME_SECS * 1000).toISOString(),
   author: { handle: "exit-e2e" },
   legs: [
     { name: "Rates under 6%: Yes", kind: "Prediction · Yes", weight: 50, fade_how: "Bets No", asset_id: null },
@@ -50,12 +54,14 @@ const TAKE: AppTake = {
     { name: "Cash", kind: "Earns interest", weight: 20, fade_how: null, asset_id: "yield:9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D" },
   ],
 };
+/** The same legs, posted by a wallet the run holds (set below), so its author can sell. */
+const AUTHORED: AppTake = { ...TAKE, id: randomUUID(), claim: "Exit e2e: the author sells", author: { handle: "exit-e2e-author" } };
 const SETTLE = args.includes("--settle");
 
 async function e2e(): Promise<void> {
   const lead = await syncClock();
   if (lead > 120) throw new Error(`The fork's clock is ${lead}s ahead of real time: restart the fork.`);
-  const service = await startForkService((m) => console.log(`  [api] ${m}`), { takes: async (id) => (id === TAKE.id ? TAKE : null) });
+  const service = await startForkService((m) => console.log(`  [api] ${m}`), { takes: async (id) => [TAKE, AUTHORED].find((t) => t.id === id) ?? null });
   const server = forkApiServer(service);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -65,13 +71,19 @@ async function e2e(): Promise<void> {
   };
   const user = Keypair.generate();
   const me = user.publicKey.toBase58();
-  const sign = (transactions: string[]) =>
+  const sign = (transactions: string[], kp = user) =>
     transactions.map((b64) => {
       const tx = VersionedTransaction.deserialize(Buffer.from(b64, "base64"));
-      tx.sign([user]);
+      tx.sign([kp]);
       return Buffer.from(tx.serialize()).toString("base64");
     });
+  const submit = async (what: string, built: { status: number; json: any }, kp: Keypair) => {
+    if (built.status !== 200) throw new Error(`${what}: ${built.status} ${JSON.stringify(built.json)}`);
+    const sent = await call("POST", "/submit", { buildId: built.json.buildId, transactions: sign(built.json.transactions, kp) });
+    if (sent.status !== 200) throw new Error(`${what} submit: ${sent.status} ${JSON.stringify(sent.json)}`);
+  };
   const conn = connection();
+  const thesis = thesisProgram(conn);
   const usdc = async () => {
     const ata = getAssociatedTokenAddressSync(USDC_MINT_MAINNET, user.publicKey, true);
     return Number((await conn.getTokenAccountBalance(ata, "confirmed")).value.amount) / 1e6;
@@ -100,6 +112,7 @@ async function e2e(): Promise<void> {
     console.log(`sale quote: expect $${quote.json.expectedUsd.toFixed(2)}, at least $${quote.json.minimumUsd.toFixed(2)}`);
     for (const s of quote.json.steps) console.log(`  ${s.labels.join(" + ")}: ${s.bytes} bytes`);
     checks.push(["quote: one transaction", quote.json.transactions.length === 1]);
+    checks.push(["quote: a backer's sale doesn't close the take", quote.json.closesTake === false]);
     // A second quote prepared before the first sale lands.
     const second = await call("POST", `/takes/${TAKE.id}/positions/${mine.address}/exit`, { owner: me });
     if (second.status !== 200) console.log(`second quote: ${second.status} ${JSON.stringify(second.json)}`);
@@ -111,7 +124,6 @@ async function e2e(): Promise<void> {
     console.log(`sold: +$${proceeds.toFixed(2)}; wallet ${afterSale} USDC`);
     checks.push(["sale: USDC back, at least the quoted minimum", proceeds >= quote.json.minimumUsd - 0.005]);
 
-    const thesis = thesisProgram(conn);
     const positionKey = new PublicKey(mine.address);
     const position = await thesis.account.position.fetch(positionKey, "confirmed");
     const exitAccount = await thesis.account.exit.fetchNullable(exitAddress(positionKey, thesis.programId), "confirmed");
@@ -131,6 +143,36 @@ async function e2e(): Promise<void> {
     const third = await call("POST", `/takes/${TAKE.id}/positions/${mine.address}/exit`, { owner: me });
     checks.push(["a new quote is refused", third.status === 409 && third.json.error === "already_exited"]);
 
+    // The author's sale closes the take.
+    const author = Keypair.generate();
+    const holder = Keypair.generate();
+    const [a, h] = [author.publicKey.toBase58(), holder.publicKey.toBase58()];
+    AUTHORED.author_wallet = a;
+    await call("POST", `/wallets/${a}/deposits`, { usd: 100 });
+    await call("POST", `/wallets/${h}/deposits`, { usd: 100 });
+    await submit("publish", await call("POST", `/takes/${AUTHORED.id}/publish`, { author: a, usd: 10 }), author);
+    await submit("holder's back", await call("POST", `/takes/${AUTHORED.id}/trades`, { owner: h, side: "back", usd: 20 }), holder);
+    const posted = await call("GET", `/takes/${AUTHORED.id}?viewer=${a}`);
+    console.log(`authored take ${posted.json.address}: posted with $10, backed with $20`);
+    checks.push(["receipt: open until the author sells", posted.json.status === "open" && posted.json.closedAt === null && posted.json.canBack === true]);
+    const buyIn = posted.json.viewerPositions.find((p: any) => !p.exited);
+    const authorQuote = await call("POST", `/takes/${AUTHORED.id}/positions/${buyIn?.address}/exit`, { owner: a });
+    checks.push(["author's quote: selling closes the take", authorQuote.json.closesTake === true]);
+    await submit("author's sale", authorQuote, author);
+    const closedView = await call("GET", `/takes/${AUTHORED.id}?viewer=${h}`);
+    const held = closedView.json.viewerPositions.find((p: any) => !p.exited);
+    checks.push(["receipt: closed at the sale, no new backs or fades", closedView.json.status === "closed" && typeof closedView.json.closedAt === "number" && closedView.json.canBack === false && closedView.json.canFade === false]);
+    checks.push(["receipt: the holder can still sell", held?.canExit === true]);
+    const onChain = await thesis.account.take.fetch(new PublicKey(posted.json.address), "confirmed");
+    checks.push(["chain: the take is closed", "closed" in onChain.status && onChain.closedAt.toNumber() === closedView.json.closedAt]);
+    const lateBack = await call("POST", `/takes/${AUTHORED.id}/trades`, { owner: me, side: "back", usd: 20 });
+    const lateFade = await call("POST", `/takes/${AUTHORED.id}/trades`, { owner: me, side: "fade", usd: 20 });
+    checks.push(["a back after the author's sale: 409 take_closed", lateBack.status === 409 && lateBack.json.error === "take_closed"]);
+    checks.push(["a fade after the author's sale: 409 take_closed", lateFade.status === 409 && lateFade.json.error === "take_closed"]);
+    const holderQuote = await call("POST", `/takes/${AUTHORED.id}/positions/${held?.address}/exit`, { owner: h });
+    checks.push(["holder's quote: doesn't close anything", holderQuote.json.closesTake === false]);
+    await submit("holder's sale", holderQuote, holder);
+
     if (SETTLE) {
       // A tick prices the sale, the next settles it. Token prices need the trade's transactions
       // to be readable, which can take a tick or two.
@@ -148,6 +190,20 @@ async function e2e(): Promise<void> {
         checks.push(["profile: the sale was scored", profile.positionsSettled === 1]);
         checks.push(["chain: the exit account closed too", !(await conn.getAccountInfo(exitAddress(positionKey, thesis.programId), "confirmed"))]);
       }
+      // The authored take settles on its author's sale, long before its horizon; the holder's
+      // sale settles on its own.
+      const heldKey = new PublicKey(held.address);
+      let done = false;
+      for (let i = 0; i < 6 && !done; i++) {
+        settlerTick();
+        const t = await thesis.account.take.fetch(new PublicKey(posted.json.address), "confirmed");
+        done = "settled" in t.status && !(await conn.getAccountInfo(heldKey, "confirmed"));
+        if (!done) await sleep(3_000);
+      }
+      const final = await call("GET", `/takes/${AUTHORED.id}`);
+      console.log(`authored take: ${final.json.status}, ${final.json.returnBps} bps, closed at ${final.json.closedAt}`);
+      checks.push(["settler: the take settles on the author's sale, and the holder's sale settles", done]);
+      checks.push(["receipt: settled, with its result and when it closed", final.json.status === "settled" && typeof final.json.returnBps === "number" && final.json.closedAt === closedView.json.closedAt]);
     }
   } finally {
     server.close();
