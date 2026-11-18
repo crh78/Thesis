@@ -33,7 +33,7 @@ def pack(batches: int) -> None:
         x, y = (r["b"], r["a"]) if flip else (r["a"], r["b"])
         key[c["id"]] = {"X": "b" if flip else "a", "Y": "a" if flip else "b"}
         strip = lambda s: {k: s[k] for k in ("verdict", "summary", "reason", "note", "error", "legs")}
-        items.append({"id": c["id"], "take": c["claim"], "risk": c["risk"], "horizon": c["horizon"],
+        items.append({"id": c["id"], "take": c["claim"], "risk": c["risk"],
                       **({"source": c["source"]} if "source" in c else {}), "X": strip(x), "Y": strip(y)})
     rnd.shuffle(items)
     size = -(-len(items) // batches)

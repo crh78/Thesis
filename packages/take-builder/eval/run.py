@@ -88,7 +88,7 @@ def main() -> None:
         warm(fn, sec)
 
     def run(case: dict) -> dict:
-        body = {k: case[k] for k in ("claim", "risk", "horizon", "source") if k in case}
+        body = {k: case[k] for k in ("claim", "risk", "source") if k in case}
         body_b = {**body, "system": system} if system else body
         # Both at once, so neither gets a quieter moment; order shuffled per case.
         fns = [args.a, args.b]
