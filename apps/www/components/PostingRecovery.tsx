@@ -7,9 +7,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { money, topicImage, type Take } from "@/lib/data";
-import { fork, ForkError, useForkWallet } from "@/lib/fork";
+import { fork, ForkError, stoppedTrade, useForkWallet, type Incomplete } from "@/lib/fork";
 import { isOnChain, POSTING_STALE_MS, postingBuyIns, sendBuyIn, showMyTakes, UNCHECKED, waitUntilLive } from "@/lib/posting";
 import { useSession } from "@/lib/session";
+import StoppedTrade from "./StoppedTrade";
 
 type State =
   | { kind: "posting" }
@@ -18,7 +19,12 @@ type State =
   /** The fork API couldn't say whether it's on-chain: never "Didn't post", never Discard. */
   | { kind: "unknown" }
   | { kind: "working"; text: string }
-  | { kind: "confirmDiscard" };
+  | { kind: "confirmDiscard" }
+  /**
+   * Its split buy-in stopped partway (trade_incomplete): the wallet holds tokens from the part that
+   * landed. Finish it or swap them back first; no Discard (nor "no money moved") until then.
+   */
+  | { kind: "stopped"; trade: Incomplete | null; retry: boolean };
 
 const DIDNT = "Your buy-in didn't go through.";
 const age = (t: Take) => Date.now() - new Date(t.created_at).getTime();
@@ -78,6 +84,8 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
       await sendBuyIn(take.id, address, buyIn, signAndSubmit);
     } catch (e) {
       if (e instanceof ForkError && e.code === UNCHECKED) return set({ kind: "unknown" });
+      const stopped = stoppedTrade(e);
+      if (stopped) return set({ kind: "stopped", ...stopped });
       return set({ kind: "failed", message: e instanceof Error ? e.message : "Couldn't send your buy-in." });
     }
     await wait();
@@ -89,6 +97,14 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
     const onChain = await isOnChain(take.id);
     if (onChain === true) return wait();
     if (onChain === null) return set({ kind: "unknown" });
+    // A buy-in that stopped partway (sent from the composer, or before a reload) leaves tokens in
+    // the wallet: sort those out first. Couldn't ask: don't delete on a guess either.
+    const stopped = address
+      ? await fork<{ trades: Incomplete[] }>("GET", `/wallets/${address}/incomplete`).then((r) => r.trades ?? [], () => null)
+      : [];
+    if (stopped === null) return set({ kind: "failed", message: "Couldn't discard it. Try again." });
+    const mine = stopped.find((t) => t.takeId === take.id);
+    if (mine) return set({ kind: "stopped", trade: mine, retry: mine.next === "retry" });
     try {
       await social("DELETE", `takes/${take.id}`);
     } catch {
@@ -103,6 +119,7 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
     : state.kind === "unconfirmed" ? <><b>On-chain, not showing yet</b> · your buy-in landed</>
     : state.kind === "unknown" ? <><b>Couldn&apos;t check</b> · whether your buy-in landed. Try again.</>
     : state.kind === "working" ? <><b className="muted">{state.text}</b></>
+    : state.kind === "stopped" ? null
     : state.kind === "confirmDiscard" ? <><b className="down">Discard this take?</b> · it never made it on-chain, so nobody saw it and no money moved</>
     : <><b className="muted">Posting…</b> · only you can see it</>;
 
@@ -112,7 +129,18 @@ export function PostingRow({ take, failed, onChanged }: { take: Take; failed?: b
       <img className="tile" src={topicImage((take as Take & { topic?: string }).topic)} alt="" />
       <div className="item-main">
         <div className="item-claim">{take.claim}</div>
-        <div className="note">{status}</div>
+        {status ? <div className="note">{status}</div> : null}
+        {state.kind === "stopped" && address ? (
+          <div className="phx-card">
+            <StoppedTrade card address={address} trade={state.trade} retry={state.retry} signAndSubmit={signAndSubmit}
+              onDone={(text, outcome) => {
+                // The buy-in went through after all: wait for the take to go live.
+                if (outcome === "complete") return void wait();
+                // Swapped back to cash: nothing is on-chain now, so Retry or Discard are safe.
+                set({ kind: "failed", message: `${text} The take isn't posted yet.` });
+              }} />
+          </div>
+        ) : null}
         {state.kind === "failed" ? (
           <div className="posting-actions">
             <button className="pill small" onClick={retry}>Retry with {money(buyIn).replace(/\.00$/, "")}</button>

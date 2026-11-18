@@ -2,7 +2,7 @@
 // A take's comments, like the iOS CommentsView: Top / Newest, replies one level deep, likes, and a
 // compose bar ("Add a comment…", or a reply). Reading is public; commenting needs an account.
 import { useCallback, useEffect, useState } from "react";
-import { rpcNow, type Person } from "@/lib/data";
+import { authorName, rpcNow, type Person } from "@/lib/data";
 import { useSession } from "@/lib/session";
 import Avatar from "./Avatar";
 import SignIn from "./SignIn";
@@ -117,7 +117,7 @@ function Thread({ takeId, author, claim, onClose, onCount }: { takeId: string; a
           <div className="compose">
             {replyTo ? (
               <div className="replying muted small">
-                Replying to {replyTo.author.id === me?.id ? "yourself" : (replyTo.author.display_name ?? replyTo.author.handle)}
+                Replying to {replyTo.author.id === me?.id ? "yourself" : authorName(replyTo.author)}
                 <button aria-label="Cancel reply" onClick={() => setReplyTo(null)}>×</button>
               </div>
             ) : null}
@@ -144,7 +144,7 @@ function CommentRow({ c, small, onLike, onReply, canLike }: { c: Comment; small?
     <div className="crow">
       <Avatar person={c.author} size={small ? 30 : 36} />
       <div className="crow-main">
-        <div className="small"><b>{c.author.display_name ?? c.author.handle}</b> <span className="muted">· {age(c.created_at)}</span></div>
+        <div className="small"><b>{authorName(c.author)}</b> <span className="muted">· {age(c.created_at)}</span></div>
         <div className="crow-body">{c.body}</div>
         <div className="crow-actions small muted">
           <button disabled={!canLike} className={c.liked ? "down" : ""} onClick={() => onLike(c)} aria-pressed={c.liked} aria-label={c.liked ? "Unlike" : "Like"}>

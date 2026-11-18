@@ -10,12 +10,13 @@ import {
   adding, basketFrom, builderLegs, type Built, type Draft, HORIZONS, horizonOf, type Leg, MAX_PICKS, newDraft, type PickAsset,
   removing, type Risk, RISKS, setting, settleDate, topicGuess,
 } from "@/lib/compose";
-import { centsInput, fork, ForkError, useForkWallet, type WalletSummary } from "@/lib/fork";
+import { centsInput, fork, ForkError, stoppedTrade, useForkWallet, type Incomplete, type WalletSummary } from "@/lib/fork";
 import { isOnChain, postingBuyIns, sendBuyIn, showMyTakes, UNCHECKED, UNCHECKED_TEXT, waitUntilLive } from "@/lib/posting";
 import { useSession } from "@/lib/session";
 import { AssetLogo, type Asset } from "./AssetBits";
 import { AddCash } from "./CashSheets";
 import { PostingAtLaunch } from "./PostingRecovery";
+import StoppedTrade from "./StoppedTrade";
 
 type Open = Partial<Draft> & { autoBuild?: boolean };
 const ComposerContext = createContext<{ open: (init?: Open) => void } | null>(null);
@@ -471,7 +472,10 @@ function AssetPicker({ legs, onClose, onPick }: { legs: Leg[]; onClose: () => vo
 
 type PostState = { kind: "sending" | "waiting" } | { kind: "live"; id: string } | { kind: "unconfirmed"; id: string } | { kind: "failed"; id: string | null; message: string }
   // The fork API couldn't say whether the buy-in landed: never "Didn't post", never Discard.
-  | { kind: "unknown"; id: string };
+  | { kind: "unknown"; id: string }
+  // A split buy-in that stopped partway (trade_incomplete): finish it, or swap it back to cash.
+  // A fresh Retry would start another publish while this one's ticket is still open.
+  | { kind: "stopped"; id: string; trade: Incomplete | null; retry: boolean };
 
 const WALLET_WAIT_MS = 20_000;
 
@@ -536,6 +540,8 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
         else if (r === "unknown") setState({ kind: "unknown", id });
       } catch (e) {
         if (live && takeId.current && e instanceof ForkError && e.code === UNCHECKED) return setState({ kind: "unknown", id: takeId.current });
+        const stopped = stoppedTrade(e);
+        if (live && takeId.current && stopped) return setState({ kind: "stopped", id: takeId.current, ...stopped });
         if (live) setState({ kind: "failed", id: takeId.current, message: e instanceof Error ? e.message : "Couldn't post your take. Try again." });
       }
     })();
@@ -546,7 +552,9 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
 
   useEffect(() => {
     if (state.kind === "live") {
-      // A chat bot's draft now points at your take, so its link opens the live take.
+      // A chat bot's draft now points at your take, so its link opens the live take. Best effort:
+      // an X draft made for another account answers 403 draft_for_other_account, and your take
+      // is posted and yours either way (only the draft's link keeps showing the draft).
       if (draft.draftId) source("PUT", `drafts/${draft.draftId}`, { take_id: state.id }).catch(() => {});
       const id = window.setTimeout(() => { onClose(); router.push(`/t/${state.id}`); }, 900);
       return () => window.clearTimeout(id);
@@ -602,6 +610,18 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
           <div className="build-status">
             <h2>Couldn&apos;t check</h2>
             <p className="muted">{UNCHECKED_TEXT} It stays in My takes on Me until it&apos;s settled either way.</p>
+          </div>
+        ) : null}
+        {state.kind === "stopped" && address ? (
+          <div className="build-status">
+            <StoppedTrade address={address} trade={state.trade} retry={state.retry} signAndSubmit={signAndSubmit}
+              onDone={(text, outcome) => {
+                const id = state.id;
+                // The buy-in went through after all: carry on as if it had (it answers already_on_chain).
+                if (outcome === "complete") return setAttempt((a) => a + 1);
+                // Swapped back: nothing is on-chain, so Retry is a fresh buy-in now, or Discard.
+                setState({ kind: "failed", id, message: `${text} Your take isn't posted yet: retry the buy-in or discard it.` });
+              }} />
           </div>
         ) : null}
         {state.kind === "failed" ? (

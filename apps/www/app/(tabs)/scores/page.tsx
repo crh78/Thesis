@@ -11,6 +11,36 @@ import { useSession } from "@/lib/session";
 
 type Board = "own" | "backers" | "faders";
 type Row = { person: Person & { takes?: number }; cash: number; pct: number };
+/** Your own line from `leaderboard` (given `p_viewer`): your rank on the whole board, in the order asked. */
+type Viewer = Row & { rank: number };
+/** `leaderboard` sends today's array, or `{ rows, viewer }` when it's given `p_viewer`. */
+type BoardReply = Row[] | { rows: Row[]; viewer: Viewer | null };
+/**
+ * What the Scores list shows: `ordered` when the database sorted it the way asked (it takes
+ * `p_dir`), else the top of the board turned around here; `viewer` is undefined when it didn't say.
+ */
+type Loaded = { rows: Row[]; ordered: boolean; viewer?: Viewer | null };
+
+// Whether `leaderboard` takes `p_dir` / `p_viewer` (its 0054+ migration). Null until a call says;
+// false after it refused them, so later loads go straight to the older call.
+let boardV2: boolean | null = null;
+
+async function loadBoard(args: Record<string, unknown>, desc: boolean, viewer: string | null): Promise<Loaded> {
+  // Only the new parameters that matter: highest first for a signed-out visitor is today's call.
+  const extra = { ...(desc ? {} : { p_dir: "asc" }), ...(viewer ? { p_viewer: viewer } : {}) };
+  if (boardV2 !== false && Object.keys(extra).length) {
+    try {
+      const r = await rpcNow<BoardReply>("leaderboard", { ...args, ...extra });
+      boardV2 = true;
+      return Array.isArray(r) ? { rows: r, ordered: true } : { rows: r.rows ?? [], ordered: true, viewer: r.viewer ?? null };
+    } catch (e) {
+      // PostgREST answers 404 (no such function) for parameters it doesn't know. Anything else
+      // is a real failure, which the older call below will most likely hit too.
+      if (/: 40[04]$/.test(e instanceof Error ? e.message : "")) boardV2 = false;
+    }
+  }
+  return { rows: await rpcNow<Row[]>("leaderboard", args), ordered: desc };
+}
 
 const PERIODS = [["week", "Week"], ["month", "Month"], ["all", "All time"]] as const;
 const BOARDS = [["own", "Own P&L"], ["backers", "For backers"], ["faders", "Faders"]] as const;
@@ -19,8 +49,9 @@ const CAPTION: Record<Board, string> = {
   backers: "Made for backers: what everyone who backed an account's takes made, losses subtracted. Fades and the author's own money don't count.",
   faders: "Faders: what each account made fading other people's takes, on fades that have settled or been sold.",
 };
-// The most rows `leaderboard` returns (its cap), always highest first. "Lowest first" turns that
-// list around, which is the true bottom of the board only while the whole board fits in it.
+// The most rows `leaderboard` returns (its cap). "Lowest first" asks it for the bottom of the board
+// (`p_dir`); before that migration, it turns the top around here, which is the true bottom only
+// while the whole board fits in one read.
 const BOARD_MAX = 200;
 const EMPTY: Record<Board, string> = {
   own: "Nobody is on the board yet.",
@@ -36,28 +67,32 @@ export default function ScoresPage() {
   const [byCash, setByCash] = useState(true);
   // Highest first by default (who made the most); flip it to see who lost the most.
   const [desc, setDesc] = useState(true);
-  const [rows, setRows] = useState<Row[] | null>(null);
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const rows = loaded?.rows ?? null;
   const [mine, setMine] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    setRows(null);
+    setLoaded(null);
     setError(null);
-    rpcNow<Row[]>("leaderboard", { p_period: period, p_board: board, p_sort: byCash ? "cash" : "pct", p_limit: BOARD_MAX })
-      .then((r) => live && setRows(r))
-      .catch((e) => { if (live) { setRows([]); setError(e instanceof Error ? e.message : String(e)); } });
+    loadBoard({ p_period: period, p_board: board, p_sort: byCash ? "cash" : "pct", p_limit: BOARD_MAX }, desc, me?.id ?? null)
+      .then((r) => live && setLoaded(r))
+      .catch((e) => { if (live) { setLoaded({ rows: [], ordered: true }); setError(e instanceof Error ? e.message : String(e)); } });
     return () => { live = false; };
-  }, [period, board, byCash]);
+  }, [period, board, byCash, desc, me?.id]);
 
   useEffect(() => {
     if (me?.id) rpcNow<Profile | null>("profile", { p_profile: me.id }).then(setMine).catch(() => {});
   }, [me?.id]);
 
   // Ranks follow the order shown: #1 is the top of the list, whichever way it's sorted.
-  const sorted = [...(rows ?? [])].sort((a, b) => (desc ? 1 : -1) * (byCash ? b.cash - a.cash : b.pct - a.pct));
+  const sorted = loaded?.ordered ? (rows ?? []) : [...(rows ?? [])].sort((a, b) => (desc ? 1 : -1) * (byCash ? b.cash - a.cash : b.pct - a.pct));
   const myIndex = sorted.findIndex((r) => r.person.id === me?.id);
-  const myRow = myIndex >= 0 ? sorted[myIndex] : null;
+  // Your rank on the whole board when the database sends it (even outside the rows shown).
+  const viewer = loaded?.viewer;
+  const myRow: Row | null = viewer !== undefined ? viewer : myIndex >= 0 ? sorted[myIndex] : null;
+  const myRank = viewer ? viewer.rank : myIndex + 1;
   // Not on the board: like the app, the backers board still shows what your takes made all time.
   const myCash = myRow?.cash ?? (board === "backers" ? mine?.backers_made ?? 0 : 0);
   const myPct = myRow?.pct ?? (board === "backers" ? mine?.backers_pct ?? 0 : 0);
@@ -66,7 +101,7 @@ export default function ScoresPage() {
   const top = sorted.map((r, i) => ({ r, rank: i + 1 })).filter(({ r }) => r.person.id !== me?.id).slice(0, 25);
   // A board longer than one read: lowest first would show the bottom of the top 200, not the
   // board's real bottom, with made-up ranks. Say so instead of ranking it.
-  const partial = !desc && (rows?.length ?? 0) >= BOARD_MAX;
+  const partial = !desc && !loaded?.ordered && (rows?.length ?? 0) >= BOARD_MAX;
 
   const primary = (cash: number, p: number) => (byCash ? money(cash, true) : pct(p));
   const secondary = (cash: number, p: number) => (byCash ? pct(p) : money(cash, true));
@@ -112,7 +147,7 @@ export default function ScoresPage() {
       {me ? (
         <LeaderRow
           me
-          rank={myRow && !partial ? `#${myIndex + 1}` : "—"}
+          rank={myRow && !partial ? `#${myRank}` : "—"}
           person={me}
           title="You"
           subtitle={`${myTakes} ${myTakes === 1 ? "take" : "takes"} · ${periodCaption}`}

@@ -2,7 +2,7 @@
 // Assets and compact take rows, after the iOS AssetLogo, AssetRow and TakeListRow.
 import Link from "next/link";
 import { useState } from "react";
-import { pct, topicImage } from "@/lib/data";
+import { isDeleted, DELETED_NAME, pct, topicImage } from "@/lib/data";
 import type { FeedTake } from "./TakeRow";
 
 export type Asset = {
@@ -145,7 +145,7 @@ export function TakeListRow({ take }: { take: FeedTake }) {
       <span className="tlrow-main">
         <span className="tlrow-claim">{take.claim}</span>
         <span className="mono muted" style={{ fontSize: 11 }}>
-          @{take.author.handle} · {RISK[take.risk] ?? take.risk}{take.tags?.length ? ` · ${take.tags.join(" / ").toUpperCase()}` : ""}
+          {isDeleted(take.author) ? DELETED_NAME : `@${take.author.handle}`} · {RISK[take.risk] ?? take.risk}{take.tags?.length ? ` · ${take.tags.join(" / ").toUpperCase()}` : ""}
         </span>
       </span>
       <span className="tlrow-num">

@@ -1,7 +1,8 @@
 "use client";
-// The fork API from the browser, as the iOS app's ForkAPI.swift: everything goes through
-// /api/fork/* (rewritten to the fork API, which sends no CORS headers). The user's Privy Solana
-// wallet signs; the API adds the app's fee payer and sends.
+// The fork API from the browser, as the iOS app's ForkAPI.swift. With NEXT_PUBLIC_FORK_API_URL set,
+// the browser calls it directly (the fork API allows this site's origin in FORK_API_CORS_ORIGINS);
+// without it, everything goes through the /api/fork/* proxy (app/api/fork), one Vercel function
+// call per request. The user's Privy Solana wallet signs; the API adds the app's fee payer and sends.
 import { useCallback, useMemo, useRef } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useSignMessage, useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
@@ -98,6 +99,15 @@ const KNOWN: Record<string, string> = {
   transaction_failed: "That didn't go through. Check your balance, then try again.",
   // Sent without a message (a sale after the take ended, a trade on a closed take).
   take_closed: "This take has ended, so it can't be traded or sold now. It settles at its end date.",
+  // A trade split over several transactions where a later one failed: the earlier ones swapped
+  // some cash into tokens that aren't in a position. StoppedTrade offers the retry, then the sweep.
+  trade_incomplete: "This trade didn't finish: part of your cash was swapped into tokens that aren't in a position.",
+  // A retry that can't be built (each comes with retry: false: the sweep is what's left).
+  retry_used: "It was already tried once. Swap the leftover back to cash instead.",
+  retry_unavailable: "It can't be finished now. Swap the leftover back to cash instead.",
+  // The API's own words for these are for developers ("Build again: transactions expire…").
+  trade_changed: "This changed while you were signing. Try again.",
+  build_expired: "That took too long. Try again.",
   // A crash on the API's side: its message is a stack line, not for people.
   internal: "Something went wrong on our side. Try again.",
 };
@@ -116,11 +126,13 @@ export function errorText(code: string, message: string | undefined): string {
 
 /** A fork API refusal: `code` is the API's error code ("insufficient_funds", "already_on_chain"…). */
 export class ForkError extends Error {
-  constructor(public code: string, message: string) { super(message); }
+  /** `data`: the API's whole refusal (a `trade_incomplete` carries `retry` and `incomplete`). */
+  constructor(public code: string, message: string, public data?: Record<string, unknown>) { super(message); }
 }
 
-// Money calls carry the signed-in person's Privy access token: the fork API checks that its
-// user owns the wallet acted for. Set by the session once someone signs in.
+// Every call carries the signed-in person's Privy access token: on money calls the fork API checks
+// that its user owns the wallet acted for, and reads count against that user's limit instead of the
+// IP's. Set by the session once someone signs in.
 let forkToken: (() => Promise<string | null>) | null = null;
 export function setForkAuth(get: (() => Promise<string | null>) | null) {
   forkToken = get;
@@ -129,15 +141,28 @@ export function setForkAuth(get: (() => Promise<string | null>) | null) {
 /** Fired when the fork API says the session isn't good for this wallet; SessionScreens asks to sign in again. */
 export const REAUTH_EVENT = "thesis:reauth";
 
+/**
+ * Where fork calls go: the fork API itself when NEXT_PUBLIC_FORK_API_URL is set (inlined at build
+ * time), else this site's /api/fork proxy. FORK_API_URL stays server-only (server renders, the proxy).
+ */
+const FORK_BASE = (process.env.NEXT_PUBLIC_FORK_API_URL ?? "").trim().replace(/\/+$/, "") || "/api/fork";
+
 export async function fork<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
-  const token = method !== "GET" && forkToken ? await forkToken().catch(() => null) : null;
-  const r = await fetch(`/api/fork${path}`, {
-    method,
-    headers: { ...(body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
-    body: body ? JSON.stringify(body) : undefined,
-    cache: "no-store",
-  });
-  const json = (await r.json().catch(() => ({}))) as { error?: string; message?: string };
+  const token = forkToken ? await forkToken().catch(() => null) : null;
+  let r: Response;
+  try {
+    r = await fetch(`${FORK_BASE}${path}`, {
+      method,
+      headers: { ...(body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+    });
+  } catch {
+    // Offline, the fork API down, or (calling it directly) a CORS refusal: the browser only says
+    // "failed to fetch". Through the proxy, the server answers these with 502 fork_unreachable.
+    throw new ForkError("fork_unreachable", "Can't reach Thesis right now. Try again in a moment.");
+  }
+  const json = (await r.json().catch(() => ({}))) as { error?: string; message?: string } & Record<string, unknown>;
   if (!r.ok) {
     const code = json.error ?? json.message ?? "Something went wrong";
     if ((r.status === 401 && code === "unauthorized") || code === "wrong_wallet") {
@@ -148,7 +173,7 @@ export async function fork<T>(method: string, path: string, body?: unknown, head
       const wait = Number(r.headers.get("retry-after"));
       throw new ForkError("rate_limited", wait > 0 ? `Too many tries. Wait ${wait < 90 ? `${Math.ceil(wait)} s` : `${Math.ceil(wait / 60)} min`} and try again.` : "Too many tries. Wait a moment and try again.");
     }
-    throw new ForkError(code, errorText(code, json.message));
+    throw new ForkError(code, errorText(code, json.message), json);
   }
   return json as T;
 }
@@ -171,6 +196,87 @@ export async function cashOutPhoenix(address: string, signAndSubmit: (b: Built) 
     if (r.done || !r.buildId || !r.transactions?.length) return;
     await signAndSubmit({ buildId: r.buildId, transactions: r.transactions });
   }
+}
+
+/**
+ * A split trade that stopped partway (the fork API's `incomplete`): `landed` of its transactions
+ * went through, so the wallet holds what they bought and no position exists yet. `next` is
+ * "retry" while its one retry is left, then "sweep".
+ */
+export type Incomplete = {
+  position: string;
+  take: string;
+  takeId: string;
+  side: "back" | "fade";
+  usd: number;
+  next: "retry" | "sweep";
+  landed: number;
+  signatures: string[];
+  at: string;
+};
+
+/** A `trade_incomplete` refusal's details: the stopped trade and whether its retry is left. */
+export function stoppedTrade(e: unknown): { trade: Incomplete | null; retry: boolean } | null {
+  if (!(e instanceof ForkError) || e.code !== "trade_incomplete") return null;
+  const trade = (e.data?.incomplete as Incomplete | undefined) ?? null;
+  return { trade, retry: e.data?.retry === true && trade?.next !== "sweep" };
+}
+
+/**
+ * How a retry or sweep ended: `complete` when the trade went through after all (`trade_complete`);
+ * `partial` when the sweep still had something left after its last round.
+ */
+export type Recovery = "complete" | "swept" | "partial" | "nothing" | "gone";
+
+/**
+ * Builds the rest of a stopped split trade once more and sends it (`POST /wallets/:w/retry`).
+ * Throws a ForkError with `data.retry === false` when only the sweep is left (retry_used,
+ * retry_unavailable, take_closed, or a retry that stopped again).
+ */
+export async function retryTrade(address: string, position: string | null, signAndSubmit: (b: Built) => Promise<string[]>): Promise<Recovery> {
+  try {
+    await signAndSubmit(await fork<Built>("POST", `/wallets/${address}/retry`, position ? { position } : {}));
+    return "complete";
+  } catch (e) {
+    if (e instanceof ForkError && e.code === "trade_complete") return "complete";
+    if (e instanceof ForkError && e.code === "incomplete_gone") return "gone";
+    throw e;
+  }
+}
+
+/**
+ * Swaps what a stopped split trade bought back to USDC (`POST /wallets/:w/sweep`), round after
+ * round until the API says `done`; Phoenix legs then go through the Phoenix cash-out.
+ */
+export async function sweepToCash(address: string, position: string | null, signAndSubmit: (b: Built) => Promise<string[]>): Promise<Recovery> {
+  const ROUNDS = 4;
+  let swept = false;
+  let phoenix = false;
+  let done = false;
+  try {
+    for (let round = 0; round < ROUNDS && !done; round++) {
+      let r: { done: boolean; buildId?: string; transactions?: string[]; phoenixCashOut?: boolean };
+      try {
+        r = await fork("POST", `/wallets/${address}/sweep`, position ? { position } : {});
+      } catch (e) {
+        // A sweep that lands forgets the stopped trade, so asking again about it can answer
+        // 404 incomplete_missing: after a landed round, that means nothing is left.
+        if (swept && e instanceof ForkError && e.code === "incomplete_missing") { done = true; break; }
+        throw e;
+      }
+      phoenix ||= !!r.phoenixCashOut;
+      if (r.done || !r.buildId || !r.transactions?.length) { done = true; break; }
+      await signAndSubmit({ buildId: r.buildId, transactions: r.transactions });
+      swept = true;
+    }
+  } catch (e) {
+    if (e instanceof ForkError && e.code === "trade_complete") return "complete";
+    throw e;
+  }
+  if (phoenix) await cashOutPhoenix(address, signAndSubmit);
+  // Every round landed and the API never said `done`: something may be left (Me still lists it).
+  if (swept && !done) return "partial";
+  return swept || phoenix ? "swept" : "nothing";
 }
 
 /** "NVDA 3x long liquidates at $61.21 · 18% away", as the iOS receipt's liquidation line. */

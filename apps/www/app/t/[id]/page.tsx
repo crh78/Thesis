@@ -5,7 +5,7 @@ import Avatar from "@/components/Avatar";
 import Basket from "@/components/Basket";
 import Comments from "@/components/Comments";
 import TradeDock from "@/components/TradeDock";
-import { calledIt, getReceipt, getTake, HORIZON, pct, takeReturn } from "@/lib/data";
+import { authorName, calledIt, getReceipt, getTake, HORIZON, isDeleted, pct, takeReturn } from "@/lib/data";
 
 export const revalidate = 15;
 
@@ -22,7 +22,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const take = await getTake(id);
   if (!take) return { title: "Thesis" };
-  const who = take.author.display_name ?? `@${take.author.handle}`;
+  const who = authorName(take.author);
   const description = `${who}'s take on Thesis. Trade it or fade it.`;
   return {
     title: `${take.claim} · Thesis`,
@@ -46,13 +46,21 @@ export default async function TakePage({ params }: Props) {
         <Link href="/" className="brand">thesis</Link>
       </div>
 
-      <Link className="author author-link" href={take.author.handle ? `/u/${take.author.handle}` : "#"}>
-        <Avatar person={take.author} />
-        <div>
-          <div style={{ fontWeight: 600 }}>{take.author.display_name ?? take.author.handle}</div>
-          <div className="muted small">@{take.author.handle}</div>
+      {isDeleted(take.author) ? (
+        // A deleted account: no handle and no profile to open.
+        <div className="author">
+          <Avatar person={take.author} />
+          <div style={{ fontWeight: 600 }}>{authorName(take.author)}</div>
         </div>
-      </Link>
+      ) : (
+        <Link className="author author-link" href={`/u/${take.author.handle}`}>
+          <Avatar person={take.author} />
+          <div>
+            <div style={{ fontWeight: 600 }}>{authorName(take.author)}</div>
+            <div className="muted small">@{take.author.handle}</div>
+          </div>
+        </Link>
+      )}
 
       <h1 className="claim">{take.claim}</h1>
       <div className="caps">
@@ -78,9 +86,9 @@ export default async function TakePage({ params }: Props) {
         <Basket legs={take.legs} receipt={receipt?.legs} />
       </div>
 
-      <TradeDock takeId={take.id} author={take.author.display_name ?? take.author.handle ?? "this"} receipt={receipt} />
+      <TradeDock takeId={take.id} author={authorName(take.author)} receipt={receipt} />
 
-      <Comments takeId={take.id} author={take.author.display_name ?? take.author.handle ?? "someone"} claim={take.claim} initialCount={take.comments} />
+      <Comments takeId={take.id} author={authorName(take.author)} claim={take.claim} initialCount={take.comments} />
     </main>
   );
 }

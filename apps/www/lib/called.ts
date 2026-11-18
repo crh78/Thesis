@@ -46,7 +46,8 @@ export function cardData(take: Take, receipt: Receipt | null): CardData {
     name: nameOf(take.author),
     handle: take.author.handle,
     avatar: avatar(take.author.avatar_url),
-    letter: (take.author.handle ?? take.author.display_name ?? "?").slice(0, 1).toUpperCase(),
+    // A deleted author: no letter on the face (it's a plain circle).
+    letter: take.author.deleted ? "" : (take.author.handle ?? take.author.display_name ?? "?").slice(0, 1).toUpperCase(),
     posted: shortDate(take.created_at),
     since: since(take.created_at),
     days: Math.max(0, Math.floor((Date.now() - new Date(take.created_at).getTime()) / 86_400_000)),
