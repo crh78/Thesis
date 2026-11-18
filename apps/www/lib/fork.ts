@@ -1,7 +1,8 @@
 "use client";
-// The fork API from the browser, as the iOS app's ForkAPI.swift: everything goes through
-// /api/fork/* (rewritten to the fork API, which sends no CORS headers). The user's Privy Solana
-// wallet signs; the API adds the app's fee payer and sends.
+// The fork API from the browser, as the iOS app's ForkAPI.swift. With NEXT_PUBLIC_FORK_API_URL set,
+// the browser calls it directly (the fork API allows this site's origin in FORK_API_CORS_ORIGINS);
+// without it, everything goes through the /api/fork/* proxy (app/api/fork), one Vercel function
+// call per request. The user's Privy Solana wallet signs; the API adds the app's fee payer and sends.
 import { useCallback, useMemo, useRef } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useSignMessage, useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
@@ -98,6 +99,10 @@ const KNOWN: Record<string, string> = {
   transaction_failed: "That didn't go through. Check your balance, then try again.",
   // Sent without a message (a sale after the take ended, a trade on a closed take).
   take_closed: "This take has ended, so it can't be traded or sold now. It settles at its end date.",
+  // A trade split over several transactions where a later one failed, even after the API's retry:
+  // the earlier ones swapped some cash into tokens that aren't in a position. `sweepToCash` swaps
+  // them back (TradeDock offers it).
+  trade_incomplete: "This trade didn't finish: part of your cash was swapped into tokens that aren't in a position.",
   // A crash on the API's side: its message is a stack line, not for people.
   internal: "Something went wrong on our side. Try again.",
 };
@@ -119,8 +124,9 @@ export class ForkError extends Error {
   constructor(public code: string, message: string) { super(message); }
 }
 
-// Money calls carry the signed-in person's Privy access token: the fork API checks that its
-// user owns the wallet acted for. Set by the session once someone signs in.
+// Every call carries the signed-in person's Privy access token: on money calls the fork API checks
+// that its user owns the wallet acted for, and reads count against that user's limit instead of the
+// IP's. Set by the session once someone signs in.
 let forkToken: (() => Promise<string | null>) | null = null;
 export function setForkAuth(get: (() => Promise<string | null>) | null) {
   forkToken = get;
@@ -129,14 +135,27 @@ export function setForkAuth(get: (() => Promise<string | null>) | null) {
 /** Fired when the fork API says the session isn't good for this wallet; SessionScreens asks to sign in again. */
 export const REAUTH_EVENT = "thesis:reauth";
 
+/**
+ * Where fork calls go: the fork API itself when NEXT_PUBLIC_FORK_API_URL is set (inlined at build
+ * time), else this site's /api/fork proxy. FORK_API_URL stays server-only (server renders, the proxy).
+ */
+const FORK_BASE = (process.env.NEXT_PUBLIC_FORK_API_URL ?? "").trim().replace(/\/+$/, "") || "/api/fork";
+
 export async function fork<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
-  const token = method !== "GET" && forkToken ? await forkToken().catch(() => null) : null;
-  const r = await fetch(`/api/fork${path}`, {
-    method,
-    headers: { ...(body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
-    body: body ? JSON.stringify(body) : undefined,
-    cache: "no-store",
-  });
+  const token = forkToken ? await forkToken().catch(() => null) : null;
+  let r: Response;
+  try {
+    r = await fetch(`${FORK_BASE}${path}`, {
+      method,
+      headers: { ...(body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+    });
+  } catch {
+    // Offline, the fork API down, or (calling it directly) a CORS refusal: the browser only says
+    // "failed to fetch". Through the proxy, the server answers these with 502 fork_unreachable.
+    throw new ForkError("fork_unreachable", "Can't reach Thesis right now. Try again in a moment.");
+  }
   const json = (await r.json().catch(() => ({}))) as { error?: string; message?: string };
   if (!r.ok) {
     const code = json.error ?? json.message ?? "Something went wrong";
@@ -171,6 +190,17 @@ export async function cashOutPhoenix(address: string, signAndSubmit: (b: Built) 
     if (r.done || !r.buildId || !r.transactions?.length) return;
     await signAndSubmit({ buildId: r.buildId, transactions: r.transactions });
   }
+}
+
+/**
+ * After a `trade_incomplete`: swaps the tokens the unfinished trade left in the wallet back to USDC.
+ * The API builds it (`POST /wallets/:w/sweep`); false when it says there's nothing left to swap.
+ */
+export async function sweepToCash(address: string, signAndSubmit: (b: Built) => Promise<string[]>): Promise<boolean> {
+  const r = await fork<{ done?: boolean; buildId?: string; transactions?: string[] }>("POST", `/wallets/${address}/sweep`, {});
+  if (r.done || !r.buildId || !r.transactions?.length) return false;
+  await signAndSubmit({ buildId: r.buildId, transactions: r.transactions });
+  return true;
 }
 
 /** "NVDA 3x long liquidates at $61.21 · 18% away", as the iOS receipt's liquidation line. */

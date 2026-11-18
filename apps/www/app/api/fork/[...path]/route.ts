@@ -1,5 +1,7 @@
-// The browser's way to the fork API (it sends no CORS headers). A server route rather than a rewrite,
-// so it can add what only the server may know (the fork API's abuse guard):
+// The browser's way to the fork API when NEXT_PUBLIC_FORK_API_URL isn't set (with it, lib/fork.ts
+// calls the fork API directly, through its CORS origins, and this route is only kept for
+// compatibility; no server code calls it). A server route rather than a rewrite, so it can add
+// what only the server may know (the fork API's abuse guard):
 //   x-thesis-proxy-key   FORK_API_PROXY_KEY, the secret the fork API shares with this proxy
 //   x-thesis-client-ip   the visitor's IP (Vercel sets x-real-ip / x-forwarded-for and overwrites
 //                        anything a client sends), so rate limits count each visitor, not Vercel

@@ -23,7 +23,8 @@ const config: NextConfig = {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
   async rewrites() {
-    // (The browser reaches the fork API through app/api/fork, a server route that adds the abuse guard's proxy headers.)
+    // (The browser reaches the fork API directly with NEXT_PUBLIC_FORK_API_URL, else through
+    // app/api/fork, a server route that adds the abuse guard's proxy headers. See lib/fork.ts.)
     if (!FORK_BLINK_URL) return [];
     return [
       // Solana Actions (Blinks) for the same share URLs, served by the fork Blink.
