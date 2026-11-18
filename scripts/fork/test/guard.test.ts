@@ -191,3 +191,48 @@ test("server: withdrawals are off, money routes go through the guard, errors car
   assert.equal(deposits.length, 1);
   assert.equal((await fetch(`${url}/health`)).status, 200);
 });
+
+test("report marks are swept once they're older than a minute", async () => {
+  const { g, logs, tick } = guard({ auth: "report" });
+  await g.checkMoney(req(), WALLET, "trades");
+  assert.equal(g.reportedKeys, 1);
+  assert.equal(logs.filter((l) => l.startsWith("auth (report only)")).length, 1);
+  tick(30_000);
+  g.sweep();
+  assert.equal(g.reportedKeys, 1, "still within its minute");
+  tick(31_000);
+  g.sweep();
+  assert.equal(g.reportedKeys, 0);
+});
+
+test("server: a money route checks the wallet is an address before the guard; 500s don't leak details", async (t) => {
+  const deposits: unknown[][] = [];
+  const service = {
+    deposit: async (...args: unknown[]) => (deposits.push(args), { usdc: 10 }),
+    wallet: async () => {
+      throw new Error("connect ECONNREFUSED 10.0.0.7:18899 (internal)");
+    },
+    publicConfig: async () => ({}),
+  } as unknown as ForkService;
+  const { g } = guard({ auth: "report" });
+  const logs: string[] = [];
+  const server = forkApiServer(service, (m) => logs.push(m), { guard: g });
+  server.listen(0, "127.0.0.1");
+  t.after(() => server.close());
+  await once(server, "listening");
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  const junk = "x".repeat(2_000);
+  const r = await fetch(`${url}/wallets/${junk}/deposits`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ usd: 10 }) });
+  assert.equal(r.status, 400);
+  assert.equal(((await r.json()) as { error: string }).error, "invalid_wallet");
+  assert.equal(g.reportedKeys, 0, "the guard never saw it");
+  assert.equal(deposits.length, 0);
+
+  const failed = await fetch(`${url}/wallets/${WALLET}`);
+  assert.equal(failed.status, 500);
+  const body = (await failed.json()) as { error: string; message: string };
+  assert.equal(body.error, "internal");
+  assert.ok(!body.message.includes("ECONNREFUSED"), "the message is generic");
+  assert.ok(logs.some((l) => l.includes("ECONNREFUSED")), "the details are logged");
+});

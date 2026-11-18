@@ -25,6 +25,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { checkWalletAuth } from "./creator-fees.ts";
 import type { Guard } from "./guard.ts";
+import { parseKey } from "./common.ts";
 import { ApiError, type ForkService } from "./service.ts";
 
 const header = (req: IncomingMessage, name: string) => {
@@ -72,8 +73,12 @@ export function forkApiServer(
   hooks: { digest?: () => Promise<unknown>; guard?: Guard } = {},
 ): Server {
   const guard = hooks.guard;
-  /** A money action for `wallet`: who's asking, and the wallet's rate limits. */
+  /**
+   * A money action for `wallet`: who's asking, and the wallet's rate limits. The wallet must be an
+   * address first, so the guard's per-wallet limits never key on arbitrary text from a request.
+   */
   const money = async (req: IncomingMessage, wallet: string, route: string) => {
+    parseKey(wallet);
     if (guard) await guard.checkMoney(req, wallet, route);
   };
   /** Builds that call Jupiter wait their turn behind the guard's queue. */
@@ -167,8 +172,9 @@ export function forkApiServer(
       throw new ApiError(404, "no_such_route");
     } catch (e) {
       if (e instanceof ApiError) return send(e.status, { error: e.code, message: e.message }, e.headers);
+      // The details go to the log only: they can name internal hosts, keys' owners or RPC errors.
       log(`error: ${e instanceof Error ? e.stack : e}`);
-      return send(500, { error: "internal", message: e instanceof Error ? e.message : String(e) });
+      return send(500, { error: "internal", message: "Something went wrong. Try again in a moment." });
     }
   });
 }

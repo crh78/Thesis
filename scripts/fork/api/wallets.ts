@@ -8,6 +8,19 @@ import { ApiError, USD, checkAmount, once, parseKey, type CashEntry, type ChainA
 import type { StateStore } from "./store.ts";
 
 const ACTIVITY_CACHE_MS = 60_000;
+/** How long a wallet read is reused (see `Wallets.wallet`). */
+const WALLET_CACHE_MS = 8_000;
+/** Cache size past which expired entries are dropped. */
+const CACHE_SWEEP_AT = 1_000;
+
+type WalletView = {
+  wallet: string;
+  usdc: number;
+  depositCapUsd: number | null;
+  depositLeftUsd: number | null;
+  holdings: { mint: string; symbol: string | null; underlying: string | null; amount: number }[];
+  activity: (ChainActivity | (CashEntry & { takeId: null; signature: null }))[];
+};
 
 /**
  * Play money per account on the public fork: $1,000 added in total, ever, with
@@ -35,15 +48,44 @@ export class Wallets {
     this.#changed = changed;
   }
 
+  /** Clears what's cached about the wallet: a trade or a cash change just moved its balances. */
   forgetActivity(owner: string) {
     this.#chainActivity.delete(owner);
+    this.#wallets.delete(owner);
   }
 
-  async wallet(addr: string) {
+  /**
+   * USDC, holdings and activity, cached WALLET_CACHE_MS and read once at a time per wallet: each
+   * read is a few RPC calls that Surfpool forwards to its mainnet datasource (Helius credits), and
+   * the apps poll it. Trades and cash changes clear the entry (`forgetActivity`).
+   */
+  wallet(addr: string) {
+    parseKey(addr);
+    const now = Date.now();
+    const hit = this.#wallets.get(addr);
+    if (hit && hit.at > now - WALLET_CACHE_MS) return hit.value;
+    if (this.#wallets.size >= CACHE_SWEEP_AT) this.#sweep(now);
+    const value = this.#readWallet(addr);
+    const entry = { at: now, value };
+    this.#wallets.set(addr, entry);
+    value.catch(() => {
+      if (this.#wallets.get(addr) === entry) this.#wallets.delete(addr);
+    });
+    return value;
+  }
+  #wallets = new Map<string, { at: number; value: Promise<WalletView> }>();
+
+  /** Drops expired cache entries, so addresses read once don't stay in memory. */
+  #sweep(now: number) {
+    for (const [k, v] of this.#wallets) if (v.at <= now - WALLET_CACHE_MS) this.#wallets.delete(k);
+    for (const [k, v] of this.#chainActivity) if (v.at <= now - ACTIVITY_CACHE_MS) this.#chainActivity.delete(k);
+  }
+
+  /** The wallet read itself (see `wallet`). */
+  async #readWallet(addr: string): Promise<WalletView> {
     const owner = parseKey(addr);
     const conn = this.#o.connection;
-    const [sol, accounts, activity] = await Promise.all([
-      conn.getBalance(owner),
+    const [accounts, activity] = await Promise.all([
       // Surfpool asks its mainnet datasource for these, which can fail transiently: once more.
       Promise.all([TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID].map((programId) => once(() => conn.getParsedTokenAccountsByOwner(owner, { programId })))),
       this.#activity(owner),
@@ -57,7 +99,6 @@ export class Wallets {
     return {
       wallet: addr,
       usdc: usdc ? usdc.tokenAmount.uiAmount : 0,
-      sol: sol / 1e9,
       // Play money left to add (null: no cap).
       depositCapUsd: DEPOSIT_CAP_USD > 0 ? DEPOSIT_CAP_USD : null,
       depositLeftUsd: DEPOSIT_CAP_USD > 0 ? Math.max(0, DEPOSIT_CAP_USD - this.depositedUsd(addr)) : null,
@@ -102,7 +143,10 @@ export class Wallets {
         await this.#o.fork.setUsdc(owner, bal - out);
       }
       this.#store.state.cash.push({ wallet: addr, kind, usd, at: new Date().toISOString() });
-      this.#store.save();
+      // Written now, not debounced: the USDC is minted, and losing its record to a crash would
+      // let the wallet past the deposit cap.
+      this.#store.saveNow();
+      this.#wallets.delete(addr);
     });
     // The chart snapshot runs in the background: on a wallet's first deposit it reads every take's
     // positions, which made that deposit take 4-7 s.

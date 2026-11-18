@@ -127,7 +127,8 @@ export class Router {
 
   /**
    * Quotes swap legs whose routability isn't known yet (once per TTL), so the receipt, and the
-   * trade sheet built from it, leaves out the same legs a build will.
+   * trade sheet built from it, leaves out the same legs a build will. One check per underlying
+   * at a time: receipts opened together wait for the same quotes instead of each quoting.
    */
   async checkRoutes(legs: MappedLeg[]) {
     const now = Date.now();
@@ -135,13 +136,23 @@ export class Router {
     if (!unknown.length) return;
     const state = this.#o.bank();
     await Promise.all(
-      unknown.map(async (l) => {
-        const best = await bestIssuer(l.key!, MIN_STAKE_USD, { state, ...this.route }).catch(() => null);
-        if (best?.winner) this.#winners.set(l.key!, { mint: best.winner.mint, at: now });
-        else this.#noRoute.set(l.key!, now + NO_ROUTE_TTL_MS);
+      [...new Set(unknown.map((l) => l.key!))].map((key) => {
+        const pending = this.#checking.get(key);
+        if (pending) return pending;
+        const check = bestIssuer(key, MIN_STAKE_USD, { state, ...this.route })
+          .catch(() => null)
+          .then((best) => {
+            if (best?.winner) this.#winners.set(key, { mint: best.winner.mint, at: now });
+            else this.#noRoute.set(key, now + NO_ROUTE_TTL_MS);
+          })
+          .finally(() => this.#checking.delete(key));
+        this.#checking.set(key, check);
+        return check;
       }),
     );
   }
+  /** Underlying key → its route check in flight. */
+  #checking = new Map<string, Promise<void>>();
 
   /**
    * The venue legs for a trade of `usd`, split by weight across the legs that can be bought.

@@ -6,7 +6,7 @@
 // Earn's `deposit-instructions` expects the user's jlUSDC account to exist, so this adds an
 // idempotent create for it, paid by `payer` (the app for Privy users) like the swap legs.
 import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
-import { ASSOCIATED_TOKEN_PROGRAM, TOKEN_PROGRAM, USDC_MINT, associatedTokenAddress, jupiterPost, toInstruction, type FetchFn, type VenueLeg } from "./index.ts";
+import { ASSOCIATED_TOKEN_PROGRAM, JUPITER_TIMEOUT_MS, TOKEN_PROGRAM, USDC_MINT, associatedTokenAddress, jupiterPost, toInstruction, type FetchFn, type VenueLeg } from "./index.ts";
 
 /** jlUSDC, Jupiter Lend's USDC vault share (SPL Token). */
 export const JL_USDC_MINT = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
@@ -104,6 +104,8 @@ export async function jupiterLendAccounts(o: { apiKey: string; fetchFn?: FetchFn
   return [...seen.values()];
 }
 
+let warnedKeyless = false;
+
 /** One vault share's value, read from Jupiter Lend Earn's token list. */
 export type ShareValue = { shareMint: string; usdcPerShare: number; raw: { totalAssets: string; totalSupply: string; convertToAssets?: string } };
 
@@ -112,10 +114,16 @@ export type ShareValue = { shareMint: string; usdcPerShare: number; raw: { total
  * `totalAssets / totalSupply`, both in base units with the same decimals, so it's exact, unlike
  * the rounded `convertToAssets`. A yield leg is priced on this (yield counts
  * in the score): its return is the interest the share earned. Null if the vault isn't listed.
+ * Reads api.jup.ag with the key; only with no key at all does it use the keyless lite-api (said
+ * once, so a missing JUPITER_API_KEY shows in the logs).
  */
 export async function jupiterLendShareValue(shareMint: string, o: { apiKey?: string | null; fetchFn?: FetchFn } = {}): Promise<ShareValue | null> {
+  if (!o.apiKey && !warnedKeyless) {
+    warnedKeyless = true;
+    console.warn("Jupiter Lend share value: no JUPITER_API_KEY, using the keyless lite-api");
+  }
   const base = o.apiKey ? "https://api.jup.ag" : "https://lite-api.jup.ag";
-  const r = await (o.fetchFn ?? fetch)(`${base}/lend/v1/earn/tokens`, { headers: o.apiKey ? { "x-api-key": o.apiKey } : {} });
+  const r = await (o.fetchFn ?? fetch)(`${base}/lend/v1/earn/tokens`, { headers: o.apiKey ? { "x-api-key": o.apiKey } : {}, signal: AbortSignal.timeout(JUPITER_TIMEOUT_MS) });
   if (!r.ok) throw new Error(`Jupiter Lend tokens: HTTP ${r.status}`);
   const list = (await r.json()) as { address?: string; totalAssets?: string; totalSupply?: string; convertToAssets?: string }[];
   const t = list.find((x) => x.address === shareMint);

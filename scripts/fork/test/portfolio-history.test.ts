@@ -67,9 +67,12 @@ test("concurrent deposits and withdrawals reconcile with every chart range", asy
 test("a balance read failure leaves the last snapshot intact", async (t) => {
   const { options, addr, failBalanceRead } = walletFixture(t);
   const first = new ForkService(options);
+  // A wallet's chart is kept once it has added play money (a read alone keeps nothing).
+  await first.deposit(addr, 10);
   await first.history(addr, "ALL");
+  first.flush();
   const saved = JSON.parse(readFileSync(options.statePath, "utf8"));
-  saved.history[addr][0].at -= 120;
+  for (const s of saved.history[addr]) s.at -= 120;
   const previous = JSON.stringify(saved);
   writeFileSync(options.statePath, previous);
   failBalanceRead();

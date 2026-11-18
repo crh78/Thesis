@@ -159,10 +159,19 @@ export class Guard {
     this.#moneyDay = new Window(DAY, this.limits.moneyPerDay);
     this.#reads = new Window(MINUTE, this.limits.readsPerMinute);
     this.#gate = new BuildGate(this.limits.buildsAtOnce, this.limits.buildQueue, o.log);
-    setInterval(() => {
-      const now = this.#now();
-      for (const w of [this.#moneyMinute, this.#moneyDay, this.#reads]) w.sweep(now);
-    }, 10 * MINUTE).unref();
+    setInterval(() => this.sweep(), 10 * MINUTE).unref();
+  }
+
+  /** Drops rate-limit windows with nothing left in them and report marks older than a minute, to bound memory. */
+  sweep() {
+    const now = this.#now();
+    for (const w of [this.#moneyMinute, this.#moneyDay, this.#reads]) w.sweep(now);
+    for (const [k, at] of this.#reported) if (at <= now - MINUTE) this.#reported.delete(k);
+  }
+
+  /** How many report marks are kept (for tests). */
+  get reportedKeys(): number {
+    return this.#reported.size;
   }
 
   #now() {
