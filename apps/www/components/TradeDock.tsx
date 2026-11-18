@@ -8,15 +8,18 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
 import { legName, pct, usd, type Position, type Receipt } from "@/lib/data";
 // The fork client adds the Privy token on money calls and handles "Sign in again".
-import { fork, markTraded } from "@/lib/fork";
+import { cashOutPhoenix, centsInput, depositLeft, fork, markTraded, type Built, type PhoenixLeg, type PhoenixRisk, type WalletSummary } from "@/lib/fork";
 import { cardValue } from "@/lib/data";
 import { X_LOGIN } from "@/lib/flags";
 import { useSession } from "@/lib/session";
+import { LiquidationLines } from "./Phoenix";
 import SignIn from "./SignIn";
 
 type Side = "back" | "fade";
-type Built = { buildId: string; transactions: string[]; feeUsd?: number };
 type Step = { kind: "closed" } | { kind: "signin" } | { kind: "trade"; side: Side } | { kind: "sell"; position: Position } | { kind: "done"; text: string };
+/** The receipt's legs and positions also carry their Phoenix details (lib/fork.ts). */
+type Leg = Receipt["legs"][number] & PhoenixLeg;
+const phoenixOf = (p: Position) => (p as Position & { phoenix?: PhoenixRisk[] }).phoenix;
 
 const CHIPS = [10, 20, 50, 100];
 
@@ -34,7 +37,8 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
   const [receipt, setReceipt] = useState<Receipt | null>(initial);
   // The receipt as this wallet sees it (canFade is false on your own take): a fade waits for it.
   const [viewerReceipt, setViewerReceipt] = useState(false);
-  const [cash, setCash] = useState<number | null>(null);
+  const [summary, setSummary] = useState<WalletSummary | null>(null);
+  const cash = summary?.usdc ?? null;
   const [config, setConfig] = useState({ feeRate: 0.001, minStakeUsd: 10 });
   const [amount, setAmount] = useState("20");
   const [busy, setBusy] = useState<string | null>(null);
@@ -50,10 +54,10 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
   const refresh = useCallback(async () => {
     if (!address) return;
     const [w, r] = await Promise.all([
-      fork<{ usdc: number }>("GET", `/wallets/${address}`).catch(() => null),
+      fork<WalletSummary>("GET", `/wallets/${address}`).catch(() => null),
       fork<Receipt>("GET", `/takes/${takeId}?viewer=${address}`).catch(() => null),
     ]);
-    if (w) setCash(w.usdc);
+    if (w) setSummary(w);
     if (r) { setReceipt(r); setViewerReceipt(true); }
   }, [address, takeId]);
 
@@ -144,8 +148,20 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
       const built = await fork<Built>("POST", `/takes/${takeId}/positions/${position.address}/exit`, { owner: address });
       await signAndSubmit(built);
       markTraded();
+      // A sale with Phoenix legs closed them; their cash comes back to USDC in a second step (as
+      // iOS). If that fails, it waits on Me with "Cash out".
+      let stranded = false;
+      if (built.phoenixCashOut) {
+        setBusy("Moving cash back…");
+        await cashOutPhoenix(address!, signAndSubmit).catch(() => { stranded = true; });
+      }
       await refresh();
-      setStep({ kind: "done", text: "Sold. The cash is back in your balance, and the position is scored at today's prices." });
+      setStep({
+        kind: "done",
+        text: stranded
+          ? "Sold, and the position is scored at today's prices. The cash from its leveraged legs is still on its way: tap Cash out on Me to move it to your balance."
+          : "Sold. The cash is back in your balance, and the position is scored at today's prices.",
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -158,8 +174,7 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
     setError(null);
     try {
       setBusy("Adding cash…");
-      const r = await fork<{ usdc: number }>("POST", `/wallets/${address}/deposits`, { usd: usdAmount });
-      setCash(r.usdc);
+      setSummary(await fork<WalletSummary>("POST", `/wallets/${address}/deposits`, { usd: usdAmount }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -199,6 +214,8 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
               <div>
                 <span className={p.side === "back" ? "up" : "down"}>{p.side === "back" ? "Traded" : "Faded"}</span> {usd(p.stakeUsd)}
                 <div className="note">{p.pendingNote ? legName(p.pendingNote) : `Score ${pct(p.returnBps == null ? null : p.returnBps / 100)}`}</div>
+                {/* Leveraged legs and fade shorts: where each one is liquidated, and how close it is. */}
+                <LiquidationLines risks={phoenixOf(p)} leverage={(i) => (receipt?.legs.find((l) => l.index === i) as Leg | undefined)?.perp?.leverage ?? null} />
               </div>
               <div style={{ textAlign: "right" }}>
                 <div className="mono">{usd(p.valueUsd)}</div>
@@ -251,6 +268,7 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
                 amount={amount}
                 setAmount={setAmount}
                 cash={cash}
+                depositLeftUsd={depositLeft(summary).left}
                 feeRate={config.feeRate}
                 busy={busy}
                 error={error}
@@ -295,6 +313,8 @@ function TradeSheet(props: {
   amount: string;
   setAmount: (s: string) => void;
   cash: number | null;
+  /** How much more cash this wallet can add (the fork API's cap); Infinity without one. */
+  depositLeftUsd: number;
   feeRate: number;
   busy: string | null;
   error: string | null;
@@ -304,13 +324,21 @@ function TradeSheet(props: {
   const { side, receipt, amount, cash, feeRate, busy } = props;
   const n = Number(amount) || 0;
   const fee = n * feeRate;
-  const legs = receipt?.legs ?? [];
+  const legs: Leg[] = receipt?.legs ?? [];
   // Fading leaves out legs that can't be shorted: card legs always (docs/cards-plan.md), shown as excluded.
   const blockedFor = (l: Receipt["legs"][number]) =>
     side === "back" ? (l.tradable ? null : l.blocked ?? "not tradable") : (l.fadeBlocked ?? (l.card ? "Cards can't be faded" : null));
   const included = legs.filter((l) => !blockedFor(l));
   const totalWeight = included.reduce((s, l) => s + l.weightBps, 0) || 1;
   const short = cash != null && cash < n + fee;
+  // Held on Phoenix: a back's perp legs (long, at the take's leverage), a fade's shorts (at the leg's own).
+  const onPhoenix = (l: Leg) => (side === "back" ? !!l.perp : !!l.short);
+  const leverageOf = (l: Leg) => l.perp?.leverage ?? 1;
+  const anyPhoenix = included.some(onPhoenix);
+  // "Add $100 cash", never more than the cap has left (cents, as the API takes them).
+  const room = Math.floor(props.depositLeftUsd * 100) / 100;
+  const add = Math.min(Math.max(100, Math.ceil(n + fee)), room);
+  const stillShort = cash != null && cash + add < n + fee;
 
   return (
     <>
@@ -319,7 +347,7 @@ function TradeSheet(props: {
         {side === "back" ? "You get the same basket at today's prices." : `You win if ${props.author} is wrong. Fades are public.`}
       </p>
       <div className="amount">
-        $<input inputMode="decimal" value={amount} onChange={(e) => props.setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Amount" />
+        $<input inputMode="decimal" value={amount} onChange={(e) => props.setAmount(centsInput(e.target.value))} aria-label="Amount" />
       </div>
       <div className="chips">
         {CHIPS.map((c) => (
@@ -338,18 +366,27 @@ function TradeSheet(props: {
               <span className="name">{legName(l.name)}</span>
               {blocked ? <div className="note">{l.card && side === "fade" ? "Cards can't be faded" : blocked}</div>
                 : heldSide ? <div className="note">{heldSide === "yes" ? "Yes" : "No"}{price != null ? ` · ${Math.round(price * 100)}¢` : ""}</div>
-                : l.card ? <div className="note">{cardValue(l.card.insuredValueUsd)}</div> : null}
+                : l.card ? <div className="note">{cardValue(l.card.insuredValueUsd)}</div>
+                : onPhoenix(l) ? <div className="note">{leverageOf(l)}x {side === "back" ? "long" : "short"} on {side === "back" ? l.perp?.symbol : l.short}</div> : null}
             </div>
             <span className="mono">{blocked ? (side === "fade" ? "Excluded" : "Left out") : usd((n * l.weightBps) / totalWeight)}</span>
           </div>
         );
       })}
       <div className="row muted small"><span>Bought from your wallet · Thesis fee {(feeRate * 100).toFixed(2)}%</span><span className="mono">{usd(fee)}</span></div>
+      {anyPhoenix ? (
+        <p className="note">Leveraged legs can be liquidated if the market moves against them. Each one&apos;s liquidation price shows on your position, and you get an alert when one gets close.</p>
+      ) : null}
       {props.error ? <div className="err">{props.error}</div> : null}
-      {short ? (
-        <button className="btn ghost" style={{ width: "100%", marginTop: 12 }} disabled={!!busy} onClick={() => props.onAddCash(Math.max(100, Math.ceil(n + fee)))}>
-          {busy === "Adding cash…" ? busy : `Add $${Math.max(100, Math.ceil(n + fee))} cash`}
+      {short && add >= 1 ? (
+        <button className="btn ghost" style={{ width: "100%", marginTop: 12 }} disabled={!!busy} onClick={() => props.onAddCash(add)}>
+          {busy === "Adding cash…" ? busy : `Add ${usd(add).replace(/\.00$/, "")} cash`}
         </button>
+      ) : null}
+      {short && (add < 1 || stillShort) ? (
+        <p className="note">
+          {add < 1 ? "You've added the most cash you can." : `You can add ${usd(add)} more, which isn't enough for this amount.`} Pick a smaller amount, or sell a position to free up cash.
+        </p>
       ) : null}
       <button
         className={`btn ${side}`}
