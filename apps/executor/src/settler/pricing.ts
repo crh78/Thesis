@@ -26,10 +26,15 @@
 // or, when the token can't be used then, on the stock times the token's premium at entry; a
 // stock-priced entry exits on the stock. Otherwise the token's premium or discount to the stock
 // (often 1-2%) would show up as a gain or loss.
+//
+// The rules themselves (which source, the liquidity floor, the premium, the prediction quotes)
+// live in leg-value.ts, shared with the marker and the fork API; this file decides what to read
+// and when, and what to sign.
 import { effectiveMultiplier, type ScaledUi } from "@thesis/venues/bank";
-import { bookProblem, legPrice, type GeminiContract, type GeminiSide } from "@thesis/venues/gemini";
+import type { GeminiContract, GeminiSide } from "@thesis/venues/gemini";
 import type { EntryBasis } from "./basis.ts";
 import { priceCard, type CardRef, type CardSource } from "./card-legs.ts";
+import { liquidTokenPrice, positive, predictionPrice, spotPrice, tokenPremium, toPriceUnits, type SpotBasisRef } from "./leg-value.ts";
 import type { StockSource, TokenPrice, TokenSource } from "./sources.ts";
 
 export type LegKindName = "spot" | "yield" | "perp" | "prediction" | "card";
@@ -127,6 +132,12 @@ export type Sources = {
 
 const isStock = (u: UnderlyingRef) => u.cls === "equity" || u.cls === "etf";
 
+export { toPriceUnits };
+
+/** A spot leg's entry basis, in the shared rule's terms. */
+const spotBasis = (entry: EntryBasis | null): SpotBasisRef =>
+  entry?.source === "token" ? { source: "token", premium: entry.premium } : entry?.source === "stock" ? { source: "stock" } : null;
+
 /** Which price a leg is being priced for. An exit and a sale are priced alike. */
 export type PriceMoment = "entry" | "exit" | "sale";
 
@@ -204,19 +215,21 @@ async function priceLegAt(
   // 1. The issuer token, live (never for a leg whose entry was priced on the stock).
   if (entry?.source !== "stock" && leg.token?.underlyingPerUiToken && live) {
     const t = (tp = await src.tokens.price(leg.token.mint));
-    if (t && t.liquidityUsd >= rules.minLiquidityUsd && t.usdPrice > 0) {
-      const implied = t.usdPrice / leg.token.underlyingPerUiToken;
+    const implied = liquidTokenPrice(t, leg.token.underlyingPerUiToken, rules.minLiquidityUsd);
+    if (t && implied !== null) {
       const publishedAt = Math.max(momentSec, Math.min(nowSec, t.at));
       const perUi = leg.token.underlyingPerUiToken;
       const known = configOf(t) !== undefined;
       const m = multiplierAt(t);
       const quote = async (inputs: Record<string, unknown>, premium: number | null): Promise<LegOutcome> => {
         const sp = await splitAdjust();
+        const priced = spotPrice(spotBasis(entry), implied, null, scale(m), sp.factor);
+        if (!priced.ok) throw new Error("unreachable: a usable token always prices a leg not on the stock");
         return {
           ok: true,
           quote: {
             leg: leg.index,
-            price: implied * scale(m) * sp.factor,
+            price: priced.price,
             publishedAt,
             rule: "issuer-token",
             basis: entry ?? { source: "token", mint: t.mint, underlyingPerUiToken: perUi, premium, ...(known ? { multiplier: m } : {}), at: momentSec },
@@ -230,8 +243,8 @@ async function priceLegAt(
       // A close from before the market shut isn't a fair reference (after-hours news), so then
       // no premium is recorded.
       const ref = await src.stocks.latestTrade(u.code).catch(() => null);
-      const fresh = ref && ref.price > 0 && nowSec - ref.at <= staleRef;
-      return quote(fresh ? { stockRef: ref.raw } : {}, fresh ? implied / ref.price : null);
+      const premium = tokenPremium(implied, ref, nowSec, staleRef);
+      return quote(premium !== null ? { stockRef: ref!.raw } : {}, premium);
     }
   }
 
@@ -251,13 +264,14 @@ async function priceLegAt(
       const m = leg.token ? multiplierAt(tp) : 1;
       const sp = await splitAdjust();
       const extra = { ...(leg.token && configOf(tp) !== undefined ? { multiplier: m } : {}), ...(entryMultiplier ? { entryMultiplier } : {}), ...sp.inputs };
+      const priced = spotPrice(spotBasis(entry), null, tr.price, scale(m), sp.factor);
       if (entry?.source === "token") {
         // A token-priced entry whose token can't price the exit: the stock, carried over to the
         // token's terms by the premium measured at entry.
-        if (entry.premium) {
+        if (priced.ok) {
           return {
             ok: true,
-            quote: { leg: leg.index, price: tr.price * entry.premium * scale(m) * sp.factor, publishedAt: tr.at, rule: "stock-adjusted", basis: entry, inputs: { trade: tr.raw, premium: entry.premium, ...extra } },
+            quote: { leg: leg.index, price: priced.price, publishedAt: tr.at, rule: "stock-adjusted", basis: entry, inputs: { trade: tr.raw, premium: entry.premium, ...extra } },
           };
         }
         // No premium (entered with the market shut): the raw stock would turn the token's premium
@@ -270,9 +284,10 @@ async function priceLegAt(
       }
       const basis: EntryBasis =
         entry ?? (leg.token && configOf(tp) !== undefined ? { source: "stock", mint: leg.token.mint, multiplier: m, at: momentSec } : { source: "stock", at: momentSec });
+      if (!priced.ok) throw new Error("unreachable: a stock trade always prices a leg not priced on the token");
       return {
         ok: true,
-        quote: { leg: leg.index, price: tr.price * scale(m) * sp.factor, publishedAt: tr.at, rule: "stock-first-trade", basis, inputs: { trade: tr.raw, ...extra } },
+        quote: { leg: leg.index, price: priced.price, publishedAt: tr.at, rule: "stock-first-trade", basis, inputs: { trade: tr.raw, ...extra } },
       };
     }
     return nowSec > until
@@ -298,7 +313,7 @@ async function priceYield(leg: LegToPrice, momentSec: number, nowSec: number, ru
   const shareMint = entry?.source === "lend" ? entry.shareMint : leg.token?.mint;
   if (!shareMint) return { ok: false, retry: false, reason: "no vault share proved for this yield leg" };
   const v = await src.lend.shareValue(shareMint);
-  if (!v || !(v.usdcPerShare > 0)) return { ok: false, retry: true, reason: `Jupiter Lend doesn't list ${shareMint} right now` };
+  if (!v || positive(v.usdcPerShare) === null) return { ok: false, retry: true, reason: `Jupiter Lend doesn't list ${shareMint} right now` };
   return {
     ok: true,
     quote: {
@@ -314,12 +329,6 @@ async function priceYield(leg: LegToPrice, momentSec: number, nowSec: number, ru
 
 /** 15 minutes: Alpaca's free feed trades a liquid stock every few seconds while the market is open. */
 export const DEFAULT_STALE_REF_SECS = 900;
-
-/** USD → on-chain price units (8 decimals). */
-export function toPriceUnits(usd: number): bigint {
-  if (!Number.isFinite(usd) || usd < 0) throw new Error(`bad price ${usd}`);
-  return BigInt(Math.round(usd * 1e8));
-}
 
 /**
  * A prediction leg (paper-filled): Gemini's live prices for the contract and
@@ -365,12 +374,10 @@ async function pricePrediction(
   const closed = c.expiry !== null && Date.parse(c.expiry) <= nowSec * 1000;
   if (!isEntry && !c.resolutionSide && closed) return wait(`${ref.instrument} stopped trading; waiting for Gemini to resolve it`);
   // Paper fills at incoherent quotes would score gains nobody could make: wait for a sane book.
-  const bad = c.resolutionSide ? null : bookProblem(c);
-  if (bad) return wait(`${ref.instrument}: Gemini's quotes don't add up (${bad})`);
-  const price = legPrice(c, ref.side, held, isEntry ? "entry" : "exit");
-  if (price === null || (isEntry && !(price > 0 && price < 1))) {
-    return wait(`no ${isEntry ? "ask" : "bid"} on ${held === "back" ? ref.side : ref.side === "yes" ? "no" : "yes"} for ${ref.instrument} right now`);
-  }
+  const p = predictionPrice(c, ref.side, held, isEntry ? "entry" : "exit");
+  if (!p.ok && p.why === "bad-book") return wait(`${ref.instrument}: Gemini's quotes don't add up (${p.detail})`);
+  if (!p.ok) return wait(`no ${isEntry ? "ask" : "bid"} on ${held === "back" ? ref.side : ref.side === "yes" ? "no" : "yes"} for ${ref.instrument} right now`);
+  const price = p.price;
   predictions.priced?.(ref.eventTicker);
   // Published when it was observed (the read), within [moment, now].
   const readMs = predictions.readAt?.(ref.eventTicker) ?? null;
@@ -381,7 +388,7 @@ async function pricePrediction(
       leg: leg.index,
       price,
       publishedAt,
-      rule: !isEntry && c.resolutionSide ? "gemini-resolution" : isEntry ? "gemini-ask" : "gemini-bid",
+      rule: p.rule,
       basis: ref,
       inputs: {
         instrument: c.instrumentSymbol, eventTicker: c.eventTicker, side: ref.side, held, ask: c.ask, bid: c.bid, status: c.status, resolutionSide: c.resolutionSide, resolvedAt: c.resolvedAt,

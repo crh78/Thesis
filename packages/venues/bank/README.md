@@ -28,10 +28,15 @@ Reads `JUPITER_API_KEY` and `QUICKNODE_RPC_URL` from the repo-root `.env`. Write
 | Gemini markets: every contract, through the `gemini` proxy (expired ones kept a week; current for 13 hours, `ASSET_BANK_MAX_GEMINI_AGE_MIN`) | 6 hours | `ASSET_BANK_GEMINI_MIN` |
 | Collector Crypt listings / yield APYs | 15 min | `ASSET_BANK_CARDS_MIN` / `ASSET_BANK_YIELD_MIN` |
 | Picked cards (card legs): every card a basket picked (the catalog's `card:<cardId>` rows), new ones first, then any older than an hour, so the settler can price card legs (`cardLeg`, `src/cards.ts`) | each cards run, up to 60 cards | `ASSET_BANK_CARDS_MAX_READS` |
-| Jupiter request budget | 45 per minute | `ASSET_BANK_JUPITER_RPM` |
+| Jupiter request budget | 25 per minute | `ASSET_BANK_JUPITER_RPM` |
 
 Probes go stalest first, and each batch is sized to whatever the Jupiter budget leaves after prices. A tier that fails retries after 30 s, and a run that overruns is never started twice.
 
+Next to the file sink's `asset-bank.json` (`src/side-files.ts`):
+
+- `asset-bank.prices.json`: the token prices and pooled liquidity alone, rewritten on every flush. The fork API's live display values read it before asking Jupiter (the main file is ~25 MB).
+- `trade-builds.busy`: when the fork API touches it while user trade builds run or wait (`markBuildsBusy`), probes pause until it's 15 s old, so the shared Jupiter key goes to trades first. No file: never paused.
+
 ## Request volume and cost
 
-At these defaults the poller runs free: Jupiter stays inside its budget (the free key allows 60 a minute; the VM runs `ASSET_BANK_JUPITER_RPM=25`, and a full probe cycle takes about 11 minutes at 45), QuickNode mint reads are cached after a cold start (~460 calls, 5 accounts per call on the free plan), the public Phoenix, Collector Crypt, Kamino and Jupiter Lend APIs cost about 30 requests an hour, and Gemini about 5 (one sweep every 6 hours; budget in `docs/gemini-plan.md`). Raising `ASSET_BANK_JUPITER_RPM` above 60 needs a paid Jupiter key.
+At these defaults the poller runs free: Jupiter stays inside its budget (the free key allows 60 a minute; the VM runs `ASSET_BANK_JUPITER_RPM=25`, the default, and a full probe cycle takes about 11 minutes at 45), QuickNode mint reads are cached after a cold start (~460 calls, 5 accounts per call on the free plan), the public Phoenix, Collector Crypt, Kamino and Jupiter Lend APIs cost about 30 requests an hour, and Gemini about 5 (one sweep every 6 hours; budget in `docs/gemini-plan.md`). Raising `ASSET_BANK_JUPITER_RPM` above 60 needs a paid Jupiter key.

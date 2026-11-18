@@ -1,7 +1,7 @@
 // Live marks, the pure part: which asset a pick is, what it's worth now by the settler's rules,
 // and the take's return as an index since it was posted. marker.ts does the I/O.
 //
-// Rules (the settler's, apps/executor/src/settler/pricing.ts, applied "now"):
+// Rules (the settler's, applied "now", through the same pure rules: settler/leg-value.ts):
 //   - spot: the issuer token when its pool holds the liquidity floor (no band against the stock);
 //     otherwise the stock's latest trade (US stocks and ETFs). A pick keeps the source its base was priced from: a token-priced base is marked on
 //     the token, or on the stock times the token's premium at the base when the token can't be
@@ -21,9 +21,9 @@
 // last mark; one that has never been marked holds the whole take back (no return is written,
 // rather than a wrong one).
 import { positionReturnBps } from "@thesis/chain";
-import { effectiveMultiplier, PRICEABLE_MIN_POOLED_USD, type ScaledUi } from "@thesis/venues/bank";
-import { bookProblem, legPrice, type GeminiContract, type GeminiSide } from "@thesis/venues/gemini";
-import { toPriceUnits } from "../settler/pricing.ts";
+import { effectiveMultiplier, type ScaledUi } from "@thesis/venues/bank";
+import type { GeminiContract, GeminiSide } from "@thesis/venues/gemini";
+import { legReturnBps, liquidTokenPrice, perpPrice, positive, predictionPrice, spotPrice, tokenPremium, toPriceUnits } from "../settler/leg-value.ts";
 
 /** A stock trade older than this is a stale close: no premium against it (settler: SETTLER_STALE_REF_SEC). */
 export const STALE_REF_SECS = 900;
@@ -138,43 +138,43 @@ export function multiplierOf(asset: Extract<PickAsset, { type: "spot" }>, snap: 
 
 /** A spot pick's price now per underlying unit, by the settler's entry rule, unscaled (no base). */
 export function spotNow(asset: Extract<PickAsset, { type: "spot" }>, snap: Snapshot): { price: number; via: "token" | "stock"; premium: number | null } | null {
-  const tp = snap.tokens.get(asset.mint);
   const ref = asset.stock ? snap.stocks.get(asset.stock) : undefined;
-  const fresh = !!ref && ref.price > 0 && snap.nowSec - ref.at <= STALE_REF_SECS;
-  if (tp && tp.usdPrice > 0 && tp.liquidityUsd >= PRICEABLE_MIN_POOLED_USD) {
-    const implied = tp.usdPrice / asset.perUi;
-    return { price: implied, via: "token", premium: fresh ? implied / ref!.price : null };
-  }
-  if (ref && ref.price > 0) return { price: ref.price, via: "stock", premium: null };
-  return null;
+  const r = spotPrice(null, liquidTokenPrice(snap.tokens.get(asset.mint), asset.perUi), stockNow(ref));
+  if (!r.ok) return null;
+  return r.via === "token" ? { price: r.price, via: "token", premium: tokenPremium(r.price, ref, snap.nowSec, STALE_REF_SECS) } : { price: r.price, via: "stock", premium: null };
 }
+
+/** The stock's latest trade as a price (any age: a live mark shows the last trade). */
+const stockNow = (ref: { price: number } | undefined) => (ref && ref.price > 0 ? ref.price : null);
 
 /** What a pick is worth now, in its base's terms (or, with no base, what a base would be). */
 export function markPick(asset: PickAsset, snap: Snapshot, base: Base["source"] | null): MarkOutcome {
   switch (asset.type) {
     case "void":
       return { ok: false, reason: asset.reason };
-    case "yield":
-      return snap.lend && snap.lend > 0 ? { ok: true, price: snap.lend, source: { source: "lend", rule: "lend-share-value" } } : { ok: false, reason: "no jlUSDC share value" };
+    case "yield": {
+      const v = positive(snap.lend);
+      return v !== null ? { ok: true, price: v, source: { source: "lend", rule: "lend-share-value" } } : { ok: false, reason: "no jlUSDC share value" };
+    }
     case "card": {
-      const v = snap.cards?.get(asset.cardId);
-      return v && v > 0 ? { ok: true, price: v, source: { source: "card", rule: "card-insured-value", cardId: asset.cardId } } : { ok: false, reason: `no insured value for card ${asset.cardId} yet` };
+      const v = positive(snap.cards?.get(asset.cardId));
+      return v !== null ? { ok: true, price: v, source: { source: "card", rule: "card-insured-value", cardId: asset.cardId } } : { ok: false, reason: `no insured value for card ${asset.cardId} yet` };
     }
     case "perp": {
       const p = snap.perps.get(asset.symbol);
-      if (!p || !(p.price > 0)) return { ok: false, reason: `no Phoenix price for ${asset.symbol}` };
-      return { ok: true, price: p.price / asset.units, source: { source: "phoenix", rule: p.rule, symbol: asset.symbol, units: asset.units } };
+      const price = perpPrice(p?.price, asset.units);
+      if (!p || price === null) return { ok: false, reason: `no Phoenix price for ${asset.symbol}` };
+      return { ok: true, price, source: { source: "phoenix", rule: p.rule, symbol: asset.symbol, units: asset.units } };
     }
     case "prediction": {
       const c = snap.events.get(asset.eventTicker)?.find((x) => x.instrumentSymbol === asset.instrument);
-      if (!c) return { ok: false, reason: `Gemini doesn't list ${asset.instrument}` };
-      if (!c.resolutionSide) {
-        const bad = bookProblem(c);
-        if (bad) return { ok: false, reason: `${asset.instrument}: Gemini's quotes don't add up (${bad})` };
+      const p = predictionPrice(c, asset.side, "back", "exit");
+      if (!p.ok) {
+        if (p.why === "unlisted") return { ok: false, reason: `Gemini doesn't list ${asset.instrument}` };
+        if (p.why === "bad-book") return { ok: false, reason: `${asset.instrument}: Gemini's quotes don't add up (${p.detail})` };
+        return { ok: false, reason: `no bid on ${asset.side} for ${asset.instrument}` };
       }
-      const p = legPrice(c, asset.side, "back", "exit");
-      if (p === null) return { ok: false, reason: `no bid on ${asset.side} for ${asset.instrument}` };
-      return { ok: true, price: p, source: { source: "gemini", rule: c.resolutionSide ? "gemini-resolution" : "gemini-bid", instrument: asset.instrument, side: asset.side } };
+      return { ok: true, price: p.price, source: { source: "gemini", rule: p.rule, instrument: asset.instrument, side: asset.side } };
     }
     case "spot": {
       const mNow = multiplierOf(asset, snap, snap.nowSec);
@@ -191,17 +191,17 @@ export function markPick(asset: PickAsset, snap: Snapshot, base: Base["source"] 
       const baseM = "multiplier" in base && base.multiplier && base.multiplier > 0 ? base.multiplier : null;
       if (baseM && mNow === undefined) return { ok: false, reason: `can't tell ${asset.mint}'s multiplier now` };
       const scale = baseM ? (mNow ?? 1) / baseM : 1;
-      if (base.source === "token") {
-        const now = spotNow(asset, snap);
-        if (now?.via === "token") return { ok: true, price: now.price * scale, source: base };
-        if (ref && ref.price > 0 && base.premium) return { ok: true, price: ref.price * base.premium * scale, source: base };
-        return { ok: false, reason: `${asset.mint}: token can't be used now and its base has no premium to the stock` };
-      }
-      if (base.source === "stock") {
-        if (ref && ref.price > 0) return { ok: true, price: ref.price * scale, source: base };
-        return { ok: false, reason: `no ${base.code} trade` };
-      }
-      return { ok: false, reason: `a ${base.source} base on a spot pick` };
+      if (base.source !== "token" && base.source !== "stock") return { ok: false, reason: `a ${base.source} base on a spot pick` };
+      const r = spotPrice(
+        base.source === "token" ? { source: "token", premium: base.premium } : { source: "stock" },
+        liquidTokenPrice(snap.tokens.get(asset.mint), asset.perUi),
+        stockNow(ref),
+        scale,
+      );
+      if (r.ok) return { ok: true, price: r.price, source: base };
+      return base.source === "token"
+        ? { ok: false, reason: `${asset.mint}: token can't be used now and its base has no premium to the stock` }
+        : { ok: false, reason: `no ${base.code} trade` };
     }
   }
 }
@@ -209,9 +209,9 @@ export function markPick(asset: PickAsset, snap: Snapshot, base: Base["source"] 
 /** A prediction pick's ask now (what a buyer pays), from a coherent, still-active book; null otherwise. */
 function predictionAsk(asset: Extract<PickAsset, { type: "prediction" }>, snap: Snapshot): number | null {
   const c = snap.events.get(asset.eventTicker)?.find((x) => x.instrumentSymbol === asset.instrument);
-  if (!c || c.resolutionSide || bookProblem(c)) return null;
-  const p = legPrice(c, asset.side, "back", "entry");
-  return p !== null && p > 0 && p < 1 ? p : null;
+  if (c?.resolutionSide) return null;
+  const p = predictionPrice(c, asset.side, "back", "entry");
+  return p.ok ? p.price : null;
 }
 
 type ReturnKind = "spot" | "perp" | "prediction" | "yield" | "card";
@@ -219,12 +219,7 @@ const returnKind = (a: PickAsset): ReturnKind | null => (a.type === "void" ? nul
 
 /** One pick's return in percent: the program's formula as a back. Null when it can't be computed (base ≤ 0). */
 export function legReturnPct(kind: ReturnKind, leverage: number, base: number, mark: number): number | null {
-  if (!(base > 0) || !(mark >= 0)) return null;
-  const bps = positionReturnBps([{ kind: { [kind]: {} } as any, weightBps: 10_000, leverage }], {
-    side: { back: {} },
-    legsMask: 1,
-    prices: [{ entry: toPriceUnits(base), exit: toPriceUnits(mark) }],
-  });
+  const bps = legReturnBps(kind, "back", leverage, base, mark);
   return bps === null ? null : bps / 100;
 }
 

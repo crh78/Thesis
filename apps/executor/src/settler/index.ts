@@ -3,6 +3,7 @@ export * from "./bank.ts";
 export * from "./basis.ts";
 export * from "./crank.ts";
 export * from "./gemini-source.ts";
+export * from "./leg-value.ts";
 export * from "./open-set.ts";
 export * from "./pricing.ts";
 export * from "./proof.ts";

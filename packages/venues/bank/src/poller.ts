@@ -55,6 +55,11 @@ export type PollerDeps = {
    */
   pickedCards?: () => Promise<string[]>;
   cardClient?: CollectorCryptClient;
+  /**
+   * True while user trade builds are running or waiting (the fork API's busy file, side-files.ts):
+   * probes stop for the rest of their run, so the shared Jupiter key goes to trades first.
+   */
+  yieldToTrades?: () => boolean;
 };
 
 /** Counts outgoing requests per host (QuickNode shown as "quicknode", never its URL). */
@@ -96,6 +101,7 @@ export class AssetBankPoller {
   afterGemini: PollerDeps["afterGemini"];
   pickedCards: PollerDeps["pickedCards"];
   cardClient: CollectorCryptClient;
+  yieldToTrades: () => boolean;
   dirty: Dirty = cleanDirty();
   /** Cap on tokens probed per probe run (smoke tests); Infinity in production. */
   maxProbesPerRun = Infinity;
@@ -108,6 +114,7 @@ export class AssetBankPoller {
     this.afterGemini = d.afterGemini;
     this.pickedCards = d.pickedCards;
     this.cardClient = d.cardClient ?? new CollectorCryptClient();
+    this.yieldToTrades = d.yieldToTrades ?? (() => false);
     const env = d.jupiter && d.rpc ? null : loadEnv();
     if (env) this.log(`asset-bank: ${describeEnv(env)}`);
     this.jup = d.jupiter ?? new JupiterClient(env!.jupiterApiKey, this.config.jupiterRpm);
@@ -295,7 +302,14 @@ export class AssetBankPoller {
     if (!stale.length) return;
     const [small, large] = this.config.probeSizesUsd;
     let quotes = 0;
+    let probed = 0;
     for (const t of stale) {
+      // Trades first: the rest waits for the next run (stalest first, so nothing is skipped for good).
+      if (this.yieldToTrades()) {
+        this.log(`probes: paused after ${probed}/${stale.length} tokens, trade builds are running`);
+        break;
+      }
+      probed++;
       const q1 = toProbeQuote(small, await this.jup.quote(t.mint, small, { maxAccounts: this.config.maxAccounts }));
       quotes++;
       // If $100 does not route, $1,000 will not either: save the request.
@@ -305,7 +319,7 @@ export class AssetBankPoller {
       this.dirty.tokens.add(t.mint);
     }
     this.#reclassify();
-    this.log(`probes: ${stale.length} tokens, ${quotes} quotes (budget ${limit}/run)`);
+    this.log(`probes: ${probed} tokens, ${quotes} quotes (budget ${limit}/run)`);
   }
 
   async phoenix(): Promise<void> {
