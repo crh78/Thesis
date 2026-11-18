@@ -30,7 +30,8 @@
 //                                  linked to your Privy login (x null when none is linked), newest
 //                                  first, from the last 14 days: { id, claim, legs, context, created_at }
 //   PUT    /source/drafts/:id      { take_id } you posted it: your live take → { posted, take_id }
-//                                  (posted false when someone else's live take got there first)
+//                                  (posted false when someone else's live take got there first);
+//                                  404 unless the take is yours, 409 take_not_live while it's posting
 //
 // Reading: X posts through X's public oEmbed, articles by fetching the page (_shared/source.ts);
 // copied accounts' timelines through Apify (_shared/x.ts). Drafting: one fast model call.
@@ -265,6 +266,8 @@ async function draftPosted(profile: string, id: string, b: Record<string, unknow
   const { data: take, error } = await db.from("takes").select("id, status").eq("id", takeId).eq("author_id", profile).maybeSingle();
   dbCheck(error);
   if (!take) throw new HttpError(404, "not_found");
+  // Only a live take: a posting one may never make it on-chain (the web app calls this once it's live).
+  if (take.status !== "live") throw new HttpError(409, "take_not_live");
   const { data: d, error: e } = await db.from("take_drafts").select("take_id, takes(status)").eq("id", id).maybeSingle();
   dbCheck(e);
   if (!d) throw new HttpError(404, "not_found");
