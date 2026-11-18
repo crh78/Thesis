@@ -476,6 +476,8 @@ export type BudgetLimits = {
   burst: number;
   /** Lanes 2 and 3 fail fast rather than leave fewer than this many requests for taps. */
   reserve: number;
+  /** How long a prebuild waits for the bucket to climb above `reserve` (no 429, no tap waiting) before it's refused. */
+  prebuildWaitMs: number;
   /** A tap-time call that would wait longer than this for its turn gets 503 busy instead. */
   maxWaitMs: number;
   /** Jupiter calls of builds in flight at once, and how many taps may queue for a slot. */
@@ -483,7 +485,7 @@ export type BudgetLimits = {
   queue: number;
 };
 
-export const JUPITER_BUDGET: BudgetLimits = { perMinute: 30, burst: 10, reserve: 6, maxWaitMs: 8_000, atOnce: 8, queue: 24 };
+export const JUPITER_BUDGET: BudgetLimits = { perMinute: 30, burst: 10, reserve: 6, maxWaitMs: 8_000, prebuildWaitMs: 4_000, atOnce: 8, queue: 24 };
 /** How long a 429 without `x-ratelimit-reset` stops every lane. */
 const PAUSE_ON_429_MS = 2_000;
 /** The longest a 429's `x-ratelimit-reset` stops every lane. */
@@ -523,7 +525,9 @@ export const newUse = (lane: Lane = 1): JupiterUse => ({ lane, calls: 0, quotes:
  * The fork API's Jupiter budget: a token bucket (BudgetLimits) with lanes, behind a concurrency
  * gate (BuildGate) for builds' calls. Tap-time calls queue for a request in order and wait up to
  * `maxWaitMs`; prebuilds and route checks take one only while more than `reserve` are left and no
- * tap is waiting, and are refused at once otherwise. A 429 (or a window Jupiter says is used up)
+ * tap is waiting. A prebuild short only of spare requests waits up to `prebuildWaitMs` for the bucket
+ * to refill (the sheet is open, nobody has tapped yet); route checks, and anything after a 429 or
+ * behind a waiting tap, are refused at once. A 429 (or a window Jupiter says is used up)
  * empties the bucket until the window resets, so nothing else piles on.
  */
 export class JupiterBudget {
@@ -578,15 +582,25 @@ export class JupiterBudget {
   }
 
   /** Takes one request for `lane`: waits in line (lane 1) or is refused (lanes 2, 3). Returns ms waited. */
-  async #take(lane: Lane): Promise<number> {
+  async #take(lane: Lane, retried = false, waited = 0): Promise<number> {
     this.#refill();
     const now = this.#now();
     if (lane !== 1) {
       if (now < this.#pausedUntil) throw this.#refuse(lane, this.#pausedUntil - now, "Jupiter answered 429");
       if (this.#waiters.length) throw this.#refuse(lane, this.#msUntil(this.#waiters.length + 1 + this.limits.reserve), "trades are waiting");
-      if (this.#tokens - 1 < this.limits.reserve) throw this.#refuse(lane, this.#msUntil(this.limits.reserve + 1), "the last few requests");
+      if (this.#tokens - 1 < this.limits.reserve) {
+        const wait = this.#msUntil(this.limits.reserve + 1);
+        // A prebuild only short of spare requests waits for the bucket (once, and within its limit),
+        // then checks again: a tap or a 429 in the meantime still turns it away.
+        if (lane === 2 && !retried && wait <= this.limits.prebuildWaitMs) {
+          const started = Date.now();
+          await new Promise((resolve) => setTimeout(resolve, wait + 5));
+          return this.#take(lane, true, Date.now() - started);
+        }
+        throw this.#refuse(lane, wait, "the last few requests");
+      }
       this.#tokens -= 1;
-      return 0;
+      return waited;
     }
     if (!this.#waiters.length && now >= this.#pausedUntil && this.#tokens >= 1) {
       this.#tokens -= 1;
