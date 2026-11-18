@@ -5,15 +5,17 @@
 // and this screen waits for that, then opens the take.
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { cardValue, isCardKind, money, rpcNow, SERIES } from "@/lib/data";
+import { cardValue, isCardKind, money, SERIES } from "@/lib/data";
 import {
   adding, basketFrom, builderLegs, type Built, type Draft, HORIZONS, horizonOf, type Leg, MAX_PICKS, newDraft, type PickAsset,
   removing, type Risk, RISKS, setting, settleDate, topicGuess,
 } from "@/lib/compose";
-import { fork, ForkError, markTraded, useForkWallet, type Built as Build, type WalletSummary } from "@/lib/fork";
+import { centsInput, fork, useForkWallet, type WalletSummary } from "@/lib/fork";
+import { postingBuyIns, sendBuyIn, showMyTakes, waitUntilLive } from "@/lib/posting";
 import { useSession } from "@/lib/session";
 import { AssetLogo, type Asset } from "./AssetBits";
 import { AddCash } from "./CashSheets";
+import { PostingAtLaunch } from "./PostingRecovery";
 
 type Open = Partial<Draft> & { autoBuild?: boolean };
 const ComposerContext = createContext<{ open: (init?: Open) => void } | null>(null);
@@ -32,6 +34,8 @@ export function ComposerProvider({ children }: { children: React.ReactNode }) {
     <ComposerContext.Provider value={value}>
       {children}
       {init ? <Composer init={init} onClose={() => setInit(null)} /> : null}
+      {/* Takes that didn't post (their buy-in never landed): Retry or Discard, once per session. */}
+      <PostingAtLaunch />
     </ComposerContext.Provider>
   );
 }
@@ -267,6 +271,8 @@ function Basket({ draft, setDraft, onClose, onBack, onPosted }: { draft: Draft; 
   const [short, setShort] = useState(false);
   const [wallet, setWallet] = useState<WalletSummary | null>(null);
   const [config, setConfig] = useState({ feeRate: 0.001, minStakeUsd: 10 });
+  // The field's text, so "12." and "12.5" can be typed; at most 2 decimals (the fork API takes cents).
+  const [buyInText, setBuyInText] = useState(draft.buyIn ? String(draft.buyIn) : "");
   const picked = legs.find((l) => l.name === selected) ?? null;
   const locked = rebuilding || checking;
 
@@ -387,8 +393,8 @@ function Basket({ draft, setDraft, onClose, onBack, onPosted }: { draft: Draft; 
         <div className="buyin-row">
           <label className="buyin">
             <span className="muted" style={{ fontSize: 11 }}>Buy-in</span>
-            <span className="mono">$<input inputMode="decimal" value={draft.buyIn || ""} disabled={locked} aria-label="Buy-in"
-              onChange={(e) => { const buyIn = Number(e.target.value.replace(/[^0-9.]/g, "")) || 0; setDraft((d) => ({ ...d, buyIn })); }} /></span>
+            <span className="mono">$<input inputMode="decimal" value={buyInText} disabled={locked} aria-label="Buy-in"
+              onChange={(e) => { const text = centsInput(e.target.value); setBuyInText(text); setDraft((d) => ({ ...d, buyIn: Number(text) || 0 })); }} /></span>
           </label>
           <button className="obtn filled" style={{ flex: 1 }} disabled={locked || !legs.length} onClick={buyIn}>{checking ? "Checking…" : "Buy in & post"}</button>
         </div>
@@ -465,7 +471,6 @@ function AssetPicker({ legs, onClose, onPick }: { legs: Leg[]; onClose: () => vo
 
 type PostState = { kind: "sending" | "waiting" } | { kind: "live"; id: string } | { kind: "unconfirmed"; id: string } | { kind: "failed"; id: string | null; message: string };
 
-const POSTING_TIMEOUT_MS = 120_000;
 const WALLET_WAIT_MS = 20_000;
 
 function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
@@ -490,6 +495,8 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
       claim: draft.claim.trim(), topic, tags, risk: draft.risk, horizon: draft.horizon, await_chain: true,
       legs: legs.map((l) => ({ name: l.name, kind: l.kind, weight: l.weight, why: l.why, slot: l.slot, fade_how: l.fadeHow, asset_id: l.assetId })),
     });
+    // Retry on Me (after closing this, or a reload) sends the same buy-in.
+    postingBuyIns.set(r.take.id, draft.buyIn);
     // Credit where it came from; not worth failing the post over.
     if (draft.source) await source("POST", "attach", { take_id: r.take.id, url: draft.source.url, label: draft.source.label, kind: draft.source.kind }).catch(() => {});
     return r.take.id;
@@ -516,33 +523,14 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
         takeId.current = id;
         if (!live) return;
         // The buy-in: required to post. An earlier send that landed is fine.
-        try {
-          const built = await fork<Build>("POST", `/takes/${id}/publish`, { author: address, usd: draft.buyIn });
-          await signAndSubmit(built);
-          markTraded();
-        } catch (e) {
-          const landed = e instanceof ForkError && (e.code === "already_on_chain" || e.code === "already_live");
-          if (!landed) {
-            const check = await fork<{ onChain: boolean }>("POST", `/takes/${id}/confirm`, {}).catch(() => ({ onChain: false }));
-            if (!check.onChain) throw e;
-          }
-        }
+        await sendBuyIn(id, address!, draft.buyIn, signAndSubmit);
         if (!live) return;
         // Wait for the chain event to make it live; halfway, ask the fork API to deliver it again.
         setState({ kind: "waiting" });
-        const start = Date.now();
-        let nudged = false;
-        while (live && Date.now() - start < POSTING_TIMEOUT_MS) {
-          const t = await rpcNow<{ status: string } | null>("take", { p_id: id }).catch(() => null);
-          if (t?.status === "live") { if (live) setState({ kind: "live", id }); return; }
-          if (!nudged && Date.now() - start > POSTING_TIMEOUT_MS / 2) { nudged = true; await fork("POST", `/takes/${id}/confirm`, {}).catch(() => {}); }
-          await new Promise((res) => setTimeout(res, 2000));
-        }
-        if (!live) return;
-        const t = await rpcNow<{ status: string } | null>("take", { p_id: id }).catch(() => null);
-        if (t?.status === "live") return setState({ kind: "live", id });
-        const check = await fork<{ onChain: boolean }>("POST", `/takes/${id}/confirm`, {}).catch(() => ({ onChain: false }));
-        setState(check.onChain ? { kind: "unconfirmed", id } : { kind: "failed", id, message: "Your buy-in didn't go through." });
+        const r = await waitUntilLive(id, () => live);
+        if (r === "live") { postingBuyIns.set(id, null); setState({ kind: "live", id }); }
+        else if (r === "unconfirmed") setState({ kind: "unconfirmed", id });
+        else if (r === "failed") setState({ kind: "failed", id, message: "Your buy-in didn't go through." });
       } catch (e) {
         if (live) setState({ kind: "failed", id: takeId.current, message: e instanceof Error ? e.message : "Couldn't post your take. Try again." });
       }
@@ -563,20 +551,26 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
 
   async function discard() {
     setDiscarding(true);
-    if (takeId.current) await social("DELETE", `takes/${takeId.current}`).catch(() => {});
+    if (takeId.current) {
+      await social("DELETE", `takes/${takeId.current}`).catch(() => {});
+      postingBuyIns.set(takeId.current, null);
+    }
     onClose();
   }
 
+  const openMyTakes = () => { onClose(); router.push("/me?tab=takes"); showMyTakes(); };
+
   return (
     <div className="cmp">
-      <Header title="Posting" />
+      {/* Closing keeps the take: it goes live once its buy-in lands, and Me shows how it's going. */}
+      <Header title="Posting" onClose={state.kind === "live" ? undefined : onClose} />
       <div className="cmp-body posting">
         <div className="take-card"><div className="take-card-claim">{draft.claim}</div><div className="muted small">{money(draft.buyIn)} buy-in</div></div>
         {state.kind === "sending" || state.kind === "waiting" ? (
           <div className="build-status">
             <span className="orb big" aria-hidden />
             <h2>{state.kind === "sending" ? "Sending your buy-in" : "Waiting for the chain"}</h2>
-            <p className="muted">Only you can see it until it&apos;s live. This can take up to a minute.</p>
+            <p className="muted">Only you can see it until it&apos;s live. This can take up to a minute. You can close this: it keeps posting, and My takes on Me shows how it&apos;s going.</p>
           </div>
         ) : null}
         {state.kind === "live" ? (
@@ -596,11 +590,13 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
         ) : null}
       </div>
       <div className="cmp-foot">
-        {state.kind === "unconfirmed" ? <button className="obtn filled" onClick={() => { onClose(); router.push("/me"); }}>See my takes</button> : null}
+        {state.kind === "unconfirmed" ? <button className="obtn filled" onClick={openMyTakes}>See my takes</button> : null}
         {state.kind === "failed" ? (
           <>
             <button className="obtn filled" onClick={() => setAttempt((a) => a + 1)}>Retry</button>
-            <button className="obtn plain down" disabled={discarding} onClick={discard}>{discarding ? "Discarding…" : "Discard"}</button>
+            {/* No take made (you're already posting this claim, say): the one posting is on Me. */}
+            {state.id ? <button className="obtn plain down" disabled={discarding} onClick={discard}>{discarding ? "Discarding…" : "Discard"}</button>
+              : <button className="obtn plain" onClick={openMyTakes}>Open My takes</button>}
           </>
         ) : null}
       </div>

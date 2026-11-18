@@ -539,3 +539,8 @@ button.ditem:hover, a.ditem:hover { background: var(--tile); }
 .card-thumb { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; display: block; background: var(--tile); }
 /* "Sign in again" shows above everything, the composer included (a 401 while posting). */
 .sheet-wrap.reauth { z-index: 40; }
+
+/* --- Money flows: Phoenix cash-out (components/Phoenix.tsx) and posting recovery (components/PostingRecovery.tsx). --- */
+.phx-card { margin: 12px 0 4px; padding: 14px; border-radius: 16px; background: var(--tile); border: 1px solid var(--hairline); }
+.posting-actions { display: flex; gap: 8px; margin-top: 8px; }
+/* --- End money flows. --- */
