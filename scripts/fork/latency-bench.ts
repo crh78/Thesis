@@ -4,7 +4,8 @@
 // Starts the fork API in-process on a spare port with the abuse limits in front (a service key it
 // makes up for the run, as the X agent would use), then per run: a throwaway wallet (a local
 // keypair, no profile) gets cash, backs a take made up for the run (it never reaches Supabase, so
-// no feed or board shows it), and sells the position. It times each request from here, reads each
+// no feed or board shows it), and sells the position, each submitted as the apps do (until
+// "accepted", then the /submissions status watch until it landed). It times each request from here, reads each
 // response's Server-Timing (where the server's time went), and prints p50 and p90.
 //
 // Never moves the fork's clock. Each run costs a few Jupiter calls per leg (quotes, swap
@@ -94,6 +95,22 @@ async function bench(): Promise<void> {
       return Buffer.from(tx.serialize()).toString("base64");
     });
 
+  /**
+   * Submits until=accepted (as the apps do): times the answer ("accepted"), then the status watch
+   * until it landed ("confirm", from the answer). A repeat must answer the same submit.
+   */
+  const accepted = async (what: string, build: { buildId: string; transactions: string[] }, kp: Keypair) => {
+    const transactions = sign(build.transactions, kp);
+    const r = ok(`${what} submit`, await call("POST", "/submit", { buildId: build.buildId, transactions, until: "accepted", timings: { bench: 0 } }, `${what} accepted`));
+    if (r.status !== 202 && r.json.status !== "landed") throw new Error(`${what} submit: expected 202 pending, got ${r.status} ${JSON.stringify(r.json)}`);
+    const started = performance.now();
+    const watched = ok(`${what} status`, await call("GET", `/submissions/${build.buildId}?wait=10000`));
+    if (watched.json.status !== "landed") throw new Error(`${what}: ${JSON.stringify(watched.json)}`);
+    record(`${what} confirm`, performance.now() - started);
+    const repeat = await call("POST", "/submit", { buildId: build.buildId, transactions, until: "accepted" });
+    if (repeat.status !== 200 || repeat.json.status !== "landed") throw new Error(`${what} repeat: ${repeat.status} ${JSON.stringify(repeat.json)}`);
+  };
+
   try {
     for (let run = 1; run <= runs; run++) {
       const user = Keypair.generate();
@@ -101,14 +118,15 @@ async function bench(): Promise<void> {
       ok("deposit", await call("POST", `/wallets/${me}/deposits`, { usd: usd * 2 }));
 
       const built = ok("back build", await call("POST", `/takes/${TAKE.id}/trades`, { owner: me, side: "back", usd }, "back build"));
-      ok("back submit", await call("POST", "/submit", { buildId: built.json.buildId, transactions: sign(built.json.transactions, user) }, "back submit"));
+      await accepted("back", built.json, user);
 
       const receipt = ok("receipt", await call("GET", `/takes/${TAKE.id}?viewer=${me}`));
       const mine = receipt.json.viewerPositions?.find((p: any) => !p.exited);
       if (!mine) throw new Error("the back isn't on the receipt");
       const sale = ok("sale build", await call("POST", `/takes/${TAKE.id}/positions/${mine.address}/exit`, { owner: me }, "sale build"));
-      ok("sale submit", await call("POST", "/submit", { buildId: sale.json.buildId, transactions: sign(sale.json.transactions, user) }, "sale submit"));
-      console.log(`run ${run}/${runs}: back build ${client["back build"].at(-1)!.toFixed(0)} ms, submit ${client["back submit"].at(-1)!.toFixed(0)} ms; sale build ${client["sale build"].at(-1)!.toFixed(0)} ms, submit ${client["sale submit"].at(-1)!.toFixed(0)} ms`);
+      await accepted("sale", sale.json, user);
+      const last = (k: string) => client[k].at(-1)!.toFixed(0);
+      console.log(`run ${run}/${runs}: back build ${last("back build")} ms, accepted ${last("back accepted")} ms, landed +${last("back confirm")} ms; sale build ${last("sale build")} ms, accepted ${last("sale accepted")} ms, landed +${last("sale confirm")} ms`);
     }
   } finally {
     server.close();

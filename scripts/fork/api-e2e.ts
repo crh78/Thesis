@@ -85,8 +85,11 @@ async function e2e(): Promise<void> {
     const sent = await call("POST", "/submit", { buildId: built.json.buildId, transactions: signed });
     if (sent.status !== 200) throw new Error(`submit: ${sent.status} ${JSON.stringify(sent.json)}`);
     console.log(`sent ${sent.json.signatures.join(", ")}`);
+    // A repeat is the same submit: its answer again, nothing sent twice. Other bytes: build_used.
     const replay = await call("POST", "/submit", { buildId: built.json.buildId, transactions: signed });
-    checks.push(["submit: a build can't be sent twice", replay.status === 410]);
+    checks.push(["submit: a repeat answers the same signatures", replay.status === 200 && JSON.stringify(replay.json.signatures) === JSON.stringify(sent.json.signatures)]);
+    const reused = await call("POST", "/submit", { buildId: built.json.buildId, transactions: built.json.transactions });
+    checks.push(["submit: other bytes for a used build are refused", reused.status === 409 && reused.json.error === "build_used"]);
 
     const after = await call("GET", `/takes/${TAKE.id}?viewer=${me}`);
     checks.push([`receipt: on-chain, backers ${backersBefore} -> ${after.json.backers}`, after.json.onChain && after.json.backers === backersBefore + 1]);
@@ -98,6 +101,24 @@ async function e2e(): Promise<void> {
     checks.push(["wallet: USDC down by $25 + fee", Math.abs(wallet.json.usdc - (200 - 25.025)) < 1e-6]);
     checks.push(["wallet: holds the basket's tokens", wallet.json.holdings.length === built.json.included.length]);
     checks.push(["wallet: activity shows the back and the deposit", wallet.json.activity.some((a: any) => a.kind === "back" && a.takeId === TAKE.id) && wallet.json.activity.some((a: any) => a.kind === "deposit")]);
+
+    // Accept-then-confirm: 202 once the fork accepted it, then the status watch sees it land.
+    const quick = await call("POST", `/takes/${TAKE.id}/trades`, { owner: me, side: "back", usd: 10 });
+    if (quick.status !== 200) throw new Error(`build: ${quick.status} ${JSON.stringify(quick.json)}`);
+    const quickSigned = quick.json.transactions.map((b64: string) => {
+      const tx = VersionedTransaction.deserialize(Buffer.from(b64, "base64"));
+      tx.sign([user]);
+      return Buffer.from(tx.serialize()).toString("base64");
+    });
+    const acceptedAt = Date.now();
+    const accepted = await call("POST", "/submit", { buildId: quick.json.buildId, transactions: quickSigned, until: "accepted", timings: { e2e: 0 } });
+    console.log(`accepted in ${Date.now() - acceptedAt} ms: ${accepted.status} ${JSON.stringify(accepted.json)}`);
+    checks.push(["submit until accepted: 202 pending with the signatures", accepted.status === 202 && accepted.json.status === "pending" && accepted.json.signatures?.length === quick.json.transactions.length]);
+    const watched = await call("GET", `/submissions/${quick.json.buildId}?wait=10000`);
+    console.log(`landed after ${Date.now() - acceptedAt} ms: ${JSON.stringify(watched.json)}`);
+    checks.push(["submissions: the accepted back landed", watched.status === 200 && watched.json.status === "landed"]);
+    const quickRepeat = await call("POST", "/submit", { buildId: quick.json.buildId, transactions: quickSigned, until: "accepted" });
+    checks.push(["submit until accepted: a repeat answers landed", quickRepeat.status === 200 && quickRepeat.json.status === "landed"]);
 
     // Phoenix lists NVIDIA, Microsoft and Amazon: a fade shorts them there (docs/phoenix-plan.md).
     const fade = await call("POST", `/takes/${TAKE.id}/trades`, { owner: me, side: "fade", usd: 10 });

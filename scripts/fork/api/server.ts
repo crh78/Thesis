@@ -9,8 +9,13 @@
 //   POST /takes/:id/publish  { author, usd }        → same, for posting an app take with the author's buy-in
 //   POST /takes/:id/confirm                         → { onChain, take?, relayed }: is the author's publish
 //                                                     on-chain here? If so, its events go to the backend again
-//   POST /submit             { buildId, transactions[], timings? }  signed by the user → { signatures[] };
-//                                                     `timings`: the client's marks (ms from the tap), logged
+//   POST /submit             { buildId, transactions[], until?, timings? }  signed by the user → { signatures[] }
+//                                                     once landed; with until: "accepted", 202 { status: "pending",
+//                                                     buildId, signatures } once the fork accepted them all. The
+//                                                     same build and bytes again: its status; other bytes: 409
+//                                                     build_used. `timings`: the client's marks (ms from the tap)
+//   GET  /submissions/:buildId?wait=<ms ≤ 10000>     → { status: pending | landed | failed | incomplete, signatures,
+//                                                     error?, incomplete? }, waiting while pending
 //
 // Builds and submits answer with a Server-Timing header: where the server's time went.
 //   GET  /wallets/:address                          USDC, holdings, activity
@@ -40,7 +45,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { checkWalletAuth } from "./creator-fees.ts";
 import type { Guard } from "./guard.ts";
 import { Timings, parseKey } from "./common.ts";
-import { ApiError, type ForkService } from "./service.ts";
+import { ApiError, SUBMISSION_WAIT_MAX_MS, type ForkService } from "./service.ts";
 
 const header = (req: IncomingMessage, name: string) => {
   const v = req.headers[name];
@@ -220,11 +225,19 @@ export function forkApiServer(
         }
       }
       // No token needed: the API only sends what it built, and checks the owner's signature on it.
+      // The body may come as text/plain (a CORS simple request: no preflight).
       if (m === "POST" && url.pathname === "/submit") {
         const b = await body(req);
         if (!Array.isArray(b.transactions) || !b.transactions.every((t) => typeof t === "string")) throw new ApiError(400, "missing_transactions");
+        if (b.until !== undefined && b.until !== "accepted" && b.until !== "confirmed") throw new ApiError(400, "invalid_until", 'until is "accepted" or left out');
         const t = timed();
-        return send(200, await service.submit(str(b.buildId, "buildId"), b.transactions as string[], { timings: t, clientTimings: b.timings }));
+        const r = await service.submit(str(b.buildId, "buildId"), b.transactions as string[], { timings: t, clientTimings: b.timings, until: b.until === "accepted" ? "accepted" : undefined });
+        return send(r.status === "pending" ? 202 : 200, r);
+      }
+      if (m === "GET" && parts[0] === "submissions" && parts[1] && parts.length === 2) {
+        if (!UUID.test(parts[1])) throw new ApiError(400, "invalid_build_id");
+        const wait = Math.max(0, Math.min(SUBMISSION_WAIT_MAX_MS, Number(url.searchParams.get("wait") ?? 0) || 0));
+        return send(200, await service.submission(parts[1], wait));
       }
       if (parts[0] === "wallets" && parts[1] && parts[2] === "creator-fees") {
         if (m === "GET" && parts.length === 3) {

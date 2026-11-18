@@ -246,16 +246,17 @@ async function serve(): Promise<void> {
   const topUp = () => keepFeePayersFunded(log).catch((e) => log(`SOL top-up failed: ${e instanceof Error ? e.message : e}`));
   void topUp();
   setInterval(topUp, TOPUP_CHECK_MS).unref();
-  // The state file is written a few seconds after a change: write what's pending before stopping.
+  // The state file is written a few seconds after a change: write what's pending before stopping,
+  // once submits answered early (until=accepted) have confirmed and done their bookkeeping (10 s at most).
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
     process.once(signal, () => {
-      try {
-        service.flush();
-      } catch (e) {
-        log(`STATE NOT SAVED on ${signal}: ${e instanceof Error ? e.message : e}`);
-        process.exit(1);
-      }
-      process.exit(0);
+      service.drain().then(
+        () => process.exit(0),
+        (e: unknown) => {
+          log(`STATE NOT SAVED on ${signal}: ${e instanceof Error ? e.message : e}`);
+          process.exit(1);
+        },
+      );
     });
   }
 }
