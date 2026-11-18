@@ -36,6 +36,7 @@ function fixture(t: TestContext, o: { take?: AppTake | null; stateTakes?: Record
       return o.take && id === o.take.id ? o.take : null;
     },
     stocks: null,
+    pricesFile: null,
     bases: null,
     jupiterApiKey: null,
     statePath,

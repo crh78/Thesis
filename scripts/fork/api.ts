@@ -16,14 +16,14 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AlpacaStocks, AuditBases } from "@thesis/executor/settler";
-import { loadBankState, type BankState } from "@thesis/venues/bank";
+import { FileSink, buildsBusyFileFor, defaultSink, loadBankState, type BankState } from "@thesis/venues/bank";
 import { fetchGeminiEvent, geminiProxy } from "@thesis/venues/gemini";
 import { envVar } from "../../packages/venues/registry/src/lib/env.ts";
 import { quicknodeHeaders, relayTransactions, webhookConfigured } from "../../infra/quicknode/fork-relay.ts";
 import { blinkServer } from "../../apps/web/blink.ts";
 import { LiveContracts } from "./api/gemini-live.ts";
 import { Guard, parseMode, parseServiceKeys } from "./api/guard.ts";
-import { forkApiServer } from "./api/server.ts";
+import { forkApiServer, parseCorsOrigins } from "./api/server.ts";
 import { DEFAULT_STATE_PATH, ForkService, type AppTake, type TakeSource } from "./api/service.ts";
 import { DATA_DIR, FORK_DEXES, HOST, PATHS, addUsdc, connection, deployedElf, loadKeypair, main, refreshMarkets, requireSurfpool, setUsdc, thesisLookupTable, topUpSol } from "./lib.ts";
 import { fetchConfig, thesisProgram } from "@thesis/chain";
@@ -184,6 +184,16 @@ function digestTime(now: Date) {
   };
 }
 
+/** The asset bank's `trade-builds.busy`, next to its file sink's bank (null with the Supabase sink). */
+function bankBusyFile(): string | null {
+  try {
+    const sink = defaultSink();
+    return sink instanceof FileSink ? buildsBusyFileFor(sink.path) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The public fork's abuse limits from the environment (see api/guard.ts and the README's "Abuse
  * limits"): FORK_API_AUTH, FORK_API_READ_LIMIT, FORK_API_SERVICE_KEYS, FORK_API_PROXY_KEY and the
@@ -199,7 +209,7 @@ export function forkGuard(log: (m: string) => void): Guard {
   if (auth === "enforce" && !privy) throw new Error("FORK_API_AUTH=enforce needs PRIVY_APP_ID, PRIVY_VERIFICATION_KEY and PRIVY_APP_SECRET");
   const serviceKeys = parseServiceKeys(envVar("FORK_API_SERVICE_KEYS"));
   log(`abuse limits: auth ${auth}${privy ? "" : " (no Privy values: tokens can't be checked)"}, read limit ${readLimit}, ${serviceKeys.size} service key(s)`);
-  return new Guard({ auth, readLimit, serviceKeys, proxyKey: envVar("FORK_API_PROXY_KEY"), privy, log });
+  return new Guard({ auth, readLimit, serviceKeys, proxyKey: envVar("FORK_API_PROXY_KEY"), privy, log, busyFile: bankBusyFile() });
 }
 
 async function serve(): Promise<void> {
@@ -209,7 +219,10 @@ async function serve(): Promise<void> {
   const port = Number(process.env.FORK_API_PORT ?? 18901);
   const digest = () => sendDigests(service, log);
   const guard = forkGuard(log);
-  forkApiServer(service, log, { digest, guard }).listen(port, HOST, () => log(`fork API on http://${HOST}:${port} (run \`pnpm fork:settler\` too, for prices)`));
+  // Origins whose browsers call the API directly instead of through the web app's proxy.
+  const cors = parseCorsOrigins(envVar("FORK_API_CORS_ORIGINS"));
+  log(cors.size ? `CORS for ${[...cors].join(", ")}` : "CORS off (FORK_API_CORS_ORIGINS unset)");
+  forkApiServer(service, log, { digest, guard, cors }).listen(port, HOST, () => log(`fork API on http://${HOST}:${port} (run \`pnpm fork:settler\` too, for prices)`));
   const blinkPort = envVar("FORK_BLINK_PORT");
   if (blinkPort) {
     const port = Number(blinkPort);

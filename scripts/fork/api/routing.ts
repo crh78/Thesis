@@ -20,12 +20,22 @@ const ROUTE = { maxAccounts: MAX_ACCOUNTS, minPooledUsd: PRICEABLE_MIN_POOLED_US
 /** How long a build reuses the last best issuer of an underlying instead of quoting every issuer. */
 const WINNER_TTL_MS = 2 * 60_000;
 const NO_ROUTE = "no liquid tokenized version to buy right now";
+/**
+ * A quote that failed rather than found no route (bestIssuer notes it as `no quote: <error>`): a
+ * rate limit, a timeout, a server error or no connection. Jupiter's own "no route" answers
+ * (COULD_NOT_FIND_ANY_ROUTE, HTTP 400/404, empty route) don't match.
+ */
+export const TRANSIENT_QUOTE = /429|rate.?limit|timeout|timed out|abort|ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|socket|network|HTTP 5\d\d/i;
 /** How long a leg with no Jupiter route is skipped before it's quoted again. */
 const NO_ROUTE_TTL_MS = 10 * 60_000;
 
 export type Route = typeof ROUTE & { dexes?: string[] };
-/** A venue leg tagged with the take leg it buys and the owner's account it fills (proof of trade). */
-type TradeLeg = VenueLeg & { output: { leg: number; account: PublicKey }; phoenix?: PhoenixLeg };
+/**
+ * A venue leg tagged with the take leg it buys and the owner's account it fills (proof of trade),
+ * and how it buys it (a split trade's sweep redeems Jupiter Lend shares instead of swapping them).
+ */
+export type TradeLeg = VenueLeg & { output: { leg: number; account: PublicKey }; how: "swap" | "lend" | "phoenix"; phoenix?: PhoenixLeg };
+type Winner = NonNullable<Awaited<ReturnType<typeof bestIssuer>>["winner"]>;
 type Excluded = { index: number; name: string; reason: string };
 /** Which side a trade takes (a fade holds the other side of a prediction leg), and whether paper legs can be in it. */
 export type TradeKind = { side?: "back" | "fade"; paper?: boolean };
@@ -193,7 +203,6 @@ export class Router {
     const tradedStake = () => stake - escrowShare(usable, stake);
     const includedIdx = () => usable.map((l) => l.index).sort((a, b) => a - b);
     if (!traded().length) return { venue: [] as TradeLeg[], included: includedIdx(), excluded: sorted() };
-    type Winner = NonNullable<Awaited<ReturnType<typeof bestIssuer>>["winner"]>;
     // A back's perp legs, and every traded leg of a fade (its shorts), trade on Phoenix.
     const onPhoenix = (l: MappedLeg) => side === "fade" || l.how === "perp";
     const quoteAll = (ls: MappedLeg[], parts: bigint[], only?: (Winner | "lend" | "phoenix")[]) =>
@@ -240,42 +249,97 @@ export class Router {
       if (winners.some((w) => w === null)) throw new ApiError(502, "routing_failed", "A route disappeared while sizing the trade. Try again.");
     }
 
-    const apiKey = this.#o.jupiterApiKey;
-    // Phoenix legs each get their own child subaccount (registered now if needed), sized at the
-    // market's mid: collateral is the leg's part of the stake, the position that times leverage.
+    // Phoenix legs each get their own child subaccount (registered now if needed).
     const phoenixLegs = swapLegs.filter(onPhoenix);
     const subs = phoenixLegs.length ? await this.phoenix!.prepare(user, phoenixLegs.length) : [];
     const subOf = new Map(phoenixLegs.map((l, k) => [l.index, subs[k]]));
     const venue = (await Promise.all(
-      swapLegs.map(async (l, j): Promise<TradeLeg[]> => {
-        const w = winners[j]!;
-        if (w === "phoenix") {
-          const market = side === "fade" ? l.short! : l.phoenix!;
-          const price = await this.phoenix!.venue.mid(market.symbol).catch(() => null);
-          if (!price) throw new ApiError(502, "routing_failed", `Phoenix has no price for ${market.symbol} right now. Try again in a moment.`);
-          const sub = subOf.get(l.index)!;
-          const legs = await this.phoenix!.venue.openLeg({
-            owner: user,
-            payer,
-            sub,
-            symbol: market.symbol,
-            side: side === "fade" ? "short" : "long",
-            collateral: parts[j],
-            // A fade shorts at the leg's own leverage: the program scores it that way.
-            leverage: l.spec.leverage,
-            price,
-            label: `${l.name} (Phoenix ${market.symbol}${l.spec.leverage > 1 ? ` ${l.spec.leverage}x` : ""})`,
-          });
-          return legs.map((v) => ({ ...v, output: { leg: l.index, account: v.outputAccount! }, phoenix: { leg: l.index, sub, symbol: market.symbol } }));
-        }
-        const leg = w === "lend"
-          ? await jupiterLendDeposit({ user, payer, amount: parts[j], label: `${l.name} (Jupiter Lend)`, apiKey: apiKey! })
-          : await jupiterBuy({ quote: w.quote, user, payer, label: `${l.name} (${w.symbol})`, apiKey });
-        // Proof of trade: the receipt checks this account grew (the take leg it buys, by index).
-        if (!leg.outputAccount) throw new ApiError(502, "routing_failed", `Jupiter's route for ${l.name} doesn't deliver to your wallet's token account.`);
-        return [{ ...leg, output: { leg: l.index, account: leg.outputAccount } }];
-      }),
+      swapLegs.map((l, j) => this.#legFor(l, parts[j], winners[j]!, user, payer, side, subOf.get(l.index))),
     )).flat();
     return { venue, included: includedIdx(), excluded: sorted() };
+  }
+
+  /**
+   * The venue instructions for one leg, given how it's bought. Phoenix legs trade in child `sub`,
+   * sized at the market's mid: collateral is the leg's part of the stake, the position that times
+   * leverage.
+   */
+  async #legFor(l: MappedLeg, part: bigint, w: Winner | "lend" | "phoenix", user: PublicKey, payer: PublicKey, side: "back" | "fade", sub?: number): Promise<TradeLeg[]> {
+    if (w === "phoenix") {
+      const market = side === "fade" ? l.short! : l.phoenix!;
+      const price = await this.phoenix!.venue.mid(market.symbol).catch(() => null);
+      if (!price) throw new ApiError(502, "routing_failed", `Phoenix has no price for ${market.symbol} right now. Try again in a moment.`);
+      const legs = await this.phoenix!.venue.openLeg({
+        owner: user,
+        payer,
+        sub: sub!,
+        symbol: market.symbol,
+        side: side === "fade" ? "short" : "long",
+        collateral: part,
+        // A fade shorts at the leg's own leverage: the program scores it that way.
+        leverage: l.spec.leverage,
+        price,
+        label: `${l.name} (Phoenix ${market.symbol}${l.spec.leverage > 1 ? ` ${l.spec.leverage}x` : ""})`,
+      });
+      return legs.map((v) => ({ ...v, output: { leg: l.index, account: v.outputAccount! }, how: "phoenix" as const, phoenix: { leg: l.index, sub: sub!, symbol: market.symbol } }));
+    }
+    const apiKey = this.#o.jupiterApiKey;
+    const leg = w === "lend"
+      ? await jupiterLendDeposit({ user, payer, amount: part, label: `${l.name} (Jupiter Lend)`, apiKey: apiKey! })
+      : await jupiterBuy({ quote: w.quote, user, payer, label: `${l.name} (${w.symbol})`, apiKey });
+    // Proof of trade: the receipt checks this account grew (the take leg it buys, by index).
+    if (!leg.outputAccount) throw new ApiError(502, "routing_failed", `Jupiter's route for ${l.name} doesn't deliver to your wallet's token account.`);
+    return [{ ...leg, output: { leg: l.index, account: leg.outputAccount }, how: w === "lend" ? "lend" : "swap" }];
+  }
+
+  /**
+   * A split trade's retry (api/split.ts): the venue legs for the take legs in `remaining` only,
+   * each sized as the first build sized it (the same included legs, stake and weights), with fresh
+   * quotes. Phoenix legs trade in the child the first build recorded for them. `legs` are the
+   * legs the receipt opens. Throws 422 `retry_unavailable` when a leg can't be bought now.
+   */
+  async rebuild(legs: MappedLeg[], user: PublicKey, usd: number, side: "back" | "fade", remaining: Set<number>, recorded: PhoenixLeg[], payer = this.#o.appPayer.publicKey): Promise<TradeLeg[]> {
+    const now = Date.now();
+    const stake = BigInt(Math.round(usd * USD));
+    const traded = legs.filter((l) => !isPaper(l.how));
+    const parts = splitStake(stake - escrowShare(legs, stake), traded.map((l) => l.spec.weightBps));
+    const unavailable = (l: MappedLeg, why: string) => new ApiError(422, "retry_unavailable", `${l.name} can't be bought again right now (${why}).`);
+    return (await Promise.all(traded.map(async (l, j): Promise<TradeLeg[]> => {
+      if (!remaining.has(l.index)) return [];
+      const why = this.leftOut(l, now, side);
+      // A remembered "no route" may come from a failed quote: a swap leg is quoted afresh below.
+      if (why && !(why === NO_ROUTE && l.how === "swap" && side === "back")) throw unavailable(l, why);
+      if (side === "fade" || l.how === "perp") {
+        const sub = recorded.find((r) => r.leg === l.index)?.sub;
+        if (sub === undefined) throw unavailable(l, "its Phoenix account isn't known");
+        return this.#legFor(l, parts[j], "phoenix", user, payer, side, sub);
+      }
+      if (l.how === "lend") return this.#legFor(l, parts[j], "lend", user, payer, side);
+      const usdPart = Number(parts[j]) / USD;
+      // Only a definite "no route" ends the retry: a quote that failed (Jupiter busy, slow, down)
+      // answers 503 busy and leaves the retry for another try.
+      let pooled = false;
+      try {
+        pooled = issuerPool(l.key!, this.#o.bank(), this.route).pool.length > 0;
+      } catch {
+        // not in the bank at all
+      }
+      if (!pooled) throw unavailable(l, NO_ROUTE);
+      let transient = false;
+      const quote = async (onlyMints?: string[]) => {
+        const r = await bestIssuer(l.key!, usdPart, { state: this.#o.bank(), ...this.route, onlyMints }).catch(() => null);
+        if (!r || (!r.winner && r.skipped.some((s) => TRANSIENT_QUOTE.test(s.reason)))) transient = true;
+        return r?.winner ?? null;
+      };
+      const known = this.#winners.get(l.key!);
+      const w = (known && known.at > now - WINNER_TTL_MS ? await quote([known.mint]) : null) ?? await quote();
+      if (!w && transient) {
+        const e = new ApiError(503, "busy", `Couldn't quote ${l.name} right now. Try again in a moment.`);
+        e.headers = { "retry-after": "5" };
+        throw e;
+      }
+      if (!w) throw unavailable(l, NO_ROUTE);
+      return this.#legFor(l, parts[j], w, user, payer, side);
+    }))).flat();
   }
 }

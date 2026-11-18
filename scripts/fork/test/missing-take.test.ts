@@ -23,6 +23,7 @@ function service(t: TestContext, take: AppTake, connection: Connection = {
     bank: emptyState,
     takes: async (id) => (id === take.id ? take : null),
     stocks: null,
+    pricesFile: null,
     bases: null,
     jupiterApiKey: null,
     statePath: join(dir, "api-state.json"),

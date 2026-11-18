@@ -7,6 +7,8 @@
 //   submit      adds the app fee payer's signature to transactions this service built and sends them
 //   buildPhoenixCashOut  closes Phoenix positions left after a sale or the horizon, or sweeps the
 //               cash left in Phoenix back to USDC (api/phoenix.ts)
+//   buildRetry / buildSweep  a split trade that stopped partway: build the rest once more, or sell
+//               what the landed part bought back to USDC (api/split.ts)
 //   wallet / deposit / withdraw   fake USDC on the fork, and on-chain holdings
 //
 // Takes live in Supabase (ids are UUIDs); their on-chain twins and the fork-only keys of demo
@@ -17,8 +19,8 @@
 // charts), wallets.ts (cash and activity) and digests.ts (daily notifications).
 import { createHash, createPublicKey, randomUUID, verify } from "node:crypto";
 import BN from "bn.js";
-import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { ComputeBudgetProgram, Keypair, PublicKey, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
+import { ComputeBudgetProgram, Keypair, PublicKey, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import {
   BADGE_KIND_INDEX,
   BADGE_META,
@@ -39,6 +41,7 @@ import {
   splitFee,
   takeAddress,
   thesisProgram,
+  ticketAddress,
   type TakeAccount,
   type ThesisProgram,
 } from "@thesis/chain";
@@ -48,6 +51,7 @@ import { jupiterBuy, jupiterLendRedeem, type VenueLeg } from "@thesis/venues/jup
 import { PHOENIX_LEG_CU } from "@thesis/venues/phoenix";
 import {
   ApiError,
+  base58,
   FADE_BLOCKED,
   FADE_NO_MARKET,
   FADE_OWN_TAKE,
@@ -65,6 +69,7 @@ import {
   staleDemo,
   type AppTake,
   type ExitReceipt,
+  type IncompleteTrade,
   type ServiceOpts,
 } from "./common.ts";
 import { CreatorFees } from "./creator-fees.ts";
@@ -72,7 +77,8 @@ import { dailyDigests } from "./digests.ts";
 import { PortfolioHistory } from "./history.ts";
 import { contractResolver, escrowedKind, mapLegs, nameResolver, onChainLegs, perpResolver, sameLegs, type AppLeg, type ContractResolver, type MappedLeg, type NameResolver, type PerpResolver } from "./legs.ts";
 import { PhoenixDesk } from "./phoenix.ts";
-import { Router, escrowShare } from "./routing.ts";
+import { Router, escrowShare, type TradeLeg } from "./routing.ts";
+import { SplitTrades, afterFailure, deserializeIx, incompleteView, serializeIx, sweepLegs } from "./split.ts";
 import { StateStore } from "./store.ts";
 import { Valuation } from "./valuation.ts";
 import { Wallets } from "./wallets.ts";
@@ -80,11 +86,64 @@ import { Wallets } from "./wallets.ts";
 export { ApiError, DEFAULT_STATE_PATH, MIN_STAKE_USD, type AppTake, type ServiceOpts, type TakeSource } from "./common.ts";
 export { digestFor } from "./digests.ts";
 
+/** A create_take, back or fade as built: what a split trade that stops partway needs (api/split.ts). */
+type TradeContext = {
+  takeId: string;
+  side: "back" | "fade";
+  usd: number;
+  included: number[];
+  /** The receipt as built, before the composer appends the last bracket's outputs. */
+  receipt: TransactionInstruction;
+  receiptCu: number;
+};
+
+/**
+ * A send that failed partway: the error of the transaction that failed, with the signatures of
+ * the ones before it that landed.
+ */
+class SendFailed extends ApiError {
+  readonly landed: string[];
+  /** The failed transaction's fate is unknown (it may still land): never counted as not landed. */
+  readonly unknown: boolean;
+  constructor(e: ApiError, landed: string[], unknown = false) {
+    super(e.status, e.code, e.message);
+    this.headers = e.headers;
+    this.body = e.body;
+    this.landed = landed;
+    this.unknown = unknown;
+  }
+}
+
+/** How often, and at most how long, an unconfirmed transaction's status is polled. */
+const SETTLE_POLL_MS = 2_000;
+const SETTLE_MAX_MS = 90_000;
+
+/** A send refused before it reached the chain: the preflight simulation failed. */
+const refusedByPreflight = (e: unknown) =>
+  Array.isArray((e as { logs?: unknown })?.logs) || /simulation failed|preflight/i.test(e instanceof Error ? e.message : String(e));
+
+/** The answer to a split trade that stopped partway: 422 `trade_incomplete` (see the README). */
+function incompleteError(position: string, t: IncompleteTrade, status = 422, code = "trade_incomplete", message?: string): ApiError {
+  const e = new ApiError(status, code, message ?? (t.next === "retry"
+    ? "Part of this trade went through. Sign once more to finish it."
+    : "This trade couldn't finish. Sell what it bought back to cash."));
+  e.body = { retry: t.next === "retry", sweep: true, incomplete: incompleteView(position, t) };
+  return e;
+}
+
 type Build = {
   owner: string;
   messages: Buffer[];
   market: PublicKey[];
-  kind: "back" | "publish" | "exit" | "claim" | "phoenix";
+  kind: "back" | "publish" | "exit" | "claim" | "phoenix" | "sweep";
+  /** Per transaction (cleanup left out), the take leg of each venue leg in it. */
+  txLegs?: number[][];
+  /** A create_take, back or fade. */
+  trade?: TradeContext;
+  /** The retry of this incomplete trade (as it stood when the retry was built). */
+  retry?: IncompleteTrade;
+  /** Take legs bought on Jupiter Lend (a sweep redeems their shares). */
+  lend?: number[];
   /** A creator-fee claim: the takes it claims (no position). */
   claims?: string[];
   expires: number;
@@ -180,6 +239,8 @@ export class ForkService {
   #log: (m: string) => void;
   /** Blockhash → its last valid block height, from every blockhash this service fetched. */
   #blockhashes = new Map<string, number>();
+  /** Split trades that stopped partway, and when to look for abandoned tickets (api/split.ts). */
+  #split: SplitTrades;
 
   constructor(opts: ServiceOpts) {
     const o: ServiceOpts = { ...opts, connection: trackBlockhashes(opts.connection, this.#blockhashes) };
@@ -187,7 +248,8 @@ export class ForkService {
     this.#program = thesisProgram(o.connection);
     this.#log = o.log ?? (() => {});
     this.#store = new StateStore(o.statePath, o.lookupTable, (m) => (o.log ?? console.error)(m));
-    this.#valuation = new Valuation(o, this.#store);
+    this.#split = new SplitTrades(this.#store);
+    this.#valuation = new Valuation(o, this.#store, { pricesFile: o.pricesFile });
     this.#router = new Router(o);
     this.#phoenix = o.phoenix ? new PhoenixDesk(o, o.phoenix, this.#store, this.#program) : null;
     this.#router.phoenix = this.#phoenix;
@@ -575,7 +637,10 @@ export class ForkService {
         throw e;
       });
     const prepared = Date.now();
-    const built = await this.#compose(venue, ix, side === "back" ? THESIS_COMPUTE_UNITS.back : THESIS_COMPUTE_UNITS.fade, ownerKey, "back", position, true);
+    const receiptCu = side === "back" ? THESIS_COMPUTE_UNITS.back : THESIS_COMPUTE_UNITS.fade;
+    const built = await this.#compose(venue, ix, receiptCu, ownerKey, "back", position, true, false, {
+      trade: { takeId, side, usd, included, receipt: ix, receiptCu },
+    });
     // Where a slow build's time went (target: a trade lands in under 5 s).
     logSlow(this.#log, `${side} build ${takeId.slice(0, 8)}`, Date.now() - started, {
       "put on-chain": mirrorMs, "legs and quotes": prepared - started - mirrorMs, compose: Date.now() - prepared,
@@ -987,6 +1052,241 @@ export class ForkService {
     };
   }
 
+  // --- Split trades that stopped partway (api/split.ts) ------------------------------------
+
+  /**
+   * A trade's send failed. When part of a split trade had landed (or this was its retry), records
+   * it as incomplete and answers 422 `trade_incomplete`, so the client retries or sweeps.
+   * Otherwise the error stands.
+   */
+  #stopped(build: Build, e: unknown): unknown {
+    const trade = build.trade;
+    if (!trade || (build.kind !== "back" && build.kind !== "publish")) return e;
+    const landed = e instanceof SendFailed ? e.landed : [];
+    const position = build.position.address.toBase58();
+    let record: IncompleteTrade;
+    if (build.retry) {
+      // The one retry failed: what's left is a sweep. Merged into the record as it is now (a
+      // sweep may have noted what it sold); gone: it finished or was swept meanwhile.
+      const current = this.#split.get(build.owner, position);
+      if (!current) return e;
+      record = { ...current, signatures: [...current.signatures, ...landed], next: "sweep" };
+    } else {
+      if (!landed.length) return e;
+      const { remaining, split } = afterFailure(build.txLegs ?? [], landed.length);
+      record = {
+        owner: build.owner,
+        take: build.position.take.toBase58(),
+        takeId: trade.takeId,
+        kind: build.kind,
+        side: trade.side,
+        usd: trade.usd,
+        included: trade.included,
+        remaining,
+        lend: build.lend ?? [],
+        receipt: serializeIx(trade.receipt),
+        receiptCu: trade.receiptCu,
+        signatures: landed,
+        // A transaction whose fate is unknown may still land: no retry, the sweep reads the ticket.
+        next: split || (e instanceof SendFailed && e.unknown) ? "sweep" : "retry",
+        publishTakeId: build.position.publishTakeId,
+        at: Date.now(),
+      };
+    }
+    this.#split.set(position, record);
+    this.#wallets.forgetActivity(build.owner);
+    this.#log(`split trade of ${build.owner.slice(0, 6)}… stopped after ${record.signatures.length} landed transaction(s) (position ${position}, next: ${record.next}): ${errorText(e)}`);
+    return incompleteError(position, record);
+  }
+
+  /** The wallet's incomplete trades (newest first), for the app to offer a retry or a sweep. */
+  incompleteTrades(wallet: string) {
+    const owner = parseKey(wallet).toBase58();
+    return { trades: this.#split.list(owner).map(([position, t]) => incompleteView(position, t)) };
+  }
+
+  /** The wallet's incomplete trade at `position`, or its newest one. */
+  #incomplete(owner: PublicKey, position: string | undefined, want?: IncompleteTrade["next"]): [PublicKey, IncompleteTrade] {
+    const list = this.#split.list(owner.toBase58());
+    const hit = position ? list.find(([p]) => p === parseKey(position).toBase58()) : list.find(([, t]) => !want || t.next === want) ?? list[0];
+    if (!hit) throw new ApiError(404, "incomplete_missing", "There's no unfinished trade to pick up.");
+    return [new PublicKey(hit[0]), hit[1]];
+  }
+
+  #ticket(owner: PublicKey, position: PublicKey) {
+    return this.#program.account.tradeTicket.fetchNullable(ticketAddress(owner, position, this.#program.programId), "confirmed");
+  }
+
+  /** The ticket is gone: the trade finished after all (409 `trade_complete`), or it was cancelled. Either way the record goes. */
+  async #ticketGone(position: PublicKey): Promise<"complete" | "gone"> {
+    const held = await this.#program.account.position.fetchNullable(position, "confirmed");
+    this.#split.delete(position.toBase58());
+    return held ? "complete" : "gone";
+  }
+
+  /**
+   * Retry (once) a split trade that stopped partway: the legs that didn't land, quoted again with
+   * a fresh blockhash, stepping on the same ticket, with the same receipt last. The owner signs
+   * the transactions and submits them as usual. `position`: the trade (default: the newest one
+   * that can be retried).
+   */
+  async buildRetry(wallet: string, address?: string) {
+    const owner = parseKey(wallet);
+    const [position, rec] = this.#incomplete(owner, address, "retry");
+    const key = position.toBase58();
+    if (rec.next !== "retry" || rec.swept?.length) throw incompleteError(key, rec, 409, "retry_used", "This trade was retried or swept already. Sell what it bought back to cash.");
+    const toSweep = (status: number, code: string, message: string) => {
+      const next = { ...rec, next: "sweep" as const };
+      this.#split.set(key, next);
+      return incompleteError(key, next, status, code, message);
+    };
+    const ticket = await this.#ticket(owner, position);
+    if (!ticket) {
+      if ((await this.#ticketGone(position)) === "complete") throw new ApiError(409, "trade_complete", "This trade went through after all.");
+      throw new ApiError(410, "incomplete_gone", "Nothing is left to finish or sell for this trade.");
+    }
+    // A leg the retry would buy is on the ticket already: its transaction landed after all.
+    if (rec.remaining.some((leg) => ticket.named & (1 << leg))) throw toSweep(409, "retry_unavailable", "Part of this trade landed after all. Sell what it bought back to cash.");
+    const app = await this.#appTake(rec.takeId);
+    const take = new PublicKey(rec.take);
+    let mapped = this.#mapLegs(app.legs);
+    if (rec.kind === "back") {
+      const onChain = await this.#program.account.take.fetchNullable(take);
+      if (!onChain || !("open" in onChain.status) || onChain.horizonEnd.toNumber() <= Date.now() / 1000) throw toSweep(409, "take_closed", "This take has closed. Sell what the trade bought back to cash.");
+      mapped = onChainLegs(mapped, onChain.legs);
+    }
+    const legs = mapped.filter((l) => rec.included.includes(l.index));
+    // Only a definite "can't be bought now" ends the retry; Jupiter being busy or slow (503, 502)
+    // leaves it for another try. Building doesn't use the retry up: sending it does.
+    const venue = await this.#router.rebuild(legs, owner, rec.usd, rec.side, new Set(rec.remaining), this.#phoenix?.legsOf(position) ?? []).catch((e: unknown) => {
+      if (e instanceof ApiError && e.code === "retry_unavailable") throw toSweep(422, e.code, e.message);
+      throw e;
+    });
+    const receipt = deserializeIx(rec.receipt);
+    const trade: TradeContext = { takeId: rec.takeId, side: rec.side, usd: rec.usd, included: rec.included, receipt, receiptCu: rec.receiptCu };
+    const built = await this.#compose(venue, receipt, rec.receiptCu, owner, rec.kind, { take, address: position, publishTakeId: rec.publishTakeId }, true, false, { trade, retry: rec });
+    return { ...built, position: key, take: rec.take, side: rec.side, stakeUsd: rec.usd, legs: rec.remaining };
+  }
+
+  /**
+   * Sweep a split trade that stopped partway: swaps the tokens its landed transactions bought (the
+   * ticket's `received`) back to USDC through Jupiter, redeems vault shares, and cancels the ticket
+   * in the same build. `{ done: true }` when the wallet has nothing left to sweep. Phoenix legs
+   * go through `phoenix/cash-out` (`phoenixCashOut`). `position`: the trade (default: the newest).
+   */
+  async buildSweep(wallet: string, address?: string) {
+    const owner = parseKey(wallet);
+    // Nothing left: no stopped trade at all, or none at `address` (already swept, retried or finished).
+    const list = this.#split.list(owner.toBase58());
+    if (!address ? !list.length : !list.some(([p]) => p === parseKey(address).toBase58())) return { done: true as const, phoenixCashOut: false };
+    const [position, rec] = this.#incomplete(owner, address);
+    const ticket = await this.#ticket(owner, position);
+    if (!ticket) {
+      if ((await this.#ticketGone(position)) === "complete") throw new ApiError(409, "trade_complete", "This trade went through after all.");
+      return { done: true as const, phoenixCashOut: false };
+    }
+    // Once a sweep is built, the trade isn't retried any more.
+    if (rec.next === "retry") this.#split.set(position.toBase58(), { ...rec, next: "sweep" });
+    const conn = this.#o.connection;
+    const payer = this.#o.appPayer.publicKey;
+    const usdc = USDC_MINT_MAINNET.toBase58();
+    const tokens = this.#o.bank().tokens;
+    const jupiter = new JupiterClient(this.#o.jupiterApiKey, 0);
+    const sells = (await Promise.all(sweepLegs(ticket, rec).map(async (l) => {
+      const info = await conn.getAccountInfo(l.account, "confirmed");
+      if (!info) return null; // closed since: nothing left to sell
+      const account = unpackAccount(l.account, info, info.owner);
+      // What the trade bought, at most what's still there.
+      const amount = account.amount < l.amount ? account.amount : l.amount;
+      if (amount <= 0n) return null;
+      const mint = account.mint.toBase58();
+      const symbol = tokens[mint]?.symbol ?? (l.lend ? "jlUSDC" : mint.slice(0, 4));
+      if (l.lend) {
+        if (!this.#o.jupiterApiKey) throw new ApiError(422, "no_exit_route", "Jupiter Lend needs JUPITER_API_KEY.");
+        const venue = await jupiterLendRedeem({ user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey });
+        const perShare = await this.#valuation.lendShareValue(mint).catch(() => null);
+        const usd = perShare === null ? null : (Number(amount) / 1e6) * perShare; // vault shares have USDC's 6 decimals
+        return { leg: l.leg, mint, symbol, amount, venue, usd, minimum: usd };
+      }
+      const { quote } = await jupiter.quoteExactIn(mint, usdc, amount, this.#router.route);
+      if (!quote || quote.inputMint !== mint || quote.outputMint !== usdc || quote.inAmount !== amount.toString()) {
+        throw new ApiError(422, "no_exit_route", `No route to sell ${symbol} back to USDC right now. Try again in a moment.`);
+      }
+      const venue = await jupiterBuy({ quote, user: owner, payer, label: `Sell ${symbol}`, apiKey: this.#o.jupiterApiKey });
+      return { leg: l.leg, mint, symbol, amount, venue, usd: Number(BigInt(quote.outAmount)) / USD, minimum: Number(BigInt(quote.otherAmountThreshold)) / USD };
+    }))).filter((s) => s !== null);
+    const cancel = await cancelTradeIx(this.#program, { owner, position, rentPayer: payer });
+    // Each sale tagged with its take leg, so a partly landed sweep knows what it sold.
+    const venue = sells.map((s) => ({ ...s.venue, output: { leg: s.leg } }));
+    const built = await this.#compose(venue, cancel, THESIS_COMPUTE_UNITS.cancelTrade, owner, "sweep", { take: new PublicKey(rec.take), address: position });
+    const sum = (k: "usd" | "minimum") => (sells.some((s) => s[k] === null) ? null : sells.reduce((n, s) => n + s[k]!, 0));
+    return {
+      done: false as const,
+      ...built,
+      position: position.toBase58(),
+      tokens: sells.map((s) => ({ leg: s.leg, mint: s.mint, symbol: s.symbol, amount: s.amount.toString() })),
+      expectedUsd: sum("usd"),
+      minimumUsd: sum("minimum"),
+      /** Phoenix legs landed: once this lands, build `phoenix/cash-out` to close them and move their cash back. */
+      phoenixCashOut: ticket.phoenix !== 0,
+    };
+  }
+
+  /** Drops every open build for `position` (a retry or sweep of it is being sent: the others are stale). */
+  #dropBuildsFor(position: PublicKey) {
+    for (const [id, b] of this.#builds) if (b.position.address.equals(position)) this.#builds.delete(id);
+  }
+
+  /**
+   * A retry's submit, inside the wallet's queue before anything is sent: the trade must still be
+   * waiting for this retry (no other retry or sweep sent since, nothing more landed), and no leg it
+   * buys may be on the ticket. Then the retry is used up, and other builds for the trade dropped.
+   */
+  async #admitRetry(build: Build & { retry: IncompleteTrade }) {
+    const position = build.position.address.toBase58();
+    const current = this.#split.get(build.owner, position);
+    const stale = () => new ApiError(409, "trade_changed", "This trade changed since the build. Build again.");
+    if (!current) throw stale();
+    if (current.next !== "retry" || current.swept?.length || current.signatures.length !== build.retry.signatures.length) {
+      throw incompleteError(position, current, 409, "retry_used", "This trade was retried or swept already. Sell what it bought back to cash.");
+    }
+    const ticket = await this.#ticket(new PublicKey(build.owner), build.position.address);
+    if (!ticket) throw stale();
+    if (current.remaining.some((leg) => ticket.named & (1 << leg))) {
+      const next = { ...current, next: "sweep" as const };
+      this.#split.set(position, next);
+      throw incompleteError(position, next, 409, "retry_unavailable", "Part of this trade landed after all. Sell what it bought back to cash.");
+    }
+    this.#split.set(position, { ...current, next: "sweep" });
+    this.#dropBuildsFor(build.position.address);
+  }
+
+  /** Sends a sweep. When it lands the trade is over; a partly landed one notes what it sold. */
+  async #submitSweep(build: Build, txs: VersionedTransaction[]) {
+    const position = build.position.address.toBase58();
+    const signatures = await this.#store.withWallet(build.owner, async () => {
+      // Re-checked here, after any earlier submit for this wallet: the trade must still be stopped.
+      if (!this.#split.get(build.owner, position) || !(await this.#ticket(new PublicKey(build.owner), build.position.address))) {
+        throw new ApiError(409, "trade_changed", "This trade changed since the build. Build again.");
+      }
+      this.#dropBuildsFor(build.position.address);
+      try {
+        return await this.#send(txs, build.market);
+      } catch (e) {
+        const landed = e instanceof SendFailed ? e.landed.length : 0;
+        const rec = this.#split.get(build.owner, position);
+        if (rec && landed) this.#split.set(position, { ...rec, swept: [...(rec.swept ?? []), ...(build.txLegs ?? []).slice(0, landed).flat()] });
+        throw e;
+      } finally {
+        this.#wallets.forgetActivity(build.owner);
+      }
+    });
+    // The last transaction cancelled the ticket.
+    this.#split.delete(position);
+    void this.#history.snapshot(build.owner).catch(() => {});
+    return { signatures };
+  }
+
   // --- Creator fees ------------------------------------------------------------------------
 
   /** What the author earned per take, claimed and left to claim (exact base units and dollars). */
@@ -1051,12 +1351,18 @@ export class ForkService {
     if (!app.author_wallet) throw new ApiError(409, "no_author_wallet", "This take's author has no wallet yet.");
     if (app.author_wallet !== author) throw new ApiError(403, "not_author", "Only the take's author can post it.");
     if (app.status === "live") throw new ApiError(409, "already_live");
+    // A publish of this take that stopped partway: a fresh one would start its ticket over
+    // (begin_trade) and lose what the landed part recorded. Retry or sweep it first.
+    const stopped = this.#split.list(authorKey.toBase58()).find(([, t]) => t.publishTakeId === takeId);
+    if (stopped) throw incompleteError(stopped[0], stopped[1], 409);
     await this.#checkFunds(authorKey, usd);
     const [{ venue, included, excluded }, config] = await Promise.all([this.#router.venueLegs(this.#mapLegs(app.legs), authorKey, usd), this.#config()]);
     const { ix, address } = await this.#createIx(app, authorKey, usd, included);
     const position = { take: address, address: positionAddress(address, authorKey, 0n), publishTakeId: takeId };
     this.#recordPhoenix(position.address, authorKey, venue);
-    const built = await this.#compose(venue, ix, THESIS_COMPUTE_UNITS.createTake, authorKey, "publish", position, true);
+    const built = await this.#compose(venue, ix, THESIS_COMPUTE_UNITS.createTake, authorKey, "publish", position, true, false, {
+      trade: { takeId, side: "back", usd, included, receipt: ix, receiptCu: THESIS_COMPUTE_UNITS.createTake },
+    });
     return { ...built, take: address.toBase58(), stakeUsd: usd, feeUsd: Number(splitFee(BigInt(Math.round(usd * USD)), config.params, { isAuthor: true }).fee) / USD, included, excluded };
   }
 
@@ -1099,6 +1405,7 @@ export class ForkService {
       void this.#history.snapshot(build.owner).catch(() => {});
       return { signatures };
     }
+    if (build.kind === "sweep") return this.#submitSweep(build, txs);
     const cleanup = txs.splice(txs.length - (build.cleanup ?? 0));
     const positionKey = build.position.address.toBase58();
     this.#inFlight.add(positionKey);
@@ -1108,9 +1415,20 @@ export class ForkService {
         const held = await this.#program.account.position.fetchNullable(build.position.address, "confirmed");
         if (!held || held.exited) throw new ApiError(409, "already_exited", "This position has already been sold.");
       }
+      if (build.retry) await this.#admitRetry(build as Build & { retry: IncompleteTrade });
       this.#wallets.forgetActivity(build.owner);
-      const confirmed = await this.#send(txs, build.market);
+      let sent: string[];
+      try {
+        sent = await this.#send(txs, build.market);
+      } catch (e) {
+        // The cleanup rides after the trade, so it wasn't sent: look again on the next build.
+        if (cleanup.length) this.#split.suspect(build.owner);
+        throw this.#stopped(build, e);
+      }
       this.#wallets.forgetActivity(build.owner);
+      // A retry's position opened over the transactions that landed first, too.
+      const confirmed = [...(build.retry?.signatures ?? []), ...sent];
+      this.#split.delete(positionKey);
       if (build.position.exit) {
         const byTake = ((this.#state.exits ??= {})[build.position.take.toBase58()] ??= {});
         byTake[build.position.address.toBase58()] = { ...build.position.exit, exitedAt: Math.floor(Date.now() / 1000) };
@@ -1137,7 +1455,10 @@ export class ForkService {
     for (const tx of cleanup) {
       await this.#send([tx], []).then(
         ([sig]) => this.#log(`cancelled abandoned trade tickets of ${build.owner} -> ${sig}`),
-        (e) => this.#log(`cancelling abandoned trade tickets of ${build.owner} failed: ${e instanceof Error ? e.message.slice(0, 160) : e}`),
+        (e) => {
+          this.#split.suspect(build.owner);
+          this.#log(`cancelling abandoned trade tickets of ${build.owner} failed: ${e instanceof Error ? e.message.slice(0, 160) : e}`);
+        },
       );
     }
     void this.#history.snapshot(build.owner).catch(() => {});
@@ -1182,7 +1503,8 @@ export class ForkService {
       // owner (32) + position (32), then rent_payer.
       { memcmp: { offset: 8 + 64, bytes: this.#o.appPayer.publicKey.toBase58() } },
     ]);
-    const busy = new Set([...this.#inFlight, ...[...this.#builds.values()].map((b) => b.position.address.toBase58())]);
+    // Incomplete trades' tickets wait for their retry or sweep (api/split.ts).
+    const busy = new Set([...this.#inFlight, ...this.#split.positions(), ...[...this.#builds.values()].map((b) => b.position.address.toBase58())]);
     return tickets.map((t) => t.account.position).filter((p) => !busy.has(p.toBase58())).slice(0, CLEANUP_TICKETS);
   }
 
@@ -1198,7 +1520,7 @@ export class ForkService {
       instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }), ...ixs],
     }).compileToV0Message();
     const tx = new VersionedTransaction(message);
-    return { tx, labels: [`cancel ${positions.length} abandoned trade ticket(s)`], bytes: tx.serialize().length, computeUnits, computeFrom: "estimated" as const };
+    return { tx, labels: [`cancel ${positions.length} abandoned trade ticket(s)`], legs: [] as number[], bytes: tx.serialize().length, computeUnits, computeFrom: "estimated" as const };
   }
 
   async #compose(
@@ -1212,6 +1534,8 @@ export class ForkService {
     proof = false,
     /** A sale that may take several transactions (Phoenix closes first, the exit last). */
     splitExit = false,
+    /** A create_take, back or fade (`trade`); the retry of an incomplete one (`retry`: its ticket is open). */
+    extra: { trade?: TradeContext; retry?: IncompleteTrade } = {},
   ) {
     // The blockhash is fetched during composing: the build's lifetime counts from before that.
     const started = Date.now();
@@ -1222,14 +1546,19 @@ export class ForkService {
       receiptCu,
       lookupTables: this.#o.lookupTable ? [this.#o.lookupTable] : [],
       connection: this.#o.connection,
-      proof: proof ? { program: this.#program, owner, position: position.address } : undefined,
+      proof: proof ? { program: this.#program, owner, position: position.address, continued: Boolean(extra.retry) } : undefined,
     });
+    const txLegs = txs.map((t) => t.legs.map((j) => (venue[j] as Partial<TradeLeg>).output?.leg ?? -1));
     if (kind === "exit" && txs.length !== 1 && !splitExit) throw new ApiError(422, "exit_too_large", "This position cannot be sold in one transaction.");
     // A trade the owner signs anyway also cancels their abandoned tickets. Not a sale: the app
-    // expects exactly one transaction there.
+    // expects exactly one transaction there. Each look is a getProgramAccounts, so it runs only
+    // when the wallet is known to have one, or every TICKET_SCAN_MS (api/split.ts).
     let cleanup = 0;
-    if (kind !== "exit") {
-      const stale = await this.#abandonedTickets(owner).catch(() => []);
+    if (kind !== "exit" && kind !== "sweep" && this.#split.scanDue(owner.toBase58())) {
+      const stale = await this.#abandonedTickets(owner).then((found) => {
+        this.#split.scanned(owner.toBase58());
+        return found;
+      }).catch(() => []);
       if (stale.length) {
         txs.push(await this.#cleanupTx(owner, stale));
         cleanup = 1;
@@ -1245,6 +1574,10 @@ export class ForkService {
       expires,
       position,
       cleanup,
+      txLegs,
+      lend: venue.flatMap((v) => ((v as Partial<TradeLeg>).how === "lend" ? [(v as TradeLeg).output.leg] : [])),
+      trade: extra.trade,
+      retry: extra.retry,
     });
     setTimeout(() => this.#builds.delete(buildId), Math.max(0, expires - Date.now())).unref();
     return {
@@ -1261,25 +1594,71 @@ export class ForkService {
     await this.#o.fork.refreshMarkets(market);
     const times: Record<string, number> = { [`refresh ${market.length} accounts`]: Date.now() - started };
     const out: string[] = [];
-    for (const [i, tx] of txs.entries()) {
-      const sent = Date.now();
-      const sig = await conn.sendTransaction(tx, { skipPreflight: false }).catch((e) => {
-        throw new ApiError(502, "send_failed", errorText(e));
-      });
-      const confirming = Date.now();
-      // Confirm against the transaction's own blockhash: once its last valid block passes, it can't
-      // land any more. (A fresh blockhash would keep waiting ~60 s past that.)
-      const own = tx.message.recentBlockhash;
-      const lastValid = this.#blockhashes.get(own);
-      const { blockhash, lastValidBlockHeight } = lastValid !== undefined ? { blockhash: own, lastValidBlockHeight: lastValid } : await conn.getLatestBlockhash("confirmed");
-      const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
-      if (res.value.err) throw new ApiError(502, "transaction_failed", `${sig}: ${JSON.stringify(res.value.err)}`);
-      times[`send ${i + 1}`] = confirming - sent;
-      times[`confirm ${i + 1}`] = Date.now() - confirming;
-      out.push(sig);
+    let unknown = false;
+    try {
+      for (const [i, tx] of txs.entries()) {
+        const sent = Date.now();
+        // Confirm against the transaction's own blockhash: once its last valid block passes, it can't
+        // land any more. (A fresh blockhash would keep waiting ~60 s past that.)
+        const own = tx.message.recentBlockhash;
+        const lastValid = this.#blockhashes.get(own);
+        const { blockhash, lastValidBlockHeight } = lastValid !== undefined ? { blockhash: own, lastValidBlockHeight: lastValid } : await conn.getLatestBlockhash("confirmed");
+        // The fee payer's signature is the transaction's id, known before it's sent.
+        const sig = base58(tx.signatures[0]);
+        let fate: "landed" | "failed" | "unknown" | null = null;
+        await conn.sendTransaction(tx, { skipPreflight: false }).catch(async (e) => {
+          if (refusedByPreflight(e)) throw new ApiError(502, "send_failed", errorText(e));
+          // The RPC failed: the transaction may have gone out all the same.
+          this.#log(`sending ${sig} failed (${errorText(e)}); waiting to see if it landed`);
+          fate = await this.#settle(sig, lastValidBlockHeight);
+          if (fate !== "landed") {
+            unknown = fate === "unknown";
+            throw new ApiError(502, "send_failed", errorText(e));
+          }
+        });
+        const confirming = Date.now();
+        if (fate !== "landed") {
+          const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed").catch(async (e) => {
+            // Expired, or the RPC failed: whether it landed decides what comes next (a split
+            // trade's retry must not buy a leg twice). Unknown is never "didn't land".
+            this.#log(`confirming ${sig} failed (${errorText(e)}); waiting to see if it landed`);
+            const settled = await this.#settle(sig, lastValidBlockHeight);
+            if (settled === "landed") return { value: { err: null } };
+            unknown = settled === "unknown";
+            throw new ApiError(502, "transaction_failed", `${sig}: ${settled === "unknown" ? "not confirmed yet" : "not confirmed"}`);
+          });
+          if (res.value.err) throw new ApiError(502, "transaction_failed", `${sig}: ${JSON.stringify(res.value.err)}`);
+        }
+        times[`send ${i + 1}`] = confirming - sent;
+        times[`confirm ${i + 1}`] = Date.now() - confirming;
+        out.push(sig);
+      }
+    } catch (e) {
+      throw new SendFailed(e instanceof ApiError ? e : new ApiError(502, "send_failed", errorText(e)), out, unknown);
     }
     logSlow(this.#log, `send of ${txs.length} transaction(s)`, Date.now() - started, times);
     return out;
+  }
+
+  /**
+   * Polls a transaction's status until it's known: "landed" (confirmed without an error), "failed"
+   * (landed with an error, or its blockhash expired unseen), or "unknown" after SETTLE_MAX_MS
+   * without an answer.
+   */
+  async #settle(sig: string, lastValidBlockHeight: number): Promise<"landed" | "failed" | "unknown"> {
+    const conn = this.#o.connection;
+    const until = Date.now() + SETTLE_MAX_MS;
+    for (;;) {
+      const status = (await conn.getSignatureStatuses([sig], { searchTransactionHistory: true }).catch(() => null))?.value?.[0];
+      if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) return status.err ? "failed" : "landed";
+      if (!status) {
+        const height = await conn.getBlockHeight("confirmed").catch(() => null);
+        // Its blockhash is past: it can't land any more.
+        if (height !== null && height > lastValidBlockHeight) return "failed";
+      }
+      if (Date.now() >= until) return "unknown";
+      await new Promise((r) => setTimeout(r, SETTLE_POLL_MS));
+    }
   }
 
   // --- Demo mirrors -----------------------------------------------------------------------
