@@ -44,9 +44,19 @@ begin
   if exists (select 1 from jsonb_array_elements(public.feed()) x where (x ->> 'id')::uuid = posting) then
     raise exception 'the feed shows a posting take';
   end if;
-  if (public.profile('00000000-0000-4000-8000-0000000000a1') -> 'person' ->> 'takes')::int <> 1 then
+  if (public.profile('00000000-0000-4000-8000-0000000000a1') ->> 'takes')::int <> 1 then
     raise exception 'the take count includes a posting take: %', public.profile('00000000-0000-4000-8000-0000000000a1');
   end if;
+  -- Follow counts stay public; who follows whom doesn't (migrations/*_follows_private.sql).
+  if (public.profile('00000000-0000-4000-8000-0000000000a1') ->> 'followers')::int <> 1
+     or (public.profile('00000000-0000-4000-8000-0000000000a2') ->> 'following')::int <> 1 then
+    raise exception 'profile follow counts: %', public.profile('00000000-0000-4000-8000-0000000000a1');
+  end if;
+  begin
+    perform 1 from public.follows;
+    raise exception 'anon can read follows';
+  exception when insufficient_privilege then null;
+  end;
   -- The fork API builds the on-chain take from it, by id.
   j := public.take_for_chain(posting);
   if j ->> 'status' <> 'posting' or jsonb_array_length(j -> 'legs') <> 1 then raise exception 'take_for_chain: %', j; end if;
@@ -58,6 +68,25 @@ begin
   select jsonb_array_length(public.posting_takes('00000000-0000-4000-8000-0000000000a1')) into n;
   if n <> 2 then raise exception 'posting_takes shows %, want 2', n; end if;
 
+  -- The edge function reads with the service role, which skips RLS (migrations/*_live_takes_only.sql):
+  -- a follower's feed and every take count still leave posting takes out.
+  select jsonb_array_length(public.following_feed('00000000-0000-4000-8000-0000000000a2')) into n;
+  if n <> 1 then raise exception 'following_feed shows % takes, want the live one only', n; end if;
+  if exists (select 1 from jsonb_array_elements(public.following_feed('00000000-0000-4000-8000-0000000000a2')) x where x ->> 'status' <> 'live') then
+    raise exception 'following_feed shows a posting take';
+  end if;
+  if (public.profile('00000000-0000-4000-8000-0000000000a1') ->> 'takes')::int <> 1 then
+    raise exception 'person_json counts posting takes for the service role';
+  end if;
+  if jsonb_array_length(public.profile_takes('00000000-0000-4000-8000-0000000000a1')) <> 1
+     or jsonb_array_length(public.takes_by_ids(array[posting, live])) <> 1
+     or exists (select 1 from jsonb_array_elements(public.feed()) x where (x ->> 'id')::uuid = posting) then
+    raise exception 'a public read shows a posting take to the service role';
+  end if;
+  if (select claim_hash from public.takes where id = posting) <> encode(sha256(convert_to('Chips keep leading', 'UTF8')), 'hex') then
+    raise exception 'takes.claim_hash is not the claim''s sha256';
+  end if;
+
   -- Someone else's wallet publishing the same claim doesn't make it live.
   select to_jsonb(array_agg(get_byte(sha256(convert_to('Chips keep leading', 'UTF8')), i) order by i))
     into hash from generate_series(0, 31) i;
@@ -65,6 +94,11 @@ begin
     'signature', 'x1', 'ordinal', 0, 'slot', 1, 'block_time', extract(epoch from now()), 'name', 'takeCreated',
     'data', jsonb_build_object('take', 'TX', 'author', 'WALLET_F', 'claimHash', hash))));
   if (select status from public.takes where id = posting) <> 'posting' then raise exception 'another wallet made it live'; end if;
+  -- Nor does the claim-hash fallback link that wallet's on-chain take to this author's take
+  -- (migrations/*_claim_hash_author.sql).
+  if (select take_id from public.chain_takes where network = 'solana-mainnet-fork' and address = 'TX') is not null then
+    raise exception 'another wallet''s on-chain take was linked to this take';
+  end if;
 
   -- The author's takeCreated does.
   perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(jsonb_build_object(
