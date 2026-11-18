@@ -14,6 +14,8 @@ export class ApiError extends Error {
   code: string;
   /** Extra response headers (Retry-After on 429 and 503). */
   headers?: Record<string, string>;
+  /** Extra fields in the error's JSON body, next to `error` and `message` (e.g. `incomplete`). */
+  body?: Record<string, unknown>;
   constructor(status: number, code: string, message?: string) {
     super(message ?? code);
     this.status = status;
@@ -67,6 +69,42 @@ export type State = {
   digests?: Record<string, DigestMark>;
   /** Which Phoenix child subaccount each perp leg or short of each position trades in (api/phoenix.ts). */
   phoenix?: PhoenixPositions;
+  /** Split trades that stopped partway, by position (api/split.ts). */
+  incomplete?: Record<string, IncompleteTrade>;
+};
+
+/**
+ * A split trade (create_take, back or fade over several transactions) whose later transaction
+ * failed after an earlier one landed: the owner holds what the landed part bought, the position's
+ * trade ticket is still open, and no position exists yet. See api/split.ts.
+ */
+export type IncompleteTrade = {
+  owner: string;
+  /** The on-chain take, and the app take's id. */
+  take: string;
+  takeId: string;
+  kind: "back" | "publish";
+  side: "back" | "fade";
+  usd: number;
+  /** Take legs the receipt opens (its legs mask). */
+  included: number[];
+  /** Take legs whose venue legs all sat in transactions that didn't land: what a retry builds again. */
+  remaining: number[];
+  /** Take legs bought on Jupiter Lend (their tokens are vault shares: a sweep redeems them). */
+  lend: number[];
+  /** The receipt instruction as first built: a retry sends the same one. */
+  receipt: { programId: string; keys: { pubkey: string; isSigner: boolean; isWritable: boolean }[]; data: string };
+  receiptCu: number;
+  /** Signatures of the transactions that landed, oldest first (the position's opening transactions). */
+  signatures: string[];
+  /** "retry" until the one retry fails (or can't be built); then "sweep". */
+  next: "retry" | "sweep";
+  /** Legs a partly landed sweep already sold back (not sold again). */
+  swept?: number[];
+  /** Publishing an app take: its id. */
+  publishTakeId?: string;
+  /** When it stopped (ms). */
+  at: number;
 };
 
 export type ServiceOpts = {

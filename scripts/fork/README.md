@@ -98,7 +98,7 @@ Surfpool's `surfnet_writeProgram` writes the ELF straight into the program's acc
 
 `pnpm fork:api` serves what the apps need on `http://127.0.0.1:18901` (`FORK_API_PORT`). Run `pnpm fork:settler` beside it so positions get prices. On the shared fork it's public over HTTPS (Tailscale Funnel), behind [abuse limits](#abuse-limits).
 
-Code is in `api/`: `server.ts` (HTTP), `service.ts` (`ForkService`: receipts, trades, sales, demo mirrors, portfolio), `store.ts` (state file, per-wallet serialization), `valuation.ts` (prices and marks), `routing.ts` (best-issuer quoting), `history.ts` (charts), `wallets.ts`, `digests.ts`, `legs.ts` (app legs → on-chain legs), `guard.ts` (abuse limits). Every back, publish and mirror is composed with proof of trade.
+Code is in `api/`: `server.ts` (HTTP), `service.ts` (`ForkService`: receipts, trades, sales, demo mirrors, portfolio), `store.ts` (state file, per-wallet serialization), `valuation.ts` (prices and marks), `routing.ts` (best-issuer quoting), `history.ts` (charts), `wallets.ts`, `digests.ts`, `legs.ts` (app legs → on-chain legs), `guard.ts` (abuse limits), `split.ts` (split trades that stop partway). Every back, publish and mirror is composed with proof of trade.
 
 Keeping load down (every RPC read of an account the fork doesn't have goes to Helius): the state file is written as compact JSON at most every 3 s (a deposit at once) and on shutdown (SIGTERM / SIGINT), never on a read, and a failed write is logged as `STATE NOT SAVED` and retried; the portfolio builds receipts only for takes the wallet holds (an owner index kept from position reads); a take's positions are rescanned every 5 minutes (every 30 s for 5 minutes after a trade on it); creator fees are cached 60 s per wallet (the author's takes are rescanned at most every 10 minutes); route checks run once per underlying at a time. Outside calls time out: Jupiter after 15 s (and at most 20 s of 429 waits per call), Supabase, Gemini and Alpaca after 10 s; Alpaca's latest trades are cached 15 s. Every 10 minutes the API tops the app fee payer and the settler key back up to 10 fake SOL when either drops below 5 (`surfnet_setAccount`, logged); it checks first that the RPC is Surfpool, so it never runs against mainnet.
 
@@ -112,7 +112,10 @@ Keeping load down (every RPC read of an account the fork doesn't have goes to He
 | `GET /wallets/:address/creator-fees` | Earned, claimed and unclaimed per take and in total. Needs `x-thesis-wallet-auth: <unix s>.<base64 signature of "Thesis creator fees <address> <unix s>">`, at most 5 minutes old |
 | `POST /wallets/:address/creator-fees/claim` `{ takes? }` | Builds the claims, as many per transaction as fit, app paying. `409 nothing_to_claim` |
 | `POST /takes/:id/positions/:address/exit` `{ owner }` | Builds a whole-position sale (see [Selling a position](#selling-a-position)). Returns the transaction, `expectedUsd` and `minimumUsd`. `409 already_exited`, `422 exit_too_large` |
-| `POST /submit` `{ buildId, transactions }` | The signed transactions. Each must match what was built byte for byte; the API adds the fee payer's signature, refreshes pools and sends in order. Builds expire after 55 s (before their blockhash does) and can't be sent twice |
+| `POST /submit` `{ buildId, transactions }` | The signed transactions. Each must match what was built byte for byte; the API adds the fee payer's signature, refreshes pools and sends in order. Builds expire after 55 s (before their blockhash does) and can't be sent twice. A split trade that stops partway answers `422 trade_incomplete` (see [Split trades](#split-trades)) |
+| `GET /wallets/:address/incomplete` | `{ trades: [...] }`: split trades that stopped partway, newest first (see [Split trades](#split-trades)) |
+| `POST /wallets/:address/retry` `{ position? }` | Builds the rest of a split trade once more (a money route). Same shape as a trade build |
+| `POST /wallets/:address/sweep` `{ position? }` | Builds the sale of what a stopped split trade bought back to USDC, cancelling its ticket (a money route), or `{ done: true }` |
 | `GET /wallets/:address` | USDC, holdings, activity, `depositCapUsd` / `depositLeftUsd` (cached 8 s; a trade or deposit clears it) |
 | `GET /wallets/:address/portfolio` | Open positions (value, cost, score, pending note) and on-chain badges with images |
 | `GET /wallets/:address/history?range=1D\|1W\|1M\|ALL` | The portfolio chart (≤120 points; deposits don't move the line). Kept only for wallets with a deposit or an open position: snapshots every 5 minutes and after each trade, full resolution for 7 days, hourly before that. Any other wallet gets its value now, and nothing is saved |
@@ -134,11 +137,22 @@ Keeping load down (every RPC read of an account the fork doesn't have goes to He
 | What | Limit | Over it |
 | --- | --- | --- |
 | Money actions per wallet | 10 a minute, 100 a day | `429 rate_limited` with `Retry-After`, in every auth mode (unverified callers count per IP and wallet) |
-| Reads per IP (GETs and `/confirm`) | 120 a minute | `FORK_API_READ_LIMIT=enforce`: `429`; `report` (default) logs. Service keys aren't counted |
+| Reads (GETs and `/confirm`) per signed-in user, else per IP | 120 a minute | `FORK_API_READ_LIMIT=enforce`: `429`; `report` (default) logs. Service keys aren't counted |
 | `POST /digests` | service key only | `401 service_key_required` |
 | Builds that call Jupiter | 2 at once, 6 waiting | `503 busy` with `Retry-After` (the shared Jupiter key would otherwise hang) |
 
-**The caller's IP:** Funnel appends what it saw to `X-Forwarded-For`, so only the last entry is used. The web app's Vercel proxy sends `x-thesis-proxy-key: <FORK_API_PROXY_KEY>` and `x-thesis-client-ip`, and only with that key is the visitor's IP used. Keep `FORK_API_READ_LIMIT=report` until the production web deploy is out and `FORK_API_PROXY_KEY` is set in Vercel and on the VM.
+**Who a read counts against:** a read carrying a valid Privy token (`Authorization: Bearer <token>`, as on money routes) counts against that Privy user, so people sharing an IP don't share a limit. A valid token is trusted for a minute (never past its expiry) without checking its signature again; an invalid one is ignored and the read counts per IP.
+
+**The caller's IP:** Funnel appends what it saw to `X-Forwarded-For`, so only the last entry is used (browsers calling directly are counted this way). The web app's Vercel proxy sends `x-thesis-proxy-key: <FORK_API_PROXY_KEY>` and `x-thesis-client-ip`, and only with that key is the visitor's IP used. Keep `FORK_API_READ_LIMIT=report` until the production web deploy is out and `FORK_API_PROXY_KEY` is set in Vercel and on the VM.
+
+### Direct browser calls
+
+To spare Vercel function invocations, the web app's browser can call the fork API directly (`https://<fork-host>`) instead of going through its `/api/fork` proxy. `FORK_API_CORS_ORIGINS` lists the origins allowed to, comma-separated, each just `scheme://host[:port]` (e.g. `https://yourthesis.xyz,https://www.yourthesis.xyz`; no paths, no `*`). Unset or empty: no CORS headers at all (only the proxy works).
+
+- **Preflight** (`OPTIONS` from an allowed origin, any path): `204` with `Access-Control-Allow-Origin: <that origin>`, `Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS`, `Access-Control-Allow-Headers: authorization, content-type, x-thesis-wallet-auth`, `Access-Control-Max-Age: 600`, `Access-Control-Expose-Headers: retry-after` and `Vary: Origin`. Preflights don't count as reads. From any other origin, `OPTIONS` is a `404` as before.
+- **Every response** to an allowed origin, errors included, carries `Access-Control-Allow-Origin: <that origin>`, `Access-Control-Expose-Headers: retry-after` (so a `429` or `503`'s `Retry-After` is readable) and `Vary: Origin`. Other origins get only `Vary: Origin`.
+- **No credentials mode:** no cookies; send the Privy token as `Authorization: Bearer <token>` (it's what makes reads count per user and money routes act for the wallet). Creator fees take `x-thesis-wallet-auth`. Other headers aren't allowed, so the proxy-only `x-thesis-proxy-key` / `x-thesis-client-ip` can't be sent from a browser (and are ignored without the key anyway).
+- The JSON shapes and status codes are the same as through the proxy.
 
 ### How it behaves
 
@@ -148,6 +162,25 @@ Keeping load down (every RPC read of an account the fork doesn't have goes to He
 - **Card legs:** a pick naming one Collector Crypt card trades as a Card-kind leg (escrowed, nothing bought, never faded), marked at the insured value the bank last read.
 - **Takes:** read through `take_for_chain` (including posting takes), cached 15 s. Trades refuse a posting take (`409 take_posting`). A demo take (seeded authors have no wallets) is mirrored on-chain on its first trade with a fork-only author and a $10 buy-in (a past date gets a fresh 30-day horizon). A real user's take that isn't on this fork (reset since) reads `missing` and trades get `409 take_missing`: its author must post a new take.
 - **Legs left out**, with the reason: prediction legs that fail the rules above; perps and shorts on names Phoenix doesn't list (a fade with nothing to short or escrow: `409 fade_unavailable`), or all Phoenix legs with `FORK_PHOENIX=0`; old card picks naming a category; names with no tokenized version liquid enough to price ($50k pool, under 1% impact). The author's buy-in records only the legs it bought (`legs_mask`), so left-out legs never hold up settlement.
+
+### Split trades
+
+A back, fade or publish too big for one transaction is a short sequence the wallet signs at once; each transaction is a proof-of-trade bracket on the position's trade ticket, and the receipt in the last one closes it. If a later transaction fails after an earlier one landed, the wallet holds what the landed part bought, the ticket is still open and no position exists. The owner's decision: **retry once, then sweep.**
+
+1. `POST /submit` answers `422 trade_incomplete`:
+   ```json
+   { "error": "trade_incomplete", "message": "...", "retry": true, "sweep": true,
+     "incomplete": { "position": "<address>", "take": "<address>", "takeId": "<uuid>", "side": "back",
+                     "usd": 50, "next": "retry", "landed": 1, "signatures": ["..."], "at": "<ISO time>" } }
+   ```
+   `retry` is true while the one retry is left (`incomplete.next` is `"retry"`); `sweep` is always true.
+2. **Retry** (when `retry` is true): `POST /wallets/:address/retry` `{ position? }` (default: the newest retryable trade) builds the legs that didn't land again with fresh quotes and a fresh blockhash, stepping on the same ticket, with the same receipt last. It answers like a trade build (`{ buildId, transactions, steps, position, take, side, stakeUsd, legs }`); sign and `POST /submit` as usual. If that submit fails too, it answers `422 trade_incomplete` again with `retry: false`. A retry that can't be built answers `409 retry_used`, `409 retry_unavailable` (part of it landed after all, or a leg sits on both sides of the failure, like a Phoenix deposit without its order), `422 retry_unavailable` (a leg can't be bought now) or `409 take_closed`, each with the same `incomplete` body and `retry: false`. Any other error (`429`, `503`, `502`): wait and try again, or sweep.
+3. **Sweep:** `POST /wallets/:address/sweep` `{ position? }` (default: the newest) builds the sale of what the landed transactions bought (the ticket's per-leg `received`, at most what the wallet still holds) back to USDC through Jupiter, redeems Jupiter Lend shares, and cancels the ticket in the last transaction (its rent goes back to the app's fee payer). It answers `{ done: false, buildId, transactions, steps, position, tokens: [{ leg, mint, symbol, amount }], expectedUsd, minimumUsd, phoenixCashOut }`; sign and `POST /submit`. Call it again until it answers `{ done: true, phoenixCashOut: false }` (nothing left). When `phoenixCashOut` is true, Phoenix legs landed: once the sweep lands, run `phoenix/cash-out` to close them and move their cash back. A sweep works whether or not the retry was used.
+4. `409 trade_complete` from either: the trade went through after all; `410 incomplete_gone` from a retry: its ticket was cancelled. Either way it's forgotten.
+
+`GET /wallets/:address/incomplete` lists the wallet's stopped trades (the `incomplete` objects), so the app can offer a retry or a sweep after a reload. They're kept in the state file for a week; until then the abandoned-ticket cleanup leaves their tickets alone.
+
+**Abandoned-ticket cleanup:** a trade build ends with a transaction cancelling the owner's other abandoned tickets when it finds any. Looking is a `getProgramAccounts`, so a build looks only when the wallet is known to have one (a cleanup that didn't land, a stopped trade dropped after a week) or at most every 30 minutes per wallet.
 
 ## Stream relay → webhook
 
