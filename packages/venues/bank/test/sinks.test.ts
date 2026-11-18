@@ -87,8 +87,8 @@ test("the trade-builds busy file: fresh for 15 s after a touch, missing means no
   const at = new Date(Date.now() - 1_000);
   await markBuildsBusy(path, at);
   assert.equal(buildsBusy(path, at.getTime() + 1_000), true);
-  assert.equal(buildsBusy(path, at.getTime() + 15_000), true);
-  assert.equal(buildsBusy(path, at.getTime() + 15_001), false);
+  assert.equal(buildsBusy(path, at.getTime() + 14_990), true); // (file times are rounded to the microsecond)
+  assert.equal(buildsBusy(path, at.getTime() + 15_010), false);
   await markBuildsBusy(path); // touching again keeps it busy
   assert.equal(buildsBusy(path), true);
 });

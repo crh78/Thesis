@@ -30,7 +30,7 @@ function valuation(t: TestContext, bank: () => BankState = emptyState) {
     statePath: join(dir, "api-state.json"),
     fork: { addUsdc: async () => 0n, setUsdc: async () => {}, refreshMarkets: async () => {} },
   } satisfies ServiceOpts;
-  return new Valuation(o, new StateStore(o.statePath, null));
+  return new Valuation(o, new StateStore(o.statePath, null), { pricesFile: null });
 }
 
 /** Stubs fetch with `answers` in order (an Error rejects); returns how many calls were made. */
