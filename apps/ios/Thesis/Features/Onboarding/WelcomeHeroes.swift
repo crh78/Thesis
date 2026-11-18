@@ -159,7 +159,7 @@ private struct StoryFrame: View {
                     .font(.geist(26, .bold))
                     .foregroundStyle(color)
                     .monospacedDigit()
-                Text(take.horizon.uppercased()).font(.mono(11)).foregroundStyle(Palette.muted)
+                Text("SINCE \(take.since.uppercased())").font(.mono(11)).foregroundStyle(Palette.muted)
             }
             ZStack {
                 TakeLine(values: take.history, closed: true)

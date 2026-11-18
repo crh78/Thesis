@@ -373,9 +373,15 @@ private extension ProfileItem {
         if take.posting {
             self.init(topic: take.topic, claim: take.claim, kind: "Posting", kindColor: Palette.muted,
                       meta: "only you can see it", value: "", ret: 0, take: take, showsReturn: false)
+        } else if take.isOpen {
+            self.init(topic: take.topic, claim: take.claim, kind: "Open", kindColor: Palette.text,
+                      meta: "until you sell · \(take.backs) traded",
+                      value: Fmt.usd(take.moneyIn), ret: take.ret, take: take)
         } else {
-            self.init(topic: take.topic, claim: take.claim, kind: "Live", kindColor: Palette.text,
-                      meta: "ends \(take.settles) · \(take.backs) traded",
+            // You sold your buy-in (or it ran its year): its result is final.
+            let day = take.closedOn.map { " " + $0.formatted(.dateTime.month(.abbreviated).day()) } ?? ""
+            self.init(topic: take.topic, claim: take.claim, kind: "Closed", kindColor: Palette.muted,
+                      meta: "closed\(day) · \(take.backs) traded",
                       value: Fmt.usd(take.moneyIn), ret: take.ret, take: take)
         }
     }

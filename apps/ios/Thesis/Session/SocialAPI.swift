@@ -76,15 +76,15 @@ struct SocialAPI: Sendable {
 
     /// Builds a basket for a take (`take-builder` function, ~2.5 s warm). `include`: asset ids the
     /// basket must keep (a take started from an asset page).
-    func buildBasket(claim: String, risk: Risk, horizon: Horizon, include: [String] = []) async throws -> BuiltBasket {
-        var body = Self.builderBody(claim, risk, horizon)
+    func buildBasket(claim: String, risk: Risk, include: [String] = []) async throws -> BuiltBasket {
+        var body = Self.builderBody(claim, risk)
         if !include.isEmpty { body["include"] = include }
         return try await takeBuilder(body)
     }
 
     /// Changes a basket the way `ask` says ("add AMD", "less crypto"), ~2 s.
-    func editBasket(claim: String, risk: Risk, horizon: Horizon, legs: [Leg], ask: String) async throws -> BuiltBasket {
-        var body = Self.builderBody(claim, risk, horizon)
+    func editBasket(claim: String, risk: Risk, legs: [Leg], ask: String) async throws -> BuiltBasket {
+        var body = Self.builderBody(claim, risk)
         body["mode"] = "edit"
         body["ask"] = ask
         body["legs"] = Self.builderLegs(legs)
@@ -92,15 +92,16 @@ struct SocialAPI: Sendable {
     }
 
     /// Same picks at a new risk: only the cash (low) or leveraged (high) pick changes. Instant.
-    func adjustBasketRisk(claim: String, risk: Risk, horizon: Horizon, legs: [Leg]) async throws -> BuiltBasket {
-        var body = Self.builderBody(claim, risk, horizon)
+    func adjustBasketRisk(claim: String, risk: Risk, legs: [Leg]) async throws -> BuiltBasket {
+        var body = Self.builderBody(claim, risk)
         body["mode"] = "risk"
         body["legs"] = Self.builderLegs(legs)
         return try await takeBuilder(body)
     }
 
-    private static func builderBody(_ claim: String, _ risk: Risk, _ horizon: Horizon) -> [String: Any] {
-        ["claim": claim, "risk": risk.rawValue.lowercased(), "horizon": horizon.long]
+    /// No horizon: takes run until the author sells, a year at most.
+    private static func builderBody(_ claim: String, _ risk: Risk) -> [String: Any] {
+        ["claim": claim, "risk": risk.rawValue.lowercased()]
     }
 
     private static func builderLegs(_ legs: [Leg]) -> [[String: Any]] {
@@ -315,7 +316,10 @@ struct NewTake: Encodable {
     let claim: String
     let topic: String
     let risk: String
-    let horizon: String
+    /// Takes have no horizon (they run until the author sells, a year at most) and the server
+    /// ignores one. Sent only so a `social` function from before that still accepts the post: a
+    /// year, as the server now sets it.
+    let horizon = "12mo"
     let tags: [String]
     let legs: [NewLeg]
     /// Keep the take hidden from everyone else until its on-chain buy-in confirms. Always true:
@@ -329,7 +333,6 @@ struct NewTake: Encodable {
         self.topic = guess.topic
         self.tags = guess.tags
         self.risk = draft.risk.serverValue
-        self.horizon = draft.horizon.serverValue
         self.legs = legs.map {
             NewLeg(name: $0.name, kind: $0.kind, weight: $0.weight, why: $0.why, slot: $0.slot, fadeHow: $0.fadeHow,
                    assetId: $0.assetID)
@@ -566,10 +569,10 @@ struct TakeDTO: Decodable {
     let claim: String
     let topic: String
     let risk: String
-    let horizon: String
+    // `horizon` and `settles_at` are still sent (older takes, older apps), but takes have no
+    // horizon now: they run until the author sells their buy-in, a year at most.
     let tags: [String]
     let createdAt: Date
-    let settlesAt: Date
     let author: PersonDTO
     let legs: [LegDTO]
     let ret: Double
@@ -582,16 +585,23 @@ struct TakeDTO: Decodable {
     let status: String?
     /// Where it came from (an article or an X post); missing on older backends.
     let source: TakeSource?
+    /// When the author sold their buy-in, which closed the take; null while open. Missing on
+    /// older backends.
+    let closedAt: Date?
+    /// Its result is final (on-chain), and when. Missing on older backends.
+    let settled: Bool?
+    let settledAt: Date?
 
     var take: Take {
         Take(id: id, author: author.person, claim: claim, topic: topic,
-             risk: Risk(serverValue: risk), horizon: horizon,
+             risk: Risk(serverValue: risk),
              age: RelativeAge.short(since: createdAt),
              since: createdAt.formatted(.dateTime.month(.abbreviated).day()),
-             settles: settlesAt.formatted(.dateTime.month(.abbreviated).day()),
              ret: ret, legs: legs.map(\.leg), backs: backs, fades: fades, comments: comments,
              moneyIn: moneyIn, history: history.count > 1 ? history : [0, 0], tags: tags,
-             posting: status == "posting", source: source)
+             posting: status == "posting", source: source,
+             status: settled == true || settledAt != nil ? .settled : closedAt != nil ? .closed : .open,
+             closedAt: closedAt, settledAt: settledAt)
     }
 }
 
@@ -634,17 +644,6 @@ extension Risk {
         case "low": self = .low
         case "high": self = .high
         default: self = .medium
-        }
-    }
-}
-
-extension Horizon {
-    var serverValue: String {
-        switch self {
-        case .twoWeeks: "2wk"
-        case .oneMonth: "1mo"
-        case .threeMonths: "3mo"
-        case .sixMonths: "6mo"
         }
     }
 }

@@ -6,7 +6,6 @@ struct TakeDraft: Identifiable, Codable {
     var id = UUID()
     var claim = "AI power demand is underrated."
     var risk: Risk = .medium
-    var horizon: Horizon = .threeMonths
     var buyIn: Double = 25
     /// Filled by the take builder (BuildingView); nil means not built yet.
     var legs: [Leg]? = nil
@@ -20,14 +19,14 @@ struct TakeDraft: Identifiable, Codable {
     /// Where the take came from (a shared article, an X call): posted with it as "via …".
     var source: TakeSource? = nil
     /// What the basket in `legs` was built for (`buildKey` then). Going back and building again
-    /// with the same take, risk and horizon reuses it, picks you changed included.
+    /// with the same take and risk reuses it, picks you changed included.
     var builtFor: String? = nil
     /// Saved as a draft: when, and whose (the handle), so each account sees its own.
     var savedAt: Date? = nil
     var owner: String? = nil
 
     var buildKey: String {
-        [claim.trimmingCharacters(in: .whitespacesAndNewlines), risk.rawValue, horizon.rawValue, seed?.id ?? ""]
+        [claim.trimmingCharacters(in: .whitespacesAndNewlines), risk.rawValue, seed?.id ?? ""]
             .joined(separator: "|")
     }
     /// The builder already answered for exactly this take (a basket, or "no clean way to trade this").
@@ -112,15 +111,15 @@ struct CreateFlow: View {
         _draft = State(initialValue: TakeDraft(claim: "", seed: seed))
     }
 
-    /// Opened from a chat link: the take, risk and horizon are already set, so
-    /// skip the composer and start on building → basket.
+    /// Opened from a chat link: the take and risk are already set, so skip the
+    /// composer and start on building → basket.
     init(link: TakeLink) {
         initialClaim = link.claim
         if let read = link.read {
             _reading = State(initialValue: read)
             return
         }
-        _draft = State(initialValue: TakeDraft(claim: link.claim, risk: link.risk, horizon: link.horizon, source: link.source))
+        _draft = State(initialValue: TakeDraft(claim: link.claim, risk: link.risk, source: link.source))
         _path = State(initialValue: [.building])
         fromLink = true
     }
@@ -232,7 +231,7 @@ struct CreateTakeView: View {
                 HStack(spacing: 10) {
                     ThinkingOrb(state: .composing, size: .px20)
                     Text("Thesis").font(.geist(14, .semibold))
-                    Text("· two quick questions").font(.geist(14)).foregroundStyle(Palette.muted)
+                    Text("· one quick question").font(.geist(14)).foregroundStyle(Palette.muted)
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -257,17 +256,11 @@ struct CreateTakeView: View {
                             }
                         }
                     }
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("How long should it run?").font(.geist(17, .semibold))
-                    Picker("Horizon", selection: $draft.horizon) {
-                        ForEach(Horizon.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    Text("Your take settles at the end, and the result goes on your record.")
+                    // No horizon to pick: the take runs until you sell your buy-in, a year at most.
+                    Text(TakeLifetime.note)
                         .font(.geist(13))
                         .foregroundStyle(Palette.muted)
+                        .accessibilityIdentifier("take-lifetime")
                 }
             }
             .padding(.horizontal, 16)
@@ -391,7 +384,7 @@ struct BuildingView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Your take").font(.geist(12, .semibold)).foregroundStyle(Palette.muted)
                     Text(draft.claim).font(.serif(26)).fixedSize(horizontal: false, vertical: true)
-                    Text("\(draft.risk.rawValue) risk · \(draft.horizon.long)").font(.geist(13)).foregroundStyle(Palette.muted)
+                    Text("\(draft.risk.rawValue) risk").font(.geist(13)).foregroundStyle(Palette.muted)
                     if let source = draft.source { SourceMark(source: source).padding(.top, 2) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -409,7 +402,7 @@ struct BuildingView: View {
                          : phases[min(step, phases.count - 1)].title)
                         .font(.geist(20, .semibold))
                         .contentTransition(.opacity)
-                    Text(buildError ?? (done ? (noExposure ?? "\(draft.legs?.count ?? 0) picks · \(draft.risk.rawValue) risk · \(draft.horizon.long)")
+                    Text(buildError ?? (done ? (noExposure ?? "\(draft.legs?.count ?? 0) picks · \(draft.risk.rawValue) risk")
                                          : phases[min(step, phases.count - 1)].sub))
                         .font(.geist(14))
                         .foregroundStyle(Palette.muted)
@@ -557,7 +550,9 @@ struct BasketView: View {
             VStack(spacing: 0) {
                 VStack(spacing: 4) {
                     Text(draft.claim).font(.serif(24)).multilineTextAlignment(.center)
-                    Text("\(draft.horizon.long) · settles \(draft.horizon.settleDate().formatted(.dateTime.month(.abbreviated).day()))").font(.geist(13)).foregroundStyle(Palette.muted)
+                    Text(TakeLifetime.note).font(.geist(13)).foregroundStyle(Palette.muted)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("take-lifetime")
                     if let source = draft.source { SourceMark(source: source) }
                 }
                 .padding(.horizontal, 16)

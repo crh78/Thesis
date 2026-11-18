@@ -68,14 +68,14 @@ enum MockData {
 
     static let aiPower = Take(
         id: "ai-power", author: jake, claim: "AI power demand is underrated.", topic: "topic-energy",
-        risk: .medium, horizon: "3mo", age: "2h", since: "Jan 4", settles: "Apr 4", ret: 14.0,
+        risk: .medium, age: "2h", since: "Jan 4", ret: 14.0,
         legs: [vistra, constellation, nvidia, capex], backs: 24, fades: 7, comments: 12, moneyIn: 1240,
         history: [0, -1.2, 0.8, 2.1, 1.4, 3.9, 5.2, 4.4, 7.0, 8.8, 8.1, 10.2, 11.5, 11.0, 12.6, 13.3, 14.0],
         tags: ["AI", "Energy"])
 
     static let fedCut = Take(
         id: "fed-jan", author: priya, claim: "The Fed cuts in January.", topic: "topic-bank",
-        risk: .low, horizon: "2mo", age: "5h", since: "Jan 1", settles: "Mar 1", ret: 3.1,
+        risk: .low, age: "5h", since: "Jan 1", ret: 3.1,
         legs: [
             Leg(name: "Rate cut: Yes", kind: "Prediction · Yes", weight: 50, why: "Pays out if the Fed cuts at the January meeting.", ret: 5.2, slot: 0, fadeHow: "Bets No"),
             Leg(name: "T-bills", kind: "Bond fund", weight: 30, why: "Short-term government debt that gains when rates fall.", ret: 1.4, slot: 1, fadeHow: nil),
@@ -87,7 +87,7 @@ enum MockData {
 
     static let chips = Take(
         id: "chips", author: dev, claim: "Chip stocks lead the next leg up.", topic: "topic-rocket",
-        risk: .high, horizon: "1mo", age: "1d", since: "Jan 3", settles: "Feb 3", ret: -4.8,
+        risk: .high, age: "1d", since: "Jan 3", ret: -4.8,
         legs: [
             Leg(name: "NVIDIA 2x", kind: "Stock · 2x", weight: 40, why: "Leveraged exposure to the biggest AI chip maker.", ret: -7.9, slot: 0, fadeHow: "Bets the stock falls"),
             Leg(name: "AMD", kind: "Stock", weight: 30, why: "Second-source GPUs and server CPUs.", ret: -3.1, slot: 1, fadeHow: "Bets the stock falls"),
@@ -99,7 +99,7 @@ enum MockData {
 
     static let nuclear = Take(
         id: "nuclear", author: mo, claim: "Nuclear restarts get fast-tracked.", topic: "topic-nuclear",
-        risk: .medium, horizon: "6mo", age: "8h", since: "Dec 28", settles: "Jun 28", ret: 9.4,
+        risk: .medium, age: "8h", since: "Dec 28", ret: 9.4,
         legs: [
             Leg(name: "Constellation", kind: "Stock", weight: 40, why: "Owns the reactors most likely to restart.", ret: 11.2, slot: 0, fadeHow: "Bets the stock falls"),
             Leg(name: "Vistra", kind: "Stock", weight: 30, why: "Nuclear-heavy power producer.", ret: 9.0, slot: 1, fadeHow: nil),
@@ -111,7 +111,7 @@ enum MockData {
 
     static let mortgage = Take(
         id: "mortgage", author: lena, claim: "Mortgage rates dip under 6% by spring.", topic: "topic-house",
-        risk: .low, horizon: "6mo", age: "1d", since: "Dec 30", settles: "Jun 30", ret: 2.2,
+        risk: .low, age: "1d", since: "Dec 30", ret: 2.2,
         legs: [
             Leg(name: "Rates under 6%: Yes", kind: "Prediction · Yes", weight: 50, why: "Pays out if the 30-year average drops under 6%.", ret: 3.4, slot: 0, fadeHow: "Bets No"),
             Leg(name: "Homebuilders", kind: "Stock basket", weight: 30, why: "Builders sell more homes when rates fall.", ret: 1.8, slot: 1, fadeHow: nil),
@@ -123,7 +123,7 @@ enum MockData {
 
     static let dataCenterSlows = Take(
         id: "dc-slows", author: kai, claim: "Data-center spending slows in 2027.", topic: "topic-computer",
-        risk: .high, horizon: "3mo", age: "2d", since: "Jan 2", settles: "Apr 2", ret: -1.9,
+        risk: .high, age: "2d", since: "Jan 2", ret: -1.9,
         legs: [
             Leg(name: "DC spending: No", kind: "Prediction · No", weight: 60, why: "Pays out if big-tech capex misses [threshold].", ret: -3.0, slot: 0, fadeHow: "Bets Yes"),
             Leg(name: "Utilities", kind: "Stock basket", weight: 40, why: "Defensive if the build-out cools.", ret: -0.3, slot: 1, fadeHow: nil)
@@ -252,7 +252,7 @@ enum MockData {
     static var myTakes: [ProfileItem] {
         [ProfileItem(topic: "topic-coin", claim: "Copper squeeze is coming.", kind: "Called it", kindColor: Palette.up, meta: "settled Dec 30 · 18 traded", value: "+$486", ret: 31.5),
          ProfileItem(topic: "topic-bank", claim: "The Fed cuts in December.", kind: "Called it", kindColor: Palette.up, meta: "settled Dec 16 · 9 traded", value: "+$212", ret: 12.0),
-         ProfileItem(topic: "topic-tv", claim: "Streaming bundles beat cable this year.", kind: "Live", kindColor: Palette.text, meta: "ends Feb 15 · 4 traded", value: "−$31", ret: -6.2)]
+         ProfileItem(topic: "topic-tv", claim: "Streaming bundles beat cable this year.", kind: "Open", kindColor: Palette.text, meta: "until you sell · 4 traded", value: "−$31", ret: -6.2)]
     }
 
     static var badges: [ProfileItem] {
@@ -346,11 +346,11 @@ extension MockData {
             XCall(postId: "2121729777891496181", url: URL(string: "https://x.com/KobeissiLetter/status/2121729777891496181")!,
                   text: "Crypto is having an absolutely brutal weekend. Bitcoin is now down -$5,000 today and -$11,000 over the last 3 days.",
                   postedAt: .now.addingTimeInterval(-3600 * 2), claim: "Bitcoin's selloff has further to run as liquidations pile up",
-                  risk: "high", horizon: "1 month"),
+                  risk: "high"),
             XCall(postId: "2121716781534314731", url: URL(string: "https://x.com/KobeissiLetter/status/2121716781534314731")!,
                   text: "BREAKING: Bitcoin falls below $65,000 and ETH falls below $1,750 as total liquidations hit $1.8 billion.",
                   postedAt: .now.addingTimeInterval(-3600 * 4), claim: "Ether keeps sliding below $1,750 this month",
-                  risk: "high", horizon: "1 month"),
+                  risk: "high"),
         ]),
     ]
 }
