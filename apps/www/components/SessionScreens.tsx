@@ -4,7 +4,7 @@
 // notification prompts (one at a time).
 import { useEffect, useState } from "react";
 import { useLinkAccount } from "@privy-io/react-auth";
-import { X_LOGIN } from "@/lib/flags";
+import { X_BOT, X_LOGIN } from "@/lib/flags";
 import { REAUTH_EVENT } from "@/lib/fork";
 import { useSession } from "@/lib/session";
 import AppPrompts from "./AppPrompts";
@@ -36,7 +36,7 @@ export default function SessionScreens() {
 
 const dismissedKey = (userId: string) => `thesis.linkx.dismissed.${userId}`;
 
-/** Once after sign-in, for accounts with no X: replies to @thesis on X trade from the X-linked account. */
+/** Once after sign-in, for accounts with no X: what the X bot builds for a reply waits here as a draft for the X-linked account. */
 function LinkXPrompt({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
   const { hints, userId } = useSession();
   // null until decided, so the prompts after it don't start alongside it.
@@ -71,7 +71,7 @@ function LinkXPrompt({ onOpenChange }: { onOpenChange: (open: boolean) => void }
       <div className="sheet" role="dialog" aria-labelledby="linkx-title">
         <button className="x" aria-label="Close" onClick={dismiss}>×</button>
         <h3 id="linkx-title">Connect your X</h3>
-        <p className="muted">Reply to any post on X with <b className="mono">@thesis back $20</b> and it trades from this account. Connect X so we know it&apos;s you.</p>
+        <p className="muted">Reply to any post on X with <b className="mono">@{X_BOT} make this a take</b> and we&apos;ll build it a basket, saved here for you to post. Connect X so we know it&apos;s you.</p>
         {error ? <div className="err">{error}</div> : null}
         <button className="obtn filled" style={{ marginTop: 16 }} onClick={() => { setError(null); linkTwitter(); }}>Connect X</button>
         <button className="obtn plain" onClick={dismiss}>Not now</button>

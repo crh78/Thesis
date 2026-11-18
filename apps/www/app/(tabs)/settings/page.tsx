@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { useLinkAccount } from "@privy-io/react-auth";
 import { showInstall } from "@/components/AppPrompts";
 import { rpcNow } from "@/lib/data";
-import { X_LOGIN } from "@/lib/flags";
+import { X_BOT, X_LOGIN } from "@/lib/flags";
 import { currentSubscription, disablePush, enablePush, isStandalone, pushSupported } from "@/lib/push";
 import { useSession } from "@/lib/session";
 
@@ -80,7 +80,7 @@ export default function SettingsPage() {
 
   return (
     <main className="page">
-      <button className="back" onClick={() => router.back()}>‹ Back</button>
+      <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
       <h1 className="title">Settings</h1>
 
       <section className="set-sec">
@@ -120,7 +120,7 @@ export default function SettingsPage() {
         ) : (
           <button className="set-row" onClick={() => { setLinkError(null); linkTwitter(); }}><span>Connect X</span><span className="muted">›</span></button>
         )}
-        <p className="muted small">Reply to any post on X with @thesis back $20 and it trades from this account.</p>
+        <p className="muted small">Reply to any post on X with @{X_BOT} make this a take and we&apos;ll build it a basket, saved here for you to post.</p>
         {linkError ? <div className="err">{linkError}</div> : null}
       </section>
       ) : null}

@@ -42,7 +42,8 @@ fails the request that needs it with an error naming it.
   aren't rate-limited as one Vercel IP. Server only: a service key may act for any wallet).
 - Optional: `FORK_BLINK_URL` (server; `https://<fork-host>:8443`, the fork Blink; without it
   `/actions.json` and `/api/actions/*` don't exist), `NEXT_PUBLIC_X_LOGIN` (`on` once X login is
-  enabled in Privy), `NEXT_PUBLIC_SITE_URL` (defaults to Vercel's production URL),
+  enabled in Privy), `NEXT_PUBLIC_X_BOT_HANDLE` (the X bot the screens name; defaults to
+  `yourthesisxyz` in `lib/flags.ts`), `NEXT_PUBLIC_SITE_URL` (defaults to Vercel's production URL),
   `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (defaults to the key in `lib/push.ts`).
 
 Adding yourthesis.xyz: buy it, then `vercel domains add yourthesis.xyz thesis-www` and point its DNS

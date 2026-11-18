@@ -6,3 +6,9 @@
  * Vercel once it is. Until then: Google and email.
  */
 export const X_LOGIN = process.env.NEXT_PUBLIC_X_LOGIN === "on";
+
+/**
+ * The X bot's handle, without the "@" (apps/x). Whether it's free isn't checked yet, so it can
+ * move: NEXT_PUBLIC_X_BOT_HANDLE changes it in one place for every screen that names it.
+ */
+export const X_BOT = (process.env.NEXT_PUBLIC_X_BOT_HANDLE || "yourthesisxyz").replace(/^@/, "");
