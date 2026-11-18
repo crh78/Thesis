@@ -3,7 +3,7 @@
 // notifications ask (once Thesis runs from the home screen). Settings can bring the install steps
 // back ("thesis:install" event).
 import { useEffect, useState } from "react";
-import { enablePush, isIOS, isPhone, isStandalone, pushSupported, registerServiceWorker } from "@/lib/push";
+import { enablePush, iosBrowser, isIOS, isPhone, isStandalone, pushSupported, registerServiceWorker, type IOSBrowser } from "@/lib/push";
 import { useSession } from "@/lib/session";
 
 type BeforeInstallPrompt = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
@@ -64,6 +64,24 @@ const ShareGlyph = () => (
   </svg>
 );
 
+/** Add to Home Screen, for the browser this is: Safari's toolbar, Chrome's address bar, Firefox's menu. */
+function IOSSteps({ browser }: { browser: IOSBrowser }) {
+  const share = <span className="kbd"><ShareGlyph /></span>;
+  const first =
+    browser === "chrome" ? <>Tap {share} at the right end of Chrome&apos;s address bar.</>
+    : browser === "edge" ? <>Tap the menu (☰) at the bottom of Edge, then tap {share} <b>Share</b>.</>
+    : browser === "firefox" ? <>Tap the menu (☰) in Firefox, then tap <b>Share</b>.</>
+    : browser === "safari" ? <>Tap {share} in Safari&apos;s toolbar.</>
+    : <>Tap {share} <b>Share</b> in your browser.</>;
+  return (
+    <ol className="install-steps">
+      <li>{first}</li>
+      <li>Scroll down and tap <b>Add to Home Screen</b>. (Not there? Open this page in Safari.)</li>
+      <li>Tap <b>Add</b>, then open Thesis from your home screen.</li>
+    </ol>
+  );
+}
+
 function InstallSheet({ event, onClose }: { event: BeforeInstallPrompt | null; onClose: () => void }) {
   const ios = isIOS();
   async function install() {
@@ -85,11 +103,7 @@ function InstallSheet({ event, onClose }: { event: BeforeInstallPrompt | null; o
         {event ? (
           <button className="obtn filled" style={{ marginTop: 14 }} onClick={install}>Install</button>
         ) : ios ? (
-          <ol className="install-steps">
-            <li>Tap <span className="kbd"><ShareGlyph /></span> in Safari&apos;s toolbar.</li>
-            <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
-            <li>Tap <b>Add</b>, then open Thesis from your home screen.</li>
-          </ol>
+          <IOSSteps browser={iosBrowser()} />
         ) : (
           <ol className="install-steps">
             <li>Open your browser&apos;s menu (⋮).</li>

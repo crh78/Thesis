@@ -9,7 +9,7 @@ import { money, pct, rpcNow, type Profile } from "@/lib/data";
 import { fork, useForkWallet, type WalletSummary } from "@/lib/fork";
 import { useSession } from "@/lib/session";
 import Avatar from "./Avatar";
-import { AddCash, CashActivity } from "./CashSheets";
+import { AddCash, CashActivity, WalletPending } from "./CashSheets";
 
 /** Your avatar in a header; opens the drawer. `open`/`onOpenChange` let Home open it on a swipe too. */
 export function ProfileMenuButton({ open: openProp, onOpenChange }: { open?: boolean; onOpenChange?: (o: boolean) => void }) {
@@ -84,7 +84,7 @@ function Drawer({ onClose }: { onClose: () => void }) {
         <Link href="/settings" onClick={onClose} className="ditem">Settings</Link>
         <button className="ditem down" onClick={() => logout()}>Log out</button>
       </aside>
-      {sheet === "add" && address ? <AddCash address={address} summary={wallet} onClose={() => setSheet(null)} onDone={setWallet} /> : null}
+      {sheet === "add" ? (address ? <AddCash address={address} summary={wallet} onClose={() => setSheet(null)} onDone={setWallet} /> : <WalletPending onClose={() => setSheet(null)} />) : null}
       {sheet === "cash" ? <CashActivity balance={wallet?.usdc ?? 0} activity={wallet?.activity ?? []} onClose={() => setSheet(null)} /> : null}
     </div>
   );

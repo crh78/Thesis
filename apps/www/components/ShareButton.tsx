@@ -1,9 +1,11 @@
 "use client";
 // Shares this page: the phone's share sheet when there is one (iMessage, etc.), else copies the link.
 import { useState } from "react";
+import { CheckIcon, ShareIcon } from "./Icons";
 
 // `url`: a path to share instead of this page (Me shares your public profile, /u/<handle>).
-export default function ShareButton({ text, label = "Share", className = "btn light", url: path }: { text: string; label?: string; className?: string; url?: string }) {
+// `icon`: the share glyph instead of the label (a check once the link is copied).
+export default function ShareButton({ text, label = "Share", className = "btn light", url: path, icon = false }: { text: string; label?: string; className?: string; url?: string; icon?: boolean }) {
   const [copied, setCopied] = useState(false);
 
   async function share() {
@@ -26,8 +28,8 @@ export default function ShareButton({ text, label = "Share", className = "btn li
   }
 
   return (
-    <button className={className} onClick={share}>
-      {copied ? "Link copied" : label}
+    <button className={className} onClick={share} aria-label={icon ? (copied ? "Link copied" : label) : undefined}>
+      {icon ? (copied ? <CheckIcon /> : <ShareIcon />) : copied ? "Link copied" : label}
     </button>
   );
 }
