@@ -74,7 +74,7 @@ targets:
         DevLoginPassword: "$(DEV_LOGIN_PASSWORD)"
         DevLoginEmail: "$(DEV_LOGIN_EMAIL)"
         DevLoginCode: "$(DEV_LOGIN_CODE)"
-        # Fork mode (empty unless Config/Fork.local.xcconfig sets it; see Config/Debug.xcconfig).
+        # The fork API, required (set by Config/Fork.local.xcconfig; see Config/Debug.xcconfig).
         ForkAPIURL: "$(FORK_API_URL)"
         # Google / Apple sign-in redirect back to the app through this scheme.
         # Must also be listed under Allowed URL schemes in the Privy dashboard.

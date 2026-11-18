@@ -5,6 +5,9 @@
 #include? "Backend.local.xcconfig"
 #include? "Privy.local.xcconfig"
 
+// The fork API: the same gitignored Fork.local.xcconfig as Debug. The app only runs on the fork.
+#include? "Fork.local.xcconfig"
+
 // Dev login never ships: these stay empty.
 DEV_LOGIN_USERNAME =
 DEV_LOGIN_PASSWORD =

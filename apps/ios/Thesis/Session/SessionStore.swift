@@ -191,8 +191,9 @@ final class SessionStore {
         if !quietly { phase = .settingUp }
         nameHint = hint ?? Self.nameHint(from: user)
 
-        // Every user gets a wallet without ever seeing one. A failure here isn't
-        // fatal: the server picks the address up on a later launch.
+        // Every user gets a wallet without ever seeing one. A failure here isn't fatal yet:
+        // connecting to the fork tries again (`forkAPI`), and the server picks the address up
+        // on a later launch.
         if user.embeddedSolanaWallets.isEmpty {
             do {
                 _ = try await user.createSolanaWallet()
@@ -246,12 +247,22 @@ final class SessionStore {
         phase = .ready
     }
 
-    /// The fork API as the signed-in user, when this build is in fork mode and the user has a
-    /// Privy Solana wallet. The wallet signs each transaction; it never sends anything itself.
+    /// The fork API as the signed-in user, through their Privy Solana wallet. The wallet signs each
+    /// transaction; it never sends anything itself. Nil without `FORK_API_URL` (AppGate stops
+    /// before this) or without a wallet: sign-in makes it, and if that failed this tries once more.
     func forkAPI() async -> ForkAPI? {
-        guard let base = AppConfig.forkAPIURL,
-              let user = await privy.getUser(),
-              let wallet = user.embeddedSolanaWallets.first else { return nil }
+        guard let base = AppConfig.forkAPIURL, let user = await privy.getUser() else { return nil }
+        var found: (any EmbeddedSolanaWallet)? = user.embeddedSolanaWallets.first
+        if found == nil {
+            do {
+                found = try await user.createSolanaWallet()
+            } catch {
+                log.error("wallet creation failed: \(error.localizedDescription, privacy: .public)")
+                // Sign-in may have made it in the meantime.
+                found = await privy.getUser()?.embeddedSolanaWallets.first
+            }
+        }
+        guard let wallet = found else { return nil }
         var signer = ForkWallet(address: wallet.address) { transaction in
             let signed = try await wallet.provider.signTransaction(transaction: transaction)
             guard let data = Data(base64Encoded: signed) else { throw ForkAPIError(code: "bad_signature", message: nil) }
@@ -269,6 +280,13 @@ final class SessionStore {
             guard let self else { throw SessionAPIError.unauthorized }
             return try await self.accessToken()
         })
+    }
+
+    /// Signed in, but there's no wallet to trade from (making it failed). Nothing works without
+    /// it, so show the error screen; Try again signs in again, which makes the wallet.
+    func walletMissing() {
+        guard phase == .ready else { return }
+        phase = .failed("Couldn't set up your wallet. Check your connection and try again.")
     }
 
     /// Social reads/writes as the signed-in user (used before AppState connects).

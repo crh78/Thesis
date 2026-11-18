@@ -6,7 +6,8 @@ private enum WithdrawPhase: Equatable {
 }
 
 /// Take money out of your balance, to a bank account or debit card.
-/// Payouts are simulated until an offramp provider exists; the ledger is real.
+/// Mock data only (UI tests, previews): money can't leave the fork, so signed in Cash and the
+/// sidebar don't offer it. Kept for the withdrawals and offramp planned for real mainnet.
 struct WithdrawView: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss

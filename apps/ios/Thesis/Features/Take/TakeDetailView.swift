@@ -280,8 +280,8 @@ struct TakeDetailView: View {
 
     // MARK: Your position
 
-    /// Your trade and/or fade on this take. Fork mode trades on-chain, so these
-    /// (play-money) positions don't apply there.
+    /// Your trade and/or fade on this take, on mock data. Signed in, positions are on-chain
+    /// (the receipt's "Sell position"), so these don't apply.
     private var held: [OwnedPosition] {
         guard !app.isOnFork else { return [] }
         return [Side.back, .fade].compactMap { app.position(in: take, side: $0) }

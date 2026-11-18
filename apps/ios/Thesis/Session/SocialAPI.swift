@@ -254,9 +254,9 @@ struct SocialAPI: Sendable {
         request.httpMethod = "POST"
         request.setValue(publishableKey, forHTTPHeaderField: "apikey")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
-        // Fork builds read takes' counts and results from the fork's chain events
+        // The app runs on the fork: takes' counts and results come from the fork's chain events
         // (chain_takes, filled by the QuickNode Stream webhook via `pnpm fork:relay`).
-        if AppConfig.forkAPIURL != nil { request.setValue("solana-mainnet-fork", forHTTPHeaderField: "x-thesis-network") }
+        request.setValue("solana-mainnet-fork", forHTTPHeaderField: "x-thesis-network")
         request.httpBody = try JSONSerialization.data(withJSONObject: args)
         let (data, status) = try await load(request)
         guard status == 200 else { throw SocialAPIError(status: status, data: data) }
@@ -268,14 +268,9 @@ struct SocialAPI: Sendable {
         try await function("social", method, path, body: body, contentType: contentType)
     }
 
-    /// The `cash` edge function (CashAPI.swift).
-    func cashCall(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
-        try await function("cash", method, path, body: body)
-    }
-
     func function(_ name: String, _ method: String, _ path: String, body: Data?,
                           contentType: String = "application/json") async throws -> Data {
-        // `path` may carry an already-encoded query ("activity?before_at=…").
+        // `path` may carry an already-encoded query ("search?q=…").
         let parts = path.split(separator: "?", maxSplits: 1).map(String.init)
         let route = parts.first ?? ""
         var components = URLComponents(url: baseURL.appending(path: route.isEmpty ? "functions/v1/\(name)" : "functions/v1/\(name)/\(route)"),
@@ -285,7 +280,7 @@ struct SocialAPI: Sendable {
         request.httpMethod = method
         request.setValue(publishableKey, forHTTPHeaderField: "apikey")
         request.setValue(try await token(), forHTTPHeaderField: "privy-token")
-        if AppConfig.forkAPIURL != nil { request.setValue("solana-mainnet-fork", forHTTPHeaderField: "x-thesis-network") }
+        request.setValue("solana-mainnet-fork", forHTTPHeaderField: "x-thesis-network")
         if let body {
             request.setValue(contentType, forHTTPHeaderField: "content-type")
             request.httpBody = body
@@ -323,11 +318,11 @@ struct NewTake: Encodable {
     let horizon: String
     let tags: [String]
     let legs: [NewLeg]
-    /// Fork mode: keep the take hidden from everyone else until its on-chain buy-in confirms.
-    let awaitChain: Bool
+    /// Keep the take hidden from everyone else until its on-chain buy-in confirms. Always true:
+    /// the app only runs on the fork (the server makes every take `posting` anyway).
+    let awaitChain = true
 
-    init(draft: TakeDraft, legs: [Leg], awaitChain: Bool = false) {
-        self.awaitChain = awaitChain
+    init(draft: TakeDraft, legs: [Leg]) {
         let claim = draft.claim.trimmingCharacters(in: .whitespacesAndNewlines)
         let guess = TopicGuess(claim: claim, legs: legs)
         self.claim = claim

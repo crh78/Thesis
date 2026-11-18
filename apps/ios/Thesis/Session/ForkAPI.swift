@@ -9,9 +9,9 @@ struct ForkWallet {
     var signMessage: (String) async throws -> Data = { _ in throw ForkAPIError(code: "cant_sign_message", message: nil) }
 }
 
-/// Fork mode: the local fork API (`scripts/fork/api`, `pnpm fork:api`), for dogfooding the whole
-/// product on a mainnet fork with fake money. On only when the build sets `FORK_API_URL`
-/// (`Config/Fork.local.xcconfig`, gitignored); production builds never have it.
+/// The fork API (`scripts/fork/api`, on the team's shared fork), for the whole product on a
+/// mainnet fork with fake money. The app's only money path: every build needs `FORK_API_URL`
+/// (`Config/Fork.local.xcconfig`, gitignored), or it stops at launch.
 ///
 /// Trades are real on-chain receipts plus Jupiter swaps from the user's own wallet: the API builds
 /// the transactions, the Privy wallet signs them here, and the API adds the app's fee payer
