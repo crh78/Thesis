@@ -24,6 +24,8 @@ const run = (name: string) => filter(fixture(name)) as ThesisStreamPayload | nul
 const EXPECTED = [
   { instructions: ["create_take"], events: ["takeCreated", "positionOpened"] },
   { instructions: ["back"], events: ["positionOpened"] },
+  // The author's sale closes the take.
+  { instructions: ["exit_position"], events: ["positionExited", "takeClosed"] },
   {
     instructions: ["settle_take", "settle_position", "mint_badge"],
     events: ["takeSettled", "positionSettled", "badgeMinted"],
@@ -55,7 +57,7 @@ for (const name of Object.keys(FIXTURES)) {
     assert.equal(payload.programId, THESIS_PROGRAM_ID.toBase58());
     assert.equal(payload.batchStart, 380_000_000);
 
-    // The transfer and the failed `back` are dropped; the three Thesis transactions stay.
+    // The transfer and the failed `back` are dropped; the four Thesis transactions stay.
     const txs = decodeThesisStream(program, payload);
     assert.deepEqual(
       txs.map((t) => ({ instructions: t.instructions, events: t.events.map((e) => e.name) })),
@@ -63,14 +65,17 @@ for (const name of Object.keys(FIXTURES)) {
     );
     assert.deepEqual(
       txs.map((t) => t.slot),
-      [380_000_000, 380_000_001, 380_000_001],
+      [380_000_000, 380_000_001, 380_000_001, 380_000_001],
     );
     assert.ok(txs.every((t) => t.blockTime && t.signature.length > 80 && !t.logsTruncated));
 
     const [created, opened] = txs[0].events;
     assert.ok((created.data as { author: PublicKey }).author.equals(KEYS.author));
     assert.equal((opened.data as { stake: BN }).stake.toNumber(), 10_000_000);
-    const settled = txs[2].events[1].data as { owner: PublicKey; pnl: BN };
+    const closed = txs[2].events[1].data as { author: PublicKey; closedAt: BN };
+    assert.ok(closed.author.equals(KEYS.author));
+    assert.equal(closed.closedAt.toNumber(), 1_790_000_000);
+    const settled = txs[3].events[1].data as { owner: PublicKey; pnl: BN };
     assert.ok(settled.owner.equals(KEYS.backer));
     assert.equal(settled.pnl.toNumber(), 3_125_000);
   });
@@ -90,8 +95,8 @@ test("the payload's events are the transactions' own", () => {
     full,
   );
   // Self-CPI events (create_take, the wrapped back) come in `events`; the old style in the logs.
-  assert.deepEqual(payload.transactions.map((t) => t.events?.length ?? 0), [2, 1, 0]);
-  assert.equal(parseThesisEvents(program, payload.transactions[2].logs).length, 3);
+  assert.deepEqual(payload.transactions.map((t) => t.events?.length ?? 0), [2, 1, 2, 0]);
+  assert.equal(parseThesisEvents(program, payload.transactions[3].logs).length, 3);
   assert.ok(!payload.transactions[1].logs.some((l) => l.includes("swap noise")));
 });
 

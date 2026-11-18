@@ -619,6 +619,10 @@ export type Thesis = {
         },
         {
           "name": "take",
+          "docs": [
+            "Written only when this is the author's buy-in (the sale closes the take)."
+          ],
+          "writable": true,
           "relations": [
             "position"
           ]
@@ -1432,6 +1436,14 @@ export type Thesis = {
           "writable": true
         },
         {
+          "name": "authorExit",
+          "docs": [
+            "The author's buy-in's exit account (its PDA; clients always pass it).",
+            "buy-in. Only the author's `exit_position` closes a take, and it always creates this",
+            "account, so a closed take can't settle on horizon prices instead."
+          ]
+        },
+        {
           "name": "eventAuthority"
         },
         {
@@ -1843,6 +1855,19 @@ export type Thesis = {
       ]
     },
     {
+      "name": "takeClosed",
+      "discriminator": [
+        33,
+        165,
+        73,
+        3,
+        135,
+        156,
+        118,
+        149
+      ]
+    },
+    {
       "name": "takeCreated",
       "discriminator": [
         88,
@@ -2117,6 +2142,11 @@ export type Thesis = {
       "code": 6046,
       "name": "invalidBadgeUriBase",
       "msg": "The badge URI base must be an https:// URL ending in /, at most 128 bytes"
+    },
+    {
+      "code": 6047,
+      "name": "authorCannotFade",
+      "msg": "A take's author can't fade it"
     }
   ],
   "types": [
@@ -2554,9 +2584,9 @@ export type Thesis = {
     {
       "name": "exit",
       "docs": [
-        "A position its owner sold before the horizon. Its sale prices score the owner; the position's",
-        "own exit prices still come at the horizon (needed only for the author's buy-in, which sets the",
-        "take's headline result). At `[EXIT_SEED, position]`. Closed together with its position."
+        "A position its owner sold before the horizon. Its sale prices score the owner, and for the",
+        "author's buy-in they also set the take's headline result. At `[EXIT_SEED, position]`.",
+        "Closed together with its position."
       ],
       "type": {
         "kind": "struct",
@@ -3299,6 +3329,10 @@ export type Thesis = {
           },
           {
             "name": "horizonEnd",
+            "docs": [
+              "When the take settles if the author never sells (a year after posting, by config), and",
+              "the last moment anyone can sell a position before it settles on horizon prices instead."
+            ],
             "type": "i64"
           },
           {
@@ -3356,13 +3390,46 @@ export type Thesis = {
           {
             "name": "resultBps",
             "docs": [
-              "Headline return in bps: the author's position, entry to exit. Set at settlement."
+              "Headline return in bps: the author's position, entry to its sale (or to the horizon if",
+              "the author never sold). Set at settlement."
             ],
             "type": "i64"
           },
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "closedAt",
+            "docs": [
+              "When the author sold their buy-in and the take closed; 0 while they haven't. Kept here",
+              "because the author's exit account closes once their buy-in settles."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "takeClosed",
+      "docs": [
+        "The author sold their buy-in: the take takes no new backs or fades, and settles on the sale's",
+        "prices (`settle_take`). Emitted after `PositionExited`, in the same instruction."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "take",
+            "type": "pubkey"
+          },
+          {
+            "name": "author",
+            "type": "pubkey"
+          },
+          {
+            "name": "closedAt",
+            "type": "i64"
           }
         ]
       }
@@ -3442,6 +3509,9 @@ export type Thesis = {
           },
           {
             "name": "settled"
+          },
+          {
+            "name": "closed"
           }
         ]
       }

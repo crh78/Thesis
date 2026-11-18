@@ -208,6 +208,7 @@ basis points.
 | `entryPricesRecorded` | `take`, `position`, `legs` (bit mask), `sourceHash` |
 | `exitPricesRecorded` | `take`, `position`, `legs`, `sourceHash` (prices at the horizon) |
 | `positionExited` | `take`, `position`, `owner`, `side`, `exitedAt` (Unix s): the owner sold before the horizon |
+| `takeClosed` | `take`, `author`, `closedAt` (Unix s): the author sold their buy-in, so the take takes no new backs or fades and settles on the sale |
 | `salePricesRecorded` | `take`, `position`, `legs`, `sourceHash` (prices at the sale) |
 | `takeSettled` | `take`, `author`, `resultBps` |
 | `positionSettled` | `take`, `position`, `owner`, `side`, `returnBps`, `pnl`, `scored`, `exited` (scored at its sale) |

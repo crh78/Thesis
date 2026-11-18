@@ -239,6 +239,29 @@ const wrappedBackLogs = [
   success(WRAPPER),
 ];
 
+// The author sells their buy-in, which closes the take: two events from one instruction.
+const authorExitEvents = [
+  eventIx("PositionExited", {
+    take,
+    position: authorPosition,
+    owner: author,
+    side: SIDE.back,
+    exitedAt: new BN(1_790_000_000),
+    escrowReturned: new BN(0),
+  }, 2),
+  eventIx("TakeClosed", { take, author, closedAt: new BN(1_790_000_000) }, 2),
+];
+const authorExitLogs = [
+  invoke(THESIS, 1),
+  "Program log: Instruction: ExitPosition",
+  invoke(SYSTEM, 2),
+  success(SYSTEM),
+  ...eventLogs(2),
+  ...eventLogs(2),
+  consumed(THESIS, 30_000),
+  success(THESIS),
+];
+
 // The crank settles the take and a position, then mints the author's badge: three top-level
 // Thesis instructions in one transaction. The old style: events in the logs.
 const settleLogs = [
@@ -339,6 +362,13 @@ function blockDataset() {
               },
             ],
             logs: wrappedBackLogs,
+          }),
+          blockTx({
+            label: "author-exit",
+            accountKeys: [b58(author), b58(take), b58(authorPosition), SYSTEM, THESIS],
+            instructions: [{ program: THESIS, data: ixData("exit_position", 0), accounts: [0, 1, 2] }],
+            inner: [{ index: 0, instructions: [{ program: SYSTEM, data: "3Bxs4h24hBtQy9rw", stackHeight: 2 }, ...authorExitEvents] }],
+            logs: authorExitLogs,
           }),
           blockTx({
             label: "settle",

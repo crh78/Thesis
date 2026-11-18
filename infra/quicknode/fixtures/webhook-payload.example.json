@@ -60,6 +60,32 @@
       ]
     },
     {
+      "signature": "65AjqwmSgmS7qmG2GiiarL68vWzjNQFjymF7K2vvugaBWkVj4Rehckhwc9nxhc12KXXN8tE4cQAQTDxTATQK5zeD",
+      "slot": 380000001,
+      "blockTime": 1800000001,
+      "instructions": [
+        "exit_position"
+      ],
+      "events": [
+        "nS/u4iqY5BEnp53rkNkpV9n7XzZSHOkKFioFQayqQY1ZBKfPa5QYycowd5nMtCfHVwo/CkiW66VxEmrwjJE9gz+89KVJ9Sb/muaBodb9mUIYWjy+110Sit8q4uiTGMVDhTre+vCBrHUAgDuxagAAAAAAAAAAAAAAAA==",
+        "IaVJA4ecdpUnp53rkNkpV9n7XzZSHOkKFioFQayqQY1ZBKfPa5QYyZrmgaHW/ZlCGFo8vtddEorfKuLokxjFQ4U63vrwgax1gDuxagAAAAA="
+      ],
+      "logs": [
+        "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [1]",
+        "Program log: Instruction: ExitPosition",
+        "Program 11111111111111111111111111111111 invoke [2]",
+        "Program 11111111111111111111111111111111 success",
+        "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [2]",
+        "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 2700 of 200000 compute units",
+        "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success",
+        "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe invoke [2]",
+        "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 2700 of 200000 compute units",
+        "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success",
+        "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe consumed 30000 of 200000 compute units",
+        "Program HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe success"
+      ]
+    },
+    {
       "signature": "5j2Ck4GANbTuHDtTm5hJgNgS7L7pyAeX6kmXFBbeSinPTHtEXRRVkmvdguz4wsQVVBrMP6Fo7vn8tPmErwRefFkm",
       "slot": 380000001,
       "blockTime": 1800000001,
