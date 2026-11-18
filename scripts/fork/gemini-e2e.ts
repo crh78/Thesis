@@ -18,10 +18,12 @@ import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { USDC_MINT_MAINNET, escrowVaultAddress, profileAddress, thesisProgram } from "@thesis/chain";
 import { loadBankState } from "@thesis/venues/bank";
-import { ineligible, type GeminiContract } from "@thesis/venues/gemini";
+import { fetchGeminiEvent, geminiProxy } from "@thesis/venues/gemini";
+import { envVar } from "../../packages/venues/registry/src/lib/env.ts";
 import { forkApiServer } from "./api/server.ts";
 import type { AppTake } from "./api/service.ts";
 import { startForkService } from "./api.ts";
+import { pickLiveContract } from "./gemini-pick.ts";
 import { REPO_ROOT, RPC_URL, connection, main, syncClock } from "./lib.ts";
 
 function settlerTick(): string {
@@ -36,15 +38,13 @@ async function e2e(): Promise<void> {
   const lead = await syncClock();
   if (lead > 120) throw new Error(`The fork's clock is ${lead}s ahead of real time: restart the fork.`);
 
-  // A contract with a real two-sided market on both sides, priced away from the edges.
+  // A contract with a real two-sided market on both sides, priced away from the edges, that also
+  // reads live through the proxy (the fork API trades only on a live read).
   const bank = await loadBankState();
   const now = Date.now();
-  const pick = Object.values(bank.venues.gemini?.contracts ?? {}).find(
-    (c: GeminiContract) =>
-      !ineligible(c, "yes", now) && !ineligible(c, "no", now) && c.ask.yes! >= 0.15 && c.ask.yes! <= 0.85 &&
-      Date.parse(c.expiry!) > now + 2 * 86_400_000,
-  );
-  if (!pick) throw new Error("No eligible Gemini contract in the asset bank: run asset-bank --once --tiers=gemini");
+  const proxy = geminiProxy(envVar);
+  const pick = await pickLiveContract(Object.values(bank.venues.gemini?.contracts ?? {}), (ticker) =>
+    fetchGeminiEvent(proxy, ticker, (input, init) => fetch(input, { signal: AbortSignal.timeout(15_000), ...init })), now);
   console.log(`contract ${pick.instrumentSymbol} "${pick.eventTitle} · ${pick.label}" yes ask ${pick.ask.yes} bid ${pick.bid.yes}, no ask ${pick.ask.no} bid ${pick.bid.no}`);
 
   const take: AppTake = {
