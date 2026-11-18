@@ -1,7 +1,8 @@
 name: Supabase
 
 # The SQL tests in supabase/tests/ against a fresh local database with every migration applied,
-# so a migration mistake shows up on the PR. Only on PRs that touch supabase/
+# so a migration mistake shows up on the PR, and every edge function's typecheck and tests. Only on
+# PRs that touch supabase/
 on:
   pull_request:
     paths:
@@ -33,5 +34,35 @@ jobs:
           for f in supabase/tests/*.sql; do
             echo "::group::$f"
             psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -q -f "$f"
+            echo "::endgroup::"
+          done
+
+  functions:
+    name: Edge functions (typecheck and test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # Every function folder: deno check its index.ts, and run its *_test.ts (no network calls,
+      # no model; tests stub fetch and DNS). _shared has tests but no entry point. A folder without
+      # its own deno.json uses a bare config, so Deno doesn't pick up the repo's package.json.
+      - name: Typecheck and test every function
+        working-directory: supabase/functions
+        run: |
+          set -euo pipefail
+          fallback="$RUNNER_TEMP/deno.json"
+          echo '{"nodeModulesDir":"none"}' > "$fallback"
+          for dir in */; do
+            fn="${dir%/}"
+            if [ -f "$fn/deno.json" ]; then cfg=(--config deno.json); else cfg=(--config "$fallback" --no-lock); fi
+            echo "::group::$fn"
+            if [ -f "$fn/index.ts" ]; then (cd "$fn" && deno check "${cfg[@]}" index.ts); fi
+            if compgen -G "$fn/*_test.ts" > /dev/null; then
+              (cd "$fn" && deno test "${cfg[@]}" --allow-env --allow-read --allow-net .)
+            fi
             echo "::endgroup::"
           done
