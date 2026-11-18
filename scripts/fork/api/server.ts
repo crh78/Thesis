@@ -3,7 +3,9 @@
 //   GET  /health
 //   GET  /takes/:id?viewer=<wallet>                 the on-chain receipt (or what would be on-chain): status
 //                                                     open | closed (its author sold) | settled, closedAt
-//   POST /takes/:id/trades   { owner, side, usd }   → { buildId, transactions[], included, excluded, feeUsd };
+//   POST /takes/:id/trades   { owner, side, usd, prebuild? }  → { buildId, transactions[], included, excluded, feeUsd,
+//                                                     expiresAt, quotedAt }; prebuild: built ahead of the tap (its own
+//                                                     per-wallet window; the money action counts at submit)
 //                                                     409 take_closed once the take isn't open
 //   POST /takes/:id/positions/:pos/exit  { owner }  → a sale's build, with closesTake (the author's buy-in)
 //   POST /takes/:id/publish  { author, usd }        → same, for posting an app take with the author's buy-in
@@ -14,6 +16,8 @@
 //                                                     buildId, signatures } once the fork accepted them all. The
 //                                                     same build and bytes again: its status; other bytes: 409
 //                                                     build_used. `timings`: the client's marks (ms from the tap)
+//   POST /builds/:buildId/refresh                   → the build again with a fresh blockhash (same id, new
+//                                                     transactions, expiresAt); 409 quote_stale, 410 build_gone
 //   GET  /submissions/:buildId?wait=<ms ≤ 10000>     → { status: pending | landed | failed | incomplete, signatures,
 //                                                     error?, incomplete? }, waiting while pending
 //
@@ -43,7 +47,7 @@
 // off: play money stays on the fork. See api/guard.ts and the README's "Abuse limits".
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { checkWalletAuth } from "./creator-fees.ts";
-import type { Guard } from "./guard.ts";
+import { rateLimited, type Guard } from "./guard.ts";
 import { Timings, parseKey } from "./common.ts";
 import { ApiError, SUBMISSION_WAIT_MAX_MS, type ForkService } from "./service.ts";
 
@@ -128,6 +132,19 @@ const num = (v: unknown, name: string) => {
 };
 
 /**
+ * What a prebuild needs from the guard (api/guard.ts): who's asking, without counting a money
+ * action (`checkAuth`), and counting it when the prebuilt trade is submitted (`countMoney`, which
+ * throws 429 past the limit). A guard without both counts a prebuild as a money action, as any build.
+ */
+type PrebuildGuard = {
+  checkAuth?: (req: IncomingMessage, wallet: string, route: string) => Promise<unknown>;
+  countMoney?: (wallet: string) => void;
+};
+
+/** Prebuilds (`prebuild: true`) a wallet may ask for in a minute: the sheet builds as the amount changes. */
+export const PREBUILDS_PER_MINUTE = 30;
+
+/**
  * `digest`: runs today's position digests now (POST /digests), when the caller wires it.
  * `guard`: abuse limits (api/guard.ts); without one every route is open, as on a private fork.
  * `cors`: origins whose browsers may call directly (parseCorsOrigins); empty or none: no CORS.
@@ -146,6 +163,26 @@ export function forkApiServer(
   const money = async (req: IncomingMessage, wallet: string, route: string) => {
     parseKey(wallet);
     if (guard) await guard.checkMoney(req, wallet, route);
+  };
+  const g = guard as (Guard & PrebuildGuard) | undefined;
+  /** The guard can check a prebuild's caller without counting it: its money action counts at submit. */
+  const deferMoney = Boolean(g && typeof g.checkAuth === "function" && typeof g.countMoney === "function");
+  /** Wallet → its prebuilds in the last minute. */
+  const prebuilds = new Map<string, number[]>();
+  /**
+   * A build route's limits: a money action, or with `prebuild` (and a guard that can defer it) the
+   * caller's check and the wallet's own window of PREBUILDS_PER_MINUTE.
+   */
+  const buildLimits = async (req: IncomingMessage, wallet: string, route: string, prebuild: boolean) => {
+    if (!prebuild || !deferMoney) return money(req, wallet, route);
+    parseKey(wallet);
+    await g!.checkAuth!(req, wallet, route);
+    const now = Date.now();
+    const recent = (prebuilds.get(wallet) ?? []).filter((at) => at > now - 60_000);
+    if (recent.length >= PREBUILDS_PER_MINUTE) throw rateLimited(recent[0] + 60_000 - now, "price checks");
+    recent.push(now);
+    prebuilds.set(wallet, recent);
+    if (prebuilds.size > 10_000) for (const [k, list] of prebuilds) if (!list.some((at) => at > now - 60_000)) prebuilds.delete(k);
   };
   /** Builds that call Jupiter wait their turn behind the guard's queue (the wait is step `queue`). */
   const queued = <T>(work: () => Promise<T>, t?: Timings) => {
@@ -200,9 +237,10 @@ export function forkApiServer(
           if (!side) throw new ApiError(400, "invalid_side");
           const owner = str(b.owner, "owner");
           const usd = num(b.usd, "usd");
-          await money(req, owner, "trades");
+          const prebuild = b.prebuild === true;
+          await buildLimits(req, owner, "trades", prebuild);
           const t = timed();
-          return send(200, await queued(() => service.buildTrade(parts[1], owner, side, usd, { timings: t }), t));
+          return send(200, await queued(() => service.buildTrade(parts[1], owner, side, usd, { timings: t, prebuild }), t));
         }
         if (m === "POST" && parts[2] === "positions" && parts[3] && parts[4] === "exit" && parts.length === 5) {
           const owner = str((await body(req)).owner, "owner");
@@ -219,9 +257,10 @@ export function forkApiServer(
           const b = await body(req);
           const author = str(b.author, "author");
           const usd = num(b.usd, "usd");
-          await money(req, author, "publish");
+          const prebuild = b.prebuild === true;
+          await buildLimits(req, author, "publish", prebuild);
           const t = timed();
-          return send(200, await queued(() => service.buildPublish(parts[1], author, usd, { timings: t }), t));
+          return send(200, await queued(() => service.buildPublish(parts[1], author, usd, { timings: t, prebuild }), t));
         }
       }
       // No token needed: the API only sends what it built, and checks the owner's signature on it.
@@ -231,8 +270,21 @@ export function forkApiServer(
         if (!Array.isArray(b.transactions) || !b.transactions.every((t) => typeof t === "string")) throw new ApiError(400, "missing_transactions");
         if (b.until !== undefined && b.until !== "accepted" && b.until !== "confirmed") throw new ApiError(400, "invalid_until", 'until is "accepted" or left out');
         const t = timed();
-        const r = await service.submit(str(b.buildId, "buildId"), b.transactions as string[], { timings: t, clientTimings: b.timings, until: b.until === "accepted" ? "accepted" : undefined });
+        const r = await service.submit(str(b.buildId, "buildId"), b.transactions as string[], {
+          timings: t,
+          clientTimings: b.timings,
+          until: b.until === "accepted" ? "accepted" : undefined,
+          // A prebuilt trade's money action counts now, once it's really being sent.
+          admit: deferMoney ? ({ owner, prebuilt }) => void (prebuilt && g!.countMoney!(owner)) : undefined,
+        });
         return send(r.status === "pending" ? 202 : 200, r);
+      }
+      // A fresh blockhash for a build (no Jupiter call): harmless, so it counts as a read.
+      if (m === "POST" && parts[0] === "builds" && parts[1] && parts[2] === "refresh" && parts.length === 3) {
+        if (!UUID.test(parts[1])) throw new ApiError(400, "invalid_build_id");
+        guard?.checkRead(req);
+        const t = timed();
+        return send(200, await service.refreshBuild(parts[1], { timings: t }));
       }
       if (m === "GET" && parts[0] === "submissions" && parts[1] && parts.length === 2) {
         if (!UUID.test(parts[1])) throw new ApiError(400, "invalid_build_id");

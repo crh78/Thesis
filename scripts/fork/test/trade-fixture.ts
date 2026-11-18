@@ -75,7 +75,7 @@ export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
     return data ? { data, owner: program.programId, lamports: 1, executable: false, rentEpoch: 0 } : null;
   };
   const sent: VersionedTransaction[] = [];
-  const refreshed: PublicKey[][] = [];
+  const refreshed: { accounts: PublicKey[]; freshMs?: number }[] = [];
   const connection = {
     getAccountInfo: async (key: PublicKey) => info(key),
     getAccountInfoAndContext: async (key: PublicKey) => ({ context: { slot: 1 }, value: info(key) }),
@@ -105,7 +105,7 @@ export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
     bases: null,
     jupiterApiKey: null,
     statePath,
-    fork: { addUsdc: async () => 0n, setUsdc: async () => {}, refreshMarkets: async (a: PublicKey[]) => void refreshed.push(a), ...o.fork },
+    fork: { addUsdc: async () => 0n, setUsdc: async () => {}, refreshMarkets: async (a: PublicKey[], r?: { freshMs?: number }) => void refreshed.push({ accounts: a, freshMs: r?.freshMs }), ...o.fork },
     log: (m) => logs.push(m),
   };
   const service = new ForkService(options);

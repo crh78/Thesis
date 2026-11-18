@@ -128,15 +128,29 @@ export function thesisLookupTable(): PublicKey | null {
  * oracles go stale within minutes and swaps start failing. Re-fetch the accounts a trade reads
  * from mainnet, and bring the fork's clock up to wall time (never backwards), or fresh pools look
  * "from the future". Never pass the user's own accounts: they only exist on the fork.
+ *
+ * `freshMs`: accounts this process reset less than that long ago are left as they are (`fresh`),
+ * and when none needed a reset the clock isn't touched either. 0 (the default): every account.
  */
-export async function refreshMarkets(accounts: PublicKey[]): Promise<{ reset: number; skipped: number }> {
-  const unique = [...new Set(accounts.map(String))];
+export async function refreshMarkets(accounts: PublicKey[], o: { freshMs?: number } = {}): Promise<{ reset: number; skipped: number; fresh: number }> {
+  const now = Date.now();
+  const all = [...new Set(accounts.map(String))];
+  const unique = all.filter((k) => !o.freshMs || (resetAt.get(k) ?? -Infinity) <= now - o.freshMs);
+  if (o.freshMs && !unique.length) return { reset: 0, skipped: 0, fresh: all.length };
   // Some accounts can't be reset (programs, sysvars); those don't go stale anyway.
   const results = await Promise.allSettled(unique.map((k) => rpc("surfnet_resetAccount", [k])));
+  // Ones that can't be reset count as fresh too: they're not market state.
+  for (const k of unique) resetAt.set(k, now);
+  if (resetAt.size > RESETS_KEPT) for (const [k, at] of resetAt) if (at <= now - 60_000) resetAt.delete(k);
   const failed = results.filter((r) => r.status === "rejected").length;
   await syncClock();
-  return { reset: unique.length - failed, skipped: failed };
+  return { reset: unique.length - failed, skipped: failed, fresh: all.length - unique.length };
 }
+
+/** Account → when this process last reset it from mainnet (refreshMarkets' `freshMs`). */
+const resetAt = new Map<string, number>();
+/** Past this many, entries over a minute old are dropped. */
+const RESETS_KEPT = 5_000;
 
 async function forkTime(): Promise<number> {
   const info = await connection().getAccountInfo(new PublicKey("SysvarC1ock11111111111111111111111111111111"), "processed");

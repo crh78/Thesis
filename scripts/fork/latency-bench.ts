@@ -4,9 +4,10 @@
 // Starts the fork API in-process on a spare port with the abuse limits in front (a service key it
 // makes up for the run, as the X agent would use), then per run: a throwaway wallet (a local
 // keypair, no profile) gets cash, backs a take made up for the run (it never reaches Supabase, so
-// no feed or board shows it), and sells the position, each submitted as the apps do (until
-// "accepted", then the /submissions status watch until it landed). It times each request from here, reads each
-// response's Server-Timing (where the server's time went), and prints p50 and p90.
+// no feed or board shows it), and sells the position. As in the apps, the back is prebuilt and
+// refreshed, and both are submitted until "accepted", then watched on /submissions until they
+// land. It times each request from here, reads each response's Server-Timing (where the server's
+// time went), and prints p50 and p90.
 //
 // Never moves the fork's clock. Each run costs a few Jupiter calls per leg (quotes, swap
 // instructions), so keep --runs small: the free Jupiter key is shared with the live API.
@@ -117,8 +118,15 @@ async function bench(): Promise<void> {
       const me = user.publicKey.toBase58();
       ok("deposit", await call("POST", `/wallets/${me}/deposits`, { usd: usd * 2 }));
 
-      const built = ok("back build", await call("POST", `/takes/${TAKE.id}/trades`, { owner: me, side: "back", usd }, "back build"));
-      await accepted("back", built.json, user);
+      // As the apps do: build when the sheet opens (prebuild), refresh it before it expires, tap.
+      const built = ok("back build", await call("POST", `/takes/${TAKE.id}/trades`, { owner: me, side: "back", usd, prebuild: true }, "back build"));
+      if (typeof built.json.expiresAt !== "number" || typeof built.json.quotedAt !== "number") throw new Error(`back build: no expiresAt/quotedAt in ${JSON.stringify(built.json)}`);
+      const refreshed = ok("back refresh", await call("POST", `/builds/${built.json.buildId}/refresh`, undefined, "back refresh"));
+      if (refreshed.json.buildId !== built.json.buildId || refreshed.json.quotedAt !== built.json.quotedAt) throw new Error(`back refresh: ${JSON.stringify(refreshed.json)}`);
+      // The transactions answered before the refresh can't be sent any more.
+      const stale = await call("POST", "/submit", { buildId: built.json.buildId, transactions: sign(built.json.transactions, user), until: "accepted" });
+      if (stale.status !== 400 || stale.json.error !== "transaction_changed") throw new Error(`stale submit: ${stale.status} ${JSON.stringify(stale.json)}`);
+      await accepted("back", refreshed.json, user);
 
       const receipt = ok("receipt", await call("GET", `/takes/${TAKE.id}?viewer=${me}`));
       const mine = receipt.json.viewerPositions?.find((p: any) => !p.exited);
