@@ -66,7 +66,6 @@ import {
   USD,
   checkAmount,
   errorText,
-  logSlow,
   legAssets,
   parseKey,
   randomPositionId,
@@ -74,6 +73,8 @@ import {
   takeClosedError,
   takeOpen,
   takeStatusName,
+  Timings,
+  clientMarks,
   type AppTake,
   type ExitReceipt,
   type IncompleteTrade,
@@ -84,7 +85,7 @@ import { dailyDigests } from "./digests.ts";
 import { PortfolioHistory } from "./history.ts";
 import { contractResolver, escrowedKind, mapLegs, nameResolver, onChainLegs, perpResolver, sameLegs, type AppLeg, type ContractResolver, type MappedLeg, type NameResolver, type PerpResolver } from "./legs.ts";
 import { PhoenixDesk } from "./phoenix.ts";
-import { Router, escrowShare, type TradeLeg } from "./routing.ts";
+import { Router, escrowShare, type TradeKind, type TradeLeg } from "./routing.ts";
 import { SplitTrades, afterFailure, deserializeIx, incompleteView, serializeIx, sweepLegs } from "./split.ts";
 import { StateStore } from "./store.ts";
 import { Valuation } from "./valuation.ts";
@@ -162,6 +163,11 @@ type Build = {
    */
   cleanup?: number;
 };
+
+/** What every build route takes besides its own fields. `timings`: the request's (server.ts sends them as Server-Timing). */
+export type BuildOpts = { timings?: Timings };
+/** `clientTimings`: the submit body's `timings` (the client's marks), logged with the build id. */
+export type SubmitOpts = { timings?: Timings; clientTimings?: unknown };
 
 /** What's known about one take's positions (see ForkService#positionsOf). */
 type PositionEntry = {
@@ -665,24 +671,37 @@ export class ForkService {
    * A back or a fade. A fade holds the other side of each prediction leg, filled on paper with its
    * share escrowed, and shorts the other legs on Phoenix; legs it can't short are left out with the reason.
    */
-  async buildTrade(takeId: string, owner: string, side: "back" | "fade", usd: number) {
+  async buildTrade(takeId: string, owner: string, side: "back" | "fade", usd: number, o: BuildOpts = {}) {
     const ownerKey = parseKey(owner);
-    const started = Date.now();
-    const { address, venue, included, excluded, ix, position, feeUsd, escrowUsd, mirrorMs } =
-      await this.#prepareBack(takeId, ownerKey, usd, this.#o.appPayer.publicKey, undefined, side).catch((e: unknown) => {
-        if (side === "fade" && e instanceof ApiError && e.code === "nothing_tradable") throw new ApiError(409, "fade_unavailable", FADE_NOTHING);
-        throw e;
-      });
-    const prepared = Date.now();
-    const receiptCu = side === "back" ? THESIS_COMPUTE_UNITS.back : THESIS_COMPUTE_UNITS.fade;
-    const built = await this.#compose(venue, ix, receiptCu, ownerKey, "back", position, true, false, {
-      trade: { takeId, side, usd, included, receipt: ix, receiptCu },
+    const t = o.timings ?? new Timings();
+    return this.#timed(`${side} build ${takeId.slice(0, 8)}`, t, async () => {
+      const { address, venue, included, excluded, ix, position, feeUsd, escrowUsd } =
+        await this.#prepareBack(takeId, ownerKey, usd, this.#o.appPayer.publicKey, undefined, side, t).catch((e: unknown) => {
+          if (side === "fade" && e instanceof ApiError && e.code === "nothing_tradable") throw new ApiError(409, "fade_unavailable", FADE_NOTHING);
+          throw e;
+        });
+      const receiptCu = side === "back" ? THESIS_COMPUTE_UNITS.back : THESIS_COMPUTE_UNITS.fade;
+      const composed = await t.time("compose", () => this.#compose(venue, ix, receiptCu, ownerKey, "back", position, true, false, {
+        trade: { takeId, side, usd, included, receipt: ix, receiptCu },
+      }));
+      return { ...composed, take: address.toBase58(), side, stakeUsd: usd, feeUsd, escrowUsd, included, excluded };
     });
-    // Where a slow build's time went (target: a trade lands in under 5 s).
-    logSlow(this.#log, `${side} build ${takeId.slice(0, 8)}`, Date.now() - started, {
-      "put on-chain": mirrorMs, "legs and quotes": prepared - started - mirrorMs, compose: Date.now() - prepared,
-    });
-    return { ...built, take: address.toBase58(), side, stakeUsd: usd, feeUsd, escrowUsd, included, excluded };
+  }
+
+  /**
+   * Runs one build, refresh or submit, then logs where its time went (`what`, the build id when
+   * there is one, and each step), whether it worked or failed.
+   */
+  async #timed<T>(what: string, t: Timings, work: () => Promise<T>, id?: (r: T) => string | undefined): Promise<T> {
+    try {
+      const r = await work();
+      const buildId = id ? id(r) : (r as { buildId?: string })?.buildId;
+      this.#log(`timing ${what}${buildId ? ` ${buildId.slice(0, 8)}` : ""} ${t.line()}`);
+      return r;
+    } catch (e) {
+      this.#log(`timing ${what} failed (${e instanceof ApiError ? e.code : "error"}) ${t.line()}`);
+      throw e;
+    }
   }
 
   /**
@@ -690,16 +709,21 @@ export class ForkService {
    * yield leg's jlUSDC, and `exit_position` records the sale in the same transaction. The program
    * lets each position exit once; it then scores on the settler's prices at the sale.
    */
-  async buildExit(takeId: string, address: string, wallet: string) {
+  async buildExit(takeId: string, address: string, wallet: string, o: BuildOpts = {}) {
+    const t = o.timings ?? new Timings();
+    return this.#timed(`sale build ${takeId.slice(0, 8)}`, t, () => this.#buildExit(takeId, address, wallet, t));
+  }
+
+  async #buildExit(takeId: string, address: string, wallet: string, t: Timings) {
     const owner = parseKey(wallet);
     const position = parseKey(address);
     const mirror = this.#state.takes[takeId];
     if (!mirror) throw new ApiError(404, "take_missing");
     const takeKey = new PublicKey(mirror.address);
-    const [take, holding] = await Promise.all([
+    const [take, holding] = await t.time("position", () => Promise.all([
       this.#program.account.take.fetchNullable(takeKey),
       this.#program.account.position.fetchNullable(position),
-    ]);
+    ]));
     if (!holding?.owner.equals(owner) || !holding.take.equals(takeKey)) throw new ApiError(404, "position_missing");
     if (holding.exited) throw new ApiError(409, "already_exited", "This position has already been sold.");
     // Any status before the horizon: holders can sell after the author has (the take closed or settled).
@@ -715,6 +739,7 @@ export class ForkService {
     const phoenixAssets = new Set(onPhoenix.map((i) => take.legs[i].asset.toBuffer().toString("hex")));
     if (onPhoenix.length && !this.#phoenix) throw new ApiError(422, "not_sellable", "Phoenix isn't connected on this fork.");
 
+    const inventoryStarted = Date.now();
     const bought = await this.#valuation.bought(position, owner);
     const tokens = this.#o.bank().tokens;
     // A spot leg's asset is its underlying; a yield leg's is the vault token itself (`token:<mint>`).
@@ -735,6 +760,7 @@ export class ForkService {
       const balance = await this.#o.connection.getTokenAccountBalance(ata, "confirmed").then((r) => BigInt(r.value.amount)).catch(() => 0n);
       if (balance < amount) throw new ApiError(409, "insufficient_tokens", "Your wallet no longer holds all the tokens this position bought.");
     }));
+    t.add("inventory", Date.now() - inventoryStarted);
     const jupiter = new JupiterClient(this.#o.jupiterApiKey, 0);
     const payer = this.#o.appPayer.publicKey;
     const usdc = USDC_MINT_MAINNET.toBase58();
@@ -765,29 +791,30 @@ export class ForkService {
       }
       return usd;
     };
-    const [shareValue, redeemLegs] = await Promise.all([
+    const [shareValue, redeemLegs] = await t.time("redeems", () => Promise.all([
       redeems.length ? redeemValue() : Promise.resolve(0),
       Promise.all(redeems.map(({ amount }) => jupiterLendRedeem({ user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey! }))),
-    ]);
+    ]));
     if (shareValue == null) throw new ApiError(422, "no_exit_route", "Couldn't price this position's yield shares.");
     // Phoenix legs: close each child's position. The cash stays in the child until the app sweeps
     // it (`buildPhoenixCashOut`), since Phoenix won't withdraw more than is there.
     const appLegs = onPhoenix.length ? (await this.#appTake(takeId).catch(() => null))?.legs : undefined;
     const names = new Map(take.legs.map((_, i) => [i, appLegs?.[i]?.name ?? `Leg ${i + 1}`] as const));
     const [closes, phoenixWorth] = onPhoenix.length
-      ? await Promise.all([this.#phoenix!.closeLegs(position, owner, names), this.#phoenix!.valueAndNotional(position, owner)])
+      ? await t.time("phoenix", () => Promise.all([this.#phoenix!.closeLegs(position, owner, names), this.#phoenix!.valueAndNotional(position, owner)]))
       : [[] as VenueLeg[], { usd: 0, notional: 0 }];
     if (phoenixWorth === null) throw new ApiError(422, "no_exit_route", "Phoenix has no price for one of this position's markets right now.");
     const quoteExit = async (maxAccounts: number) => {
-      const swaps = await Promise.all(inventory.filter((l) => !l.isYield).map(async ({ mint, amount }) => {
+      const swaps = await t.time("quotes", () => Promise.all(inventory.filter((l) => !l.isYield).map(async ({ mint, amount }) => {
         const { quote } = await jupiter.quoteExactIn(mint, usdc, amount, { ...this.#router.route, maxAccounts });
         if (!quote || quote.inputMint !== mint || quote.outputMint !== usdc || quote.inAmount !== amount.toString()) throw new ApiError(422, "no_exit_route", "No route to sell every token in this position.");
         return { quote, venue: await jupiterBuy({ quote, user: owner, payer, label: `Sell ${tokens[mint].symbol}`, apiKey: this.#o.jupiterApiKey }) };
-      }));
+      })));
+      t.quotedAt ??= Date.now();
       const venues: VenueLeg[] = [...closes, ...swaps.map((q) => q.venue), ...redeemLegs];
       // A sale with Phoenix closes may take several transactions (each order is ~640 bytes);
       // the exit is recorded in the last one.
-      const built = await this.#compose(venues, ix, THESIS_COMPUTE_UNITS.exitPosition, owner, "exit", { take: takeKey, address: position, exit }, false, closes.length > 0);
+      const built = await t.time("compose", () => this.#compose(venues, ix, THESIS_COMPUTE_UNITS.exitPosition, owner, "exit", { take: takeKey, address: position, exit }, false, closes.length > 0));
       const swapped = (k: "outAmount" | "otherAmountThreshold") => Number(swaps.reduce((n, q) => n + BigInt(q.quote[k]), 0n)) / USD;
       // The sale pays the escrow back in full, in the same transaction. Phoenix legs close at
       // most 1% from the mid (DEFAULT_SLIPPAGE).
@@ -938,15 +965,13 @@ export class ForkService {
     return { address, take };
   }
 
-  async #prepareBack(takeId: string, owner: PublicKey, usd: number, payer: PublicKey, maxLegs?: number, side: "back" | "fade" = "back") {
+  async #prepareBack(takeId: string, owner: PublicKey, usd: number, payer: PublicKey, maxLegs?: number, side: "back" | "fade" = "back", t = new Timings()) {
     checkAmount(usd);
-    await this.#checkFunds(owner, usd);
-    const app = await this.#appTake(takeId);
+    await t.time("funds", () => this.#checkFunds(owner, usd));
+    const app = await t.time("take", () => this.#appTake(takeId));
     // Nobody but the author knows a posting take's id; still, nothing trades it before it's on-chain.
     if (app.status === "posting") throw new ApiError(409, "take_posting", "This take isn't on-chain yet.");
-    const mirrorStarted = Date.now();
-    const existing = maxLegs === undefined ? await this.#ensureOnChain(takeId, app) : await this.#existingBlinkTake(takeId, app);
-    const mirrorMs = Date.now() - mirrorStarted;
+    const existing = await t.time("mirror", () => (maxLegs === undefined ? this.#ensureOnChain(takeId, app) : this.#existingBlinkTake(takeId, app)));
     if (!existing || !takeOpen(existing.take)) {
       if (maxLegs !== undefined) throw new ApiError(409, "take_closed", "This take is not open on the fork.");
       throw takeClosedError(existing?.take);
@@ -954,11 +979,14 @@ export class ForkService {
     const { address, take } = existing;
     // Authors can't fade their own take. The program refuses it too; this says why before a build.
     if (side === "fade" && take.author.equals(owner)) throw new ApiError(409, "cannot_fade_own_take", FADE_OWN_TAKE);
-    const [{ venue, included, excluded }, config] = await Promise.all([
+    // Routing may add its own steps (quotes, swap instructions) to `timings`.
+    const kind: TradeKind & { timings?: Timings } = { side, paper: maxLegs === undefined, timings: t };
+    const [{ venue, included, excluded }, config] = await t.time("legs", () => Promise.all([
       // The Blink (maxLegs) buys spot and yield legs only: Gemini legs are in the app.
-      this.#router.venueLegs(onChainLegs(this.#mapLegs(app.legs), take.legs), owner, usd, payer, maxLegs, { side, paper: maxLegs === undefined }),
+      this.#router.venueLegs(onChainLegs(this.#mapLegs(app.legs), take.legs), owner, usd, payer, maxLegs, kind),
       this.#config(),
-    ]);
+    ]));
+    t.quotedAt ??= Date.now();
     const mask = included.reduce((m, i) => m | (1 << i), 0);
     const id = randomPositionId();
     const stake = Math.round(usd * USD);
@@ -970,7 +998,7 @@ export class ForkService {
     this.#recordPhoenix(position.address, owner, venue);
     const fee = splitFee(BigInt(stake), config.params, { isAuthor: take.author.equals(owner) });
     const escrow = escrowShare(onChainLegs(this.#mapLegs(app.legs), take.legs).filter((l) => included.includes(l.index)), BigInt(stake));
-    return { address, venue, included, excluded, ix, position, feeUsd: Number(fee.fee) / USD, escrowUsd: Number(escrow) / USD, mirrorMs };
+    return { address, venue, included, excluded, ix, position, feeUsd: Number(fee.fee) / USD, escrowUsd: Number(escrow) / USD };
   }
 
   /** Notes which Phoenix child each Phoenix leg of `position` trades in (deposit and order share one). */
@@ -1304,7 +1332,7 @@ export class ForkService {
   }
 
   /** Sends a sweep. When it lands the trade is over; a partly landed one notes what it sold. */
-  async #submitSweep(build: Build, txs: VersionedTransaction[]) {
+  async #submitSweep(build: Build, txs: VersionedTransaction[], t?: Timings) {
     const position = build.position.address.toBase58();
     const signatures = await this.#store.withWallet(build.owner, async () => {
       // Re-checked here, after any earlier submit for this wallet: the trade must still be stopped.
@@ -1313,7 +1341,7 @@ export class ForkService {
       }
       this.#dropBuildsFor(build.position.address);
       try {
-        return await this.#send(txs, build.market);
+        return await this.#send(txs, build.market, t);
       } catch (e) {
         const landed = e instanceof SendFailed ? e.landed.length : 0;
         const rec = this.#split.get(build.owner, position);
@@ -1367,11 +1395,11 @@ export class ForkService {
   }
 
   /** Sends a claim's transactions one by one; reports any that failed after one landed. */
-  async #submitClaim(build: Build, txs: VersionedTransaction[]) {
+  async #submitClaim(build: Build, txs: VersionedTransaction[], t?: Timings) {
     const signatures: string[] = [];
     try {
       await this.#store.withWallet(build.owner, async () => {
-        for (const tx of txs) signatures.push(...(await this.#send([tx], [])));
+        for (const tx of txs) signatures.push(...(await this.#send([tx], [], t)));
       });
     } finally {
       this.#fees.forget(build.owner, build.claims ?? []);
@@ -1383,11 +1411,16 @@ export class ForkService {
   }
 
   /** Posts an app take on-chain with the author's own buy-in, signed by their wallet. */
-  async buildPublish(takeId: string, author: string, usd: number) {
+  async buildPublish(takeId: string, author: string, usd: number, o: BuildOpts = {}) {
+    const t = o.timings ?? new Timings();
+    return this.#timed(`publish build ${takeId.slice(0, 8)}`, t, () => this.#buildPublish(takeId, author, usd, t));
+  }
+
+  async #buildPublish(takeId: string, author: string, usd: number, t: Timings) {
     const authorKey = parseKey(author);
     checkAmount(usd);
     if (this.#state.takes[takeId]) throw new ApiError(409, "already_on_chain");
-    const app = await this.#appTake(takeId, { fresh: true });
+    const app = await t.time("take", () => this.#appTake(takeId, { fresh: true }));
     // Only the take's author can put it on-chain: with someone else's wallet, the take, its creator
     // fees and its score would be theirs (posting take ids aren't secret: a feed can show one).
     if (!app.author_wallet) throw new ApiError(409, "no_author_wallet", "This take's author has no wallet yet.");
@@ -1397,14 +1430,16 @@ export class ForkService {
     // (begin_trade) and lose what the landed part recorded. Retry or sweep it first.
     const stopped = this.#split.list(authorKey.toBase58()).find(([, t]) => t.publishTakeId === takeId);
     if (stopped) throw incompleteError(stopped[0], stopped[1], 409);
-    await this.#checkFunds(authorKey, usd);
-    const [{ venue, included, excluded }, config] = await Promise.all([this.#router.venueLegs(this.#mapLegs(app.legs), authorKey, usd), this.#config()]);
+    await t.time("funds", () => this.#checkFunds(authorKey, usd));
+    const kind: TradeKind & { timings?: Timings } = { timings: t };
+    const [{ venue, included, excluded }, config] = await t.time("legs", () => Promise.all([this.#router.venueLegs(this.#mapLegs(app.legs), authorKey, usd, undefined, undefined, kind), this.#config()]));
+    t.quotedAt ??= Date.now();
     const { ix, address } = await this.#createIx(app, authorKey, usd, included);
     const position = { take: address, address: positionAddress(address, authorKey, 0n), publishTakeId: takeId };
     this.#recordPhoenix(position.address, authorKey, venue);
-    const built = await this.#compose(venue, ix, THESIS_COMPUTE_UNITS.createTake, authorKey, "publish", position, true, false, {
+    const built = await t.time("compose", () => this.#compose(venue, ix, THESIS_COMPUTE_UNITS.createTake, authorKey, "publish", position, true, false, {
       trade: { takeId, side: "back", usd, included, receipt: ix, receiptCu: THESIS_COMPUTE_UNITS.createTake },
-    });
+    }));
     return { ...built, take: address.toBase58(), stakeUsd: usd, feeUsd: Number(splitFee(BigInt(Math.round(usd * USD)), config.params, { isAuthor: true }).fee) / USD, included, excluded };
   }
 
@@ -1412,7 +1447,15 @@ export class ForkService {
    * Sends transactions this service built, after the user signed them. Each must match a built
    * message byte for byte, so the app fee payer only ever signs what it built.
    */
-  async submit(buildId: string, signed: string[]) {
+  async submit(buildId: string, signed: string[], o: SubmitOpts = {}) {
+    const t = o.timings ?? new Timings();
+    const kind = this.#builds.get(buildId)?.kind ?? "unknown";
+    const marks = clientMarks(o.clientTimings);
+    if (marks) this.#log(`client timings ${buildId.slice(0, 8)} (${kind}): ${marks}`);
+    return this.#timed(`${kind} submit`, t, () => this.#submit(buildId, signed, t), () => buildId);
+  }
+
+  async #submit(buildId: string, signed: string[], t: Timings) {
     const build = this.#builds.get(buildId);
     if (!build || build.expires < Date.now()) throw new ApiError(410, "build_expired", "Build again: transactions expire after about a minute");
     if (signed.length !== build.messages.length) throw new ApiError(400, "wrong_transaction_count");
@@ -1440,18 +1483,20 @@ export class ForkService {
       return tx;
     });
     this.#builds.delete(buildId);
-    if (build.kind === "claim") return this.#submitClaim(build, txs);
+    if (build.kind === "claim") return this.#submitClaim(build, txs, t);
     if (build.kind === "phoenix") {
-      const signatures = await this.#store.withWallet(build.owner, () => this.#send(txs, build.market));
+      const signatures = await this.#store.withWallet(build.owner, () => this.#send(txs, build.market, t));
       this.#wallets.forgetActivity(build.owner);
       void this.#history.snapshot(build.owner).catch(() => {});
       return { signatures };
     }
-    if (build.kind === "sweep") return this.#submitSweep(build, txs);
+    if (build.kind === "sweep") return this.#submitSweep(build, txs, t);
     const cleanup = txs.splice(txs.length - (build.cleanup ?? 0));
     const positionKey = build.position.address.toBase58();
     this.#inFlight.add(positionKey);
+    const queued = Date.now();
     const signatures = await this.#store.withWallet(build.owner, async () => {
+      t.add("lock", Date.now() - queued);
       if (build.expires < Date.now()) throw new ApiError(410, "build_expired", "Build again: transactions expire after about a minute");
       if (build.position.exit) {
         const held = await this.#program.account.position.fetchNullable(build.position.address, "confirmed");
@@ -1461,13 +1506,14 @@ export class ForkService {
       this.#wallets.forgetActivity(build.owner);
       let sent: string[];
       try {
-        sent = await this.#send(txs, build.market);
+        sent = await this.#send(txs, build.market, t);
       } catch (e) {
         // The cleanup rides after the trade, so it wasn't sent: look again on the next build.
         if (cleanup.length) this.#split.suspect(build.owner);
         throw this.#stopped(build, e);
       }
       this.#wallets.forgetActivity(build.owner);
+      const bookkeeping = Date.now();
       // A retry's position opened over the transactions that landed first, too.
       const confirmed = [...(build.retry?.signatures ?? []), ...sent];
       this.#split.delete(positionKey);
@@ -1492,8 +1538,10 @@ export class ForkService {
         this.#takeCache.delete(publishTakeId);
       }
       if (build.kind !== "exit") this.#save();
+      t.add("bookkeeping", Date.now() - bookkeeping);
       return confirmed;
     }).finally(() => this.#inFlight.delete(positionKey));
+    const cleanupStarted = Date.now();
     for (const tx of cleanup) {
       await this.#send([tx], []).then(
         ([sig]) => this.#log(`cancelled abandoned trade tickets of ${build.owner} -> ${sig}`),
@@ -1503,10 +1551,11 @@ export class ForkService {
         },
       );
     }
+    if (cleanup.length) t.add("cleanup", Date.now() - cleanupStarted);
     void this.#history.snapshot(build.owner).catch(() => {});
     // The take goes live when the backend sees its takeCreated: deliver it now rather than
     // waiting for the relay, so the author's "posting…" clears as soon as this returns.
-    if (build.position.publishTakeId) await this.#relay(signatures);
+    if (build.position.publishTakeId) await t.time("relay", () => this.#relay(signatures));
     return { signatures };
   }
 
@@ -1630,11 +1679,9 @@ export class ForkService {
     };
   }
 
-  async #send(txs: VersionedTransaction[], market: PublicKey[]): Promise<string[]> {
+  async #send(txs: VersionedTransaction[], market: PublicKey[], t = new Timings()): Promise<string[]> {
     const conn = this.#o.connection;
-    const started = Date.now();
-    await this.#o.fork.refreshMarkets(market);
-    const times: Record<string, number> = { [`refresh ${market.length} accounts`]: Date.now() - started };
+    await t.time("refresh", () => this.#o.fork.refreshMarkets(market));
     const out: string[] = [];
     let unknown = false;
     try {
@@ -1671,14 +1718,13 @@ export class ForkService {
           });
           if (res.value.err) throw new ApiError(502, "transaction_failed", `${sig}: ${JSON.stringify(res.value.err)}`);
         }
-        times[`send ${i + 1}`] = confirming - sent;
-        times[`confirm ${i + 1}`] = Date.now() - confirming;
+        t.add(`send${txs.length > 1 ? ` ${i + 1}` : ""}`, confirming - sent);
+        t.add(`confirm${txs.length > 1 ? ` ${i + 1}` : ""}`, Date.now() - confirming);
         out.push(sig);
       }
     } catch (e) {
       throw new SendFailed(e instanceof ApiError ? e : new ApiError(502, "send_failed", errorText(e)), out, unknown);
     }
-    logSlow(this.#log, `send of ${txs.length} transaction(s)`, Date.now() - started, times);
     return out;
   }
 

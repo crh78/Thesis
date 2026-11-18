@@ -327,7 +327,7 @@ test("CORS: allowed origins get the headers and a 204 preflight; others and unse
   const read = await fetch(`${url}/wallets/${WALLET}`, { headers: { origin: "https://yourthesis.xyz" } });
   assert.equal(read.status, 200);
   assert.equal(read.headers.get("access-control-allow-origin"), "https://yourthesis.xyz");
-  assert.equal(read.headers.get("access-control-expose-headers"), "retry-after");
+  assert.equal(read.headers.get("access-control-expose-headers"), CORS.expose);
   // Errors carry the headers too, so the browser can read a 429's Retry-After.
   const limited = await fetch(`${url}/wallets/${WALLET}`, { headers: { origin: "https://yourthesis.xyz" } });
   assert.equal(limited.status, 429);
