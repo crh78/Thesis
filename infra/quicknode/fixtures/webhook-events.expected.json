@@ -87,6 +87,33 @@
     }
   },
   {
+    "signature": "65AjqwmSgmS7qmG2GiiarL68vWzjNQFjymF7K2vvugaBWkVj4Rehckhwc9nxhc12KXXN8tE4cQAQTDxTATQK5zeD",
+    "ordinal": 0,
+    "slot": 380000001,
+    "block_time": 1800000001,
+    "name": "positionExited",
+    "data": {
+      "take": "3fo9CmA9Cn6G3NJ9Co4FtkG8PjWNfcDEjuxZKb96jDpL",
+      "position": "EcGDjf4ryjhvCdBBrwchqkQVNuDKvJRBweC75Htf77TL",
+      "owner": "BRfeVhakULdf41zG4hj2rLTV3Ych8ZY5gma3sPRLyhwi",
+      "side": "back",
+      "exitedAt": "1790000000",
+      "escrowReturned": "0"
+    }
+  },
+  {
+    "signature": "65AjqwmSgmS7qmG2GiiarL68vWzjNQFjymF7K2vvugaBWkVj4Rehckhwc9nxhc12KXXN8tE4cQAQTDxTATQK5zeD",
+    "ordinal": 1,
+    "slot": 380000001,
+    "block_time": 1800000001,
+    "name": "takeClosed",
+    "data": {
+      "take": "3fo9CmA9Cn6G3NJ9Co4FtkG8PjWNfcDEjuxZKb96jDpL",
+      "author": "BRfeVhakULdf41zG4hj2rLTV3Ych8ZY5gma3sPRLyhwi",
+      "closedAt": "1790000000"
+    }
+  },
+  {
     "signature": "5j2Ck4GANbTuHDtTm5hJgNgS7L7pyAeX6kmXFBbeSinPTHtEXRRVkmvdguz4wsQVVBrMP6Fo7vn8tPmErwRefFkm",
     "ordinal": 0,
     "slot": 380000001,

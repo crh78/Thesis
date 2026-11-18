@@ -120,8 +120,14 @@ pub enum FadeVia {
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
 pub enum TakeStatus {
+    /// Takes backs and fades until the author sells or `horizon_end` passes.
     Open,
+    /// The headline result is recorded (`settle_take`).
     Settled,
+    /// The author sold their buy-in (`exit_position`): no new backs or fades, and `settle_take`
+    /// scores the take on the sale's prices. Holders keep their positions until they sell, or
+    /// until `horizon_end`. Appended, so `Open` and `Settled` keep their Borsh indices.
+    Closed,
 }
 
 /// One leg of a basket, as the author chose it. Every leg is priced by the settler, so the
@@ -150,6 +156,8 @@ pub struct Take {
     pub claim_hash: [u8; 32],
     pub risk: Risk,
     pub created_at: i64,
+    /// When the take settles if the author never sells (a year after posting, by config), and
+    /// the last moment anyone can sell a position before it settles on horizon prices instead.
     pub horizon_end: i64,
     #[max_len(MAX_LEGS)]
     pub legs: Vec<LegSpec>,
@@ -163,9 +171,13 @@ pub struct Take {
     /// Platform's part of the fees from backs of this take, for the creator boost.
     pub platform_fees_from_backs: u64,
     pub status: TakeStatus,
-    /// Headline return in bps: the author's position, entry to exit. Set at settlement.
+    /// Headline return in bps: the author's position, entry to its sale (or to the horizon if
+    /// the author never sold). Set at settlement.
     pub result_bps: i64,
     pub bump: u8,
+    /// When the author sold their buy-in and the take closed; 0 while they haven't. Kept here
+    /// because the author's exit account closes once their buy-in settles.
+    pub closed_at: i64,
 }
 
 impl Take {
@@ -217,9 +229,9 @@ impl Position {
     }
 }
 
-/// A position its owner sold before the horizon. Its sale prices score the owner; the position's
-/// own exit prices still come at the horizon (needed only for the author's buy-in, which sets the
-/// take's headline result). At `[EXIT_SEED, position]`. Closed together with its position.
+/// A position its owner sold before the horizon. Its sale prices score the owner, and for the
+/// author's buy-in they also set the take's headline result. At `[EXIT_SEED, position]`.
+/// Closed together with its position.
 #[account]
 #[derive(InitSpace)]
 pub struct Exit {

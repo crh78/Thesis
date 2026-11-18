@@ -63,6 +63,14 @@ const HOUR = 3_600;
 const DAY = 24 * HOUR;
 
 /**
+ * How long a take runs if its author never sells: it auto-settles this long after posting, as if
+ * sold at that day's prices. The author's own sale closes and settles it sooner. Clients pass
+ * `horizonEnd = posting + TAKE_LIFETIME_SECS` to `create_take` (the config's horizon window
+ * allows a day either side).
+ */
+export const TAKE_LIFETIME_SECS = 365 * DAY;
+
+/**
  * Launch values for `init_config`, as decided in docs/onchain-plan.md. Price delay is a
  * proposed default.
  */
@@ -71,9 +79,10 @@ export const DEFAULT_CONFIG_PARAMS: ConfigParams = {
   creatorFeeBps: 5,
   minStake: new BN(10 * 10 ** USDC_DECIMALS),
   maxLegs: MAX_LEGS,
-  minHorizonSecs: new BN(HOUR),
-  // 5 years, including one leap day.
-  maxHorizonSecs: new BN((5 * 365 + 1) * DAY),
+  // Every take runs a year (TAKE_LIFETIME_SECS); a day either side covers clock skew and the
+  // time between building a take and its receipt landing.
+  minHorizonSecs: new BN(TAKE_LIFETIME_SECS - DAY),
+  maxHorizonSecs: new BN(TAKE_LIFETIME_SECS + DAY),
   // Long enough to cover a weekend plus a holiday for stock feeds.
   maxPriceDelaySecs: new BN(4 * DAY),
   creatorBoostBps: 0,
@@ -99,8 +108,10 @@ export const THESIS_COMPUTE_UNITS = {
   recordEntryPrices: 13_400,
   recordExitPrices: 18_000,
   recordSalePrices: 18_000,
-  exitPosition: 32_500,
-  settleTake: 12_800,
+  // The author's sale (it closes the take: one more event), and a closed 10-leg take settling on
+  // its sale prices: the worst cases.
+  exitPosition: 37_300,
+  settleTake: 19_700,
   settlePosition: 22_900,
   mintBadge: 90_000,
 } as const;

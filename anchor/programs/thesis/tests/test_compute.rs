@@ -22,7 +22,8 @@ use {
 /// the same records cost about 5% more on a Surfpool fork). They include the program's events:
 /// each is a self-CPI (`emit_cpi!`), about 2,700 CU. Keep `THESIS_COMPUTE_UNITS` in
 /// packages/chain/src/constants.ts in step: clients use it to set transaction compute limits,
-/// and the price records use the 10-leg ceilings, the most any take can need.
+/// the price records use the 10-leg ceilings, the most any take can need, `exitPosition` the
+/// author's sale and `settleTake` the closed 10-leg take.
 const CEILINGS: &[(&str, u64)] = &[
     ("begin_trade", 19_500),
     ("create_take", 65_600),
@@ -37,11 +38,13 @@ const CEILINGS: &[(&str, u64)] = &[
     ("record_entry_prices (10 legs)", 13_400),
     ("record_exit_prices", 11_700),
     ("record_exit_prices (10 legs)", 18_000),
-    ("exit_position", 32_500),
+    ("exit_position", 36_600),
+    ("exit_position (author)", 37_300),
     ("record_sale_prices", 11_800),
     ("record_sale_prices (10 legs)", 18_000),
     ("settle_position (sold)", 21_500),
     ("settle_take", 12_800),
+    ("settle_take (closed)", 19_700),
     ("settle_position", 22_900),
     ("claim_creator_fees", 14_600),
     ("mint_badge", 90_000),
@@ -186,6 +189,20 @@ fn run_once(seed: u8) -> (Vec<(&'static str, u64)>, Sizes) {
         .record_sale(&wide, &wide_sold, wide_sale)
         .expect("sale (10 legs)");
     used.push(("record_sale_prices (10 legs)", meta.compute_units_consumed));
+    // The wide take's author sells their buy-in, which closes the take (one more event), and the
+    // take settles on that sale.
+    let meta = env
+        .exit_position(&fader, &wide, &wide_pos)
+        .expect("exit_position (author)");
+    used.push(("exit_position (author)", meta.compute_units_consumed));
+    let author_sale = (0..10u8)
+        .map(|i| price(i, usd(106.0 + f64::from(i)), NOW + DAY))
+        .collect();
+    env.record_sale(&wide, &wide_pos, author_sale)
+        .expect("author sale (10 legs)");
+    let ix = env.settle_take_ix(&wide, &fader.pubkey());
+    let meta = env.crank(ix).expect("settle_take (closed)");
+    used.push(("settle_take (closed)", meta.compute_units_consumed));
     let payer = env.app_payer.pubkey();
     let ix = env.settle_sold_position_ix(&take, &sold, &backer.pubkey(), &backer.pubkey(), &payer);
     let meta = env.crank(ix).expect("settle sold");

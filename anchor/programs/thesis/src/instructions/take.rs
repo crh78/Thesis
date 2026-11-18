@@ -188,6 +188,7 @@ pub fn handle_create_take<'info>(
         status: TakeStatus::Open,
         result_bps: 0,
         bump: ctx.bumps.take,
+        closed_at: 0,
     });
 
     ctx.accounts.author_position.set_inner(Position {

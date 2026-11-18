@@ -318,6 +318,34 @@ fn settling_a_big_win_earns_the_plus_50_badge() {
 }
 
 #[test]
+fn the_authors_sale_earns_badges_at_once() {
+    // Selling the buy-in settles the take early, so a badge doesn't wait for the horizon.
+    let (mut env, author) = author_with_take();
+    let owner = author.pubkey();
+    let take = take_pda(&owner, 1);
+    let pos = position_pda(&take, &owner, AUTHOR_POSITION_ID);
+    env.set_time(NOW + 120);
+    env.record(false, &take, &pos, vec![price(0, usd(100.0), NOW + 60)])
+        .unwrap();
+    let sold_at = NOW + 10 * DAY;
+    env.set_time(sold_at);
+    env.exit_position(&author, &take, &pos).unwrap();
+    env.set_time(sold_at + 120);
+    env.record_sale(&take, &pos, vec![price(0, usd(210.0), sold_at + 60)])
+        .unwrap();
+    let ix = env.settle_take_ix(&take, &owner);
+    env.crank(ix).unwrap();
+
+    for kind in [BadgeKind::FirstOver50, BadgeKind::FirstOver100] {
+        mint_badge(&mut env, &owner, kind).expect("+110% earns +50% and +100%");
+    }
+    assert_error(
+        mint_badge(&mut env, &owner, BadgeKind::Over1000),
+        "BadgeNotEarned",
+    );
+}
+
+#[test]
 fn prefunded_mint_address_still_mints() {
     // Anyone can send lamports to the badge address first; that must not block the badge.
     let (mut env, author) = author_with_take();

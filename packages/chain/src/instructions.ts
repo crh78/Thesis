@@ -438,6 +438,8 @@ export async function settleTakeIx(
       take: p.take,
       authorPosition: authorPositionAddress(p.take, p.author, program.programId),
       authorProfile: profileAddress(p.author, program.programId),
+      // Read once the author has sold (the take is closed): it settles on the sale's prices.
+      authorExit: exitAddress(authorPositionAddress(p.take, p.author, program.programId), program.programId),
     })
     .instruction();
 }

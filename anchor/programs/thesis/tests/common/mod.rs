@@ -1007,6 +1007,7 @@ impl Env {
                 take: *take,
                 author_position: position_pda(take, author, AUTHOR_POSITION_ID),
                 author_profile: profile_pda(author),
+                author_exit: exit_pda(&position_pda(take, author, AUTHOR_POSITION_ID)),
             }
             .to_account_metas(None),
         )

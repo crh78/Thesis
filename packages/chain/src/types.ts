@@ -16,6 +16,8 @@ export type Side = T["side"];
 export type LegKind = T["legKind"];
 export type FadeVia = T["fadeVia"];
 export type BadgeKind = T["badgeKind"];
+/** `{ open: {} }`, `{ closed: {} }` (the author sold) or `{ settled: {} }`. */
+export type TakeStatus = T["takeStatus"];
 
 export type TakeAccount = IdlAccounts<Thesis>["take"];
 export type PositionAccount = IdlAccounts<Thesis>["position"];

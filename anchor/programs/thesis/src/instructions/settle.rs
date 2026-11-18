@@ -14,11 +14,14 @@ const OVER_50_BPS: i64 = 5_000;
 const OVER_100_BPS: i64 = 10_000;
 const OVER_1000_BPS: i64 = 100_000;
 
-/// Finalizes a take after its horizon: its headline result is the author's position, entry to
-/// exit. Anyone can call it. Must run before positions are settled.
+/// Finalizes a take: its headline result is the author's buy-in, entry to exit. Anyone can call
+/// it. Must run before held positions and the author's buy-in are settled.
+///
+/// Once the author has sold (the take is `Closed`), it settles on the sale's prices, before the
+/// horizon. Otherwise it settles at the horizon, on the buy-in's horizon prices.
 ///
 /// If the author's prices are still missing once `max_price_delay_secs` has passed since the
-/// horizon end, the take settles at 0% so its positions aren't stuck.
+/// sale (or the horizon end), the take settles at 0% so its positions aren't stuck.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct SettleTake<'info> {
@@ -33,23 +36,46 @@ pub struct SettleTake<'info> {
     pub author_position: Account<'info, Position>,
     #[account(mut, constraint = author_profile.owner == take.author @ ThesisError::AccountMismatch)]
     pub author_profile: Account<'info, Profile>,
+    /// The author's buy-in's exit account (its PDA; clients always pass it).
+    /// CHECK: read only once the take is closed, then it must be an `Exit` naming the author's
+    /// buy-in. Only the author's `exit_position` closes a take, and it always creates this
+    /// account, so a closed take can't settle on horizon prices instead.
+    pub author_exit: UncheckedAccount<'info>,
 }
 
 pub fn handle_settle_take(ctx: Context<SettleTake>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let take = &ctx.accounts.take;
-    require!(
-        take.status == TakeStatus::Open,
-        ThesisError::TakeAlreadySettled
-    );
-    require!(now >= take.horizon_end, ThesisError::HorizonNotReached);
-
-    let priced = position_return_bps(&take.legs, &ctx.accounts.author_position);
+    let author_position = &ctx.accounts.author_position;
+    let (priced, prices_from) = match take.status {
+        TakeStatus::Settled => return err!(ThesisError::TakeAlreadySettled),
+        TakeStatus::Open => {
+            require!(now >= take.horizon_end, ThesisError::HorizonNotReached);
+            (
+                position_return_bps(&take.legs, author_position),
+                take.horizon_end,
+            )
+        }
+        TakeStatus::Closed => {
+            let info = ctx.accounts.author_exit.to_account_info();
+            require_keys_eq!(*info.owner, crate::ID, ThesisError::AccountMismatch);
+            let exit = Exit::try_deserialize(&mut &info.try_borrow_data()?[..])?;
+            require_keys_eq!(
+                exit.position,
+                author_position.key(),
+                ThesisError::AccountMismatch
+            );
+            (
+                sale_return_bps(&take.legs, author_position, &exit),
+                exit.exited_at,
+            )
+        }
+    };
     let result_bps = match priced {
         Some(r) => r,
         None => {
             require!(
-                grace_passed(take.horizon_end, &ctx.accounts.config, now)?,
+                grace_passed(prices_from, &ctx.accounts.config, now)?,
                 ThesisError::PriceMissing
             );
             0
@@ -84,9 +110,10 @@ pub fn handle_settle_take(ctx: Context<SettleTake>) -> Result<()> {
 /// Folds a position's result into its owner's profile, then closes the position and refunds
 /// its rent to whoever paid it. Anyone can call it; the rent never goes to the caller.
 ///
-/// A held position settles after its take, on its horizon prices. A sold one (`exit_position`)
-/// settles on its sale prices, as soon as they're recorded, and its exit account closes with it.
-/// The author's buy-in still waits for the take, whose headline result it sets.
+/// A held position settles after its take, on its horizon prices (so after the horizon, even when
+/// the take settled early on the author's sale). A sold one (`exit_position`) settles on its sale
+/// prices, as soon as they're recorded, and its exit account closes with it. The author's buy-in
+/// still waits for the take, whose headline result it sets.
 ///
 /// A position whose prices never arrived (past the grace period) settles at 0% and unscored.
 #[event_cpi]

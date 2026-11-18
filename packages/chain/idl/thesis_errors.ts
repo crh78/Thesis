@@ -46,7 +46,8 @@ export const ThesisErrorCode = {
   Unauthorized: 6043,
   ReturnOutOfRange: 6044,
   FadeNeedsPredictionLegs: 6045,
-  InvalidBadgeUriBase: 6046
+  InvalidBadgeUriBase: 6046,
+  AuthorCannotFade: 6047
 };
 
 export type ThesisErrorName = keyof typeof ThesisErrorCode;

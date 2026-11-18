@@ -1,4 +1,5 @@
-//! Selling a position before the horizon: `exit_position`, sale prices, early settlement.
+//! Selling a position before the horizon: `exit_position`, sale prices, early settlement, and
+//! the author's sale, which closes the take and settles it early.
 
 mod common;
 
@@ -248,15 +249,139 @@ fn a_sold_position_settles_on_its_sale_even_after_the_horizon() {
 }
 
 #[test]
-fn the_author_can_sell_but_the_headline_runs_to_the_horizon() {
+fn the_authors_sale_closes_the_take_and_settles_it_early() {
     let Setup {
         mut env,
         author,
+        backer,
         take,
         author_pos,
-        ..
+        backer_pos,
     } = setup();
+    // A second backer, who sells after the take has settled.
+    let seller = env.user(100 * USDC);
+    let args = OpenPositionArgs {
+        id: 1,
+        stake: 20 * USDC,
+        legs_mask: 0b11,
+    };
+    env.open_position(Side::Back, &seller, &take, args).unwrap();
+    let seller_pos = position_pda(&take, &seller.pubkey(), 1);
+    env.record(
+        false,
+        &take,
+        &seller_pos,
+        vec![
+            price(0, usd(100.0), NOW + 120),
+            price(1, usd(1.0), NOW + 120),
+        ],
+    )
+    .unwrap();
 
+    // Before the sale the take is open and can't settle.
+    let ix = env.settle_take_ix(&take, &author.pubkey());
+    assert_error(env.crank(ix), "HorizonNotReached");
+
+    env.set_time(SOLD_AT);
+    env.exit_position(&author, &take, &author_pos).unwrap();
+    let t: Take = env.fetch(&take);
+    assert_eq!((t.status, t.closed_at), (TakeStatus::Closed, SOLD_AT));
+
+    // Closed: no new backs or fades.
+    let late = env.user(100 * USDC);
+    for (side, legs_mask) in [(Side::Back, 0b11), (Side::Fade, 0b01)] {
+        let args = OpenPositionArgs {
+            id: 1,
+            stake: 10 * USDC,
+            legs_mask,
+        };
+        assert_error(env.open_position(side, &late, &take, args), "TakeClosed");
+    }
+
+    // The take settles on the sale's prices, once all of them are in.
+    env.set_time(SOLD_AT + 120);
+    let ix = env.settle_take_ix(&take, &author.pubkey());
+    assert_error(env.crank(ix), "PriceMissing");
+    env.record_sale(&take, &author_pos, vec![price(0, usd(110.0), SOLD_AT + 60)])
+        .unwrap();
+    let ix = env.settle_take_ix(&take, &author.pubkey());
+    assert_error(env.crank(ix), "PriceMissing");
+    env.record_sale(&take, &author_pos, vec![price(1, usd(1.0), SOLD_AT + 60)])
+        .unwrap();
+
+    // Only the author's own exit account settles it.
+    env.set_time(SOLD_AT + DAY);
+    env.exit_position(&backer, &take, &backer_pos).unwrap();
+    let mut ix = env.settle_take_ix(&take, &author.pubkey());
+    ix.accounts[4].pubkey = exit_pda(&backer_pos); // author_exit
+    assert_error(env.crank(ix), "AccountMismatch");
+
+    // 60% × +10% on the spot leg, flat yield: +6%, well before the horizon.
+    let ix = env.settle_take_ix(&take, &author.pubkey());
+    env.crank(ix).unwrap();
+    let t: Take = env.fetch(&take);
+    assert_eq!(
+        (t.status, t.result_bps, t.closed_at),
+        (TakeStatus::Settled, 600, SOLD_AT)
+    );
+    let p: Profile = env.fetch(&profile_pda(&author.pubkey()));
+    assert_eq!((p.takes_settled, p.best_take_bps), (1, 600));
+    let ix = env.settle_take_ix(&take, &author.pubkey());
+    assert_error(env.crank(ix), "TakeAlreadySettled");
+
+    // The author's buy-in settles on the same sale: +6% on $10.
+    let app_payer = env.app_payer.pubkey();
+    let ix = env.settle_sold_position_ix(
+        &take,
+        &author_pos,
+        &author.pubkey(),
+        &author.pubkey(),
+        &app_payer,
+    );
+    env.crank(ix).unwrap();
+    let p: Profile = env.fetch(&profile_pda(&author.pubkey()));
+    assert_eq!((p.scored_pnl, p.wins), (600_000, 1));
+    assert!(!env.exists(&author_pos) && !env.exists(&exit_pda(&author_pos)));
+
+    // A holder can still sell after the early settlement, and settles on that sale.
+    env.set_time(SOLD_AT + 2 * DAY);
+    env.exit_position(&seller, &take, &seller_pos).unwrap();
+    env.set_time(SOLD_AT + 2 * DAY + 120);
+    env.record_sale(
+        &take,
+        &seller_pos,
+        vec![
+            price(0, usd(120.0), SOLD_AT + 2 * DAY + 60),
+            price(1, usd(1.0), SOLD_AT + 2 * DAY + 60),
+        ],
+    )
+    .unwrap();
+    let ix = env.settle_sold_position_ix(
+        &take,
+        &seller_pos,
+        &seller.pubkey(),
+        &seller.pubkey(),
+        &app_payer,
+    );
+    env.crank(ix).unwrap();
+    let s: Profile = env.fetch(&profile_pda(&seller.pubkey()));
+    // 60% × +20% on $20.
+    assert_eq!((s.scored_pnl, s.wins), (2_400_000, 1));
+
+    // Left: the backer's sale, waiting for its prices.
+    assert_eq!(env.fetch::<Take>(&take).open_positions, 1);
+}
+
+#[test]
+fn a_held_position_settles_at_the_horizon_after_an_early_settlement() {
+    let Setup {
+        mut env,
+        author,
+        backer,
+        take,
+        author_pos,
+        backer_pos,
+    } = setup();
     env.set_time(SOLD_AT);
     env.exit_position(&author, &take, &author_pos).unwrap();
     env.set_time(SOLD_AT + 120);
@@ -269,46 +394,67 @@ fn the_author_can_sell_but_the_headline_runs_to_the_horizon() {
         ],
     )
     .unwrap();
+    let ix = env.settle_take_ix(&take, &author.pubkey());
+    env.crank(ix).unwrap();
 
-    // The buy-in sets the take's result, so it can't settle before the take.
-    let app_payer = env.app_payer.pubkey();
-    let settle_author = |env: &Env| {
-        env.settle_sold_position_ix(
+    // The take is settled, but the backer's position runs on: no horizon prices yet.
+    let ix = env.settle_position_ix(&take, &backer_pos, &backer.pubkey(), &backer.pubkey());
+    assert_error(env.crank(ix), "PriceMissing");
+    assert_error(
+        env.record(
+            true,
             &take,
-            &author_pos,
-            &author.pubkey(),
-            &author.pubkey(),
-            &app_payer,
-        )
-    };
-    let ix = settle_author(&env);
-    assert_error(env.crank(ix), "TakeNotSettled");
+            &backer_pos,
+            vec![price(0, usd(150.0), SOLD_AT + 60)],
+        ),
+        "HorizonNotReached",
+    );
 
-    // The headline uses the buy-in's horizon prices: +100% on the spot leg, +60% overall.
     env.set_time(HORIZON + 120);
     env.record(
         true,
         &take,
-        &author_pos,
+        &backer_pos,
         vec![
-            price(0, usd(200.0), HORIZON + 60),
+            price(0, usd(150.0), HORIZON + 60),
             price(1, usd(1.0), HORIZON + 60),
         ],
     )
     .unwrap();
+    let ix = env.settle_position_ix(&take, &backer_pos, &backer.pubkey(), &backer.pubkey());
+    env.crank(ix).unwrap();
+    // 60% × +50% on $20, from the horizon: the author's sale doesn't settle anyone else.
+    let b: Profile = env.fetch(&profile_pda(&backer.pubkey()));
+    assert_eq!((b.scored_pnl, b.wins), (6_000_000, 1));
+    // The take's headline stays at the sale.
+    assert_eq!(env.fetch::<Take>(&take).result_bps, 600);
+}
+
+#[test]
+fn a_closed_take_without_sale_prices_settles_at_zero_after_the_grace_period() {
+    let Setup {
+        mut env,
+        author,
+        take,
+        author_pos,
+        ..
+    } = setup();
+    env.set_time(SOLD_AT);
+    env.exit_position(&author, &take, &author_pos).unwrap();
     let ix = env.settle_take_ix(&take, &author.pubkey());
+
+    // The grace period runs from the sale, not the horizon.
+    env.set_time(SOLD_AT + DELAY);
+    assert_error(env.crank(ix.clone()), "PriceMissing");
+    env.set_time(SOLD_AT + DELAY + 1);
     env.crank(ix).unwrap();
     let t: Take = env.fetch(&take);
-    assert_eq!(t.result_bps, 6_000);
+    assert_eq!((t.status, t.result_bps), (TakeStatus::Settled, 0));
     let p: Profile = env.fetch(&profile_pda(&author.pubkey()));
-    assert_eq!((p.takes_over_50, p.best_take_bps), (1, 6_000));
-
-    // The author's own score uses the sale: 60% × +10% = +6% on $10.
-    let ix = settle_author(&env);
-    env.crank(ix).unwrap();
-    let p: Profile = env.fetch(&profile_pda(&author.pubkey()));
-    assert_eq!((p.scored_pnl, p.wins), (600_000, 1));
-    assert!(!env.exists(&author_pos) && !env.exists(&exit_pda(&author_pos)));
+    assert_eq!(
+        (p.takes_settled, p.takes_over_50, p.best_take_bps),
+        (1, 0, 0)
+    );
 }
 
 #[test]

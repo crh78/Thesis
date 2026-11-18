@@ -121,6 +121,12 @@ fn open_position<'info>(
     let legs = take.legs.len();
     validate_legs_mask(args.legs_mask, legs)?;
     if side == Side::Fade {
+        // An author can't bet against their own call.
+        require_keys_neq!(
+            ctx.accounts.owner.key(),
+            take.author,
+            ThesisError::AuthorCannotFade
+        );
         require!(
             included_legs(args.legs_mask, &take.legs).all(|leg| leg.fade_via != FadeVia::None),
             ThesisError::LegNotFadeable

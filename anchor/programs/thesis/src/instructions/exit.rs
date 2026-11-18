@@ -11,8 +11,10 @@ use crate::{constants::*, error::ThesisError, events::*, state::*, utils::transf
 /// Each position exits once (the exit account sits at a PDA of the position). No fee: the
 /// platform fee is charged on backs and fades only. Works while new positions are paused.
 ///
-/// The author can sell their own buy-in too. Their own score uses the sale, but the take's
-/// headline result still runs to the horizon on the buy-in's horizon prices.
+/// The author can sell their own buy-in too. That closes the take: no new backs or fades
+/// (`TakeClosed`), and `settle_take` scores its headline result on the sale's prices. Everyone
+/// else keeps their position and can still sell it until the horizon, also after the take has
+/// settled early.
 ///
 /// The position's escrowed prediction share comes back here, in full:
 /// paper legs aren't paid, so the amount never depends on a price, and the author's buy-in,
@@ -24,6 +26,8 @@ pub struct ExitPosition<'info> {
     /// Pays the exit's rent and gets it back at settlement.
     #[account(mut)]
     pub payer: Signer<'info>,
+    /// Written only when this is the author's buy-in (the sale closes the take).
+    #[account(mut)]
     pub take: Account<'info, Take>,
     #[account(
         mut,
@@ -55,12 +59,12 @@ pub struct ExitPosition<'info> {
 
 pub fn handle_exit_position(ctx: Context<ExitPosition>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    let take = &ctx.accounts.take;
+    // Any status: holders can sell after the author has (the take is closed, or settled early).
+    // A take that settled at its horizon is past it.
     require!(
-        take.status == TakeStatus::Open,
-        ThesisError::TakeAlreadySettled
+        now < ctx.accounts.take.horizon_end,
+        ThesisError::HorizonPassed
     );
-    require!(now < take.horizon_end, ThesisError::HorizonPassed);
 
     let escrow_returned = ctx.accounts.position.escrowed;
     let config = &ctx.accounts.config;
@@ -75,8 +79,15 @@ pub fn handle_exit_position(ctx: Context<ExitPosition>) -> Result<()> {
         ctx.accounts.usdc_mint.decimals,
     )?;
 
-    let take = &ctx.accounts.take;
+    let take = &mut ctx.accounts.take;
     let position = &mut ctx.accounts.position;
+    let closes_take = position.id == AUTHOR_POSITION_ID
+        && position.owner == take.author
+        && take.status == TakeStatus::Open;
+    if closes_take {
+        take.status = TakeStatus::Closed;
+        take.closed_at = now;
+    }
     position.exited = true;
     // Returned: settlement has nothing left to pay back.
     position.escrowed = 0;
@@ -96,5 +107,12 @@ pub fn handle_exit_position(ctx: Context<ExitPosition>) -> Result<()> {
         exited_at: now,
         escrow_returned,
     });
+    if closes_take {
+        emit_cpi!(TakeClosed {
+            take: take.key(),
+            author: take.author,
+            closed_at: now,
+        });
+    }
     Ok(())
 }
