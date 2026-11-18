@@ -24,6 +24,11 @@
 //                                  { verdict: "basket", id, summary, legs, existing } or
 //                                  { verdict: "no_clean_exposure", reason }. Its page is /d/<id> on
 //                                  the web; the same origin_ref returns the same draft.
+//                                  for_x: the X bot's asker (their username), whose drafts wait for
+//                                  them in the web app, since the bot's replies carry no link.
+//   GET    /source/drafts/mine     → { x, drafts } the X bot's unposted drafts for the X account
+//                                  linked to your Privy login (x null when none is linked), newest
+//                                  first, from the last 14 days: { id, claim, legs, context, created_at }
 //   PUT    /source/drafts/:id      { take_id } you posted it: your live take → { posted, take_id }
 //                                  (posted false when someone else's live take got there first)
 //
@@ -36,7 +41,7 @@
 // x_poll_secret, bot_secret, read through source_secret()), where pg_cron reads the poll secret too.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { privyDid } from "../_shared/privy.ts";
+import { privyDid, privyXUsername } from "../_shared/privy.ts";
 import { draftTake, readSource, SourceError } from "../_shared/source.ts";
 import { fetchPosts, ingest, parseHandle, recentCalls } from "../_shared/x.ts";
 
@@ -189,6 +194,7 @@ async function buildDraft(b: Record<string, unknown>) {
   const sourceUrl = src && typeof src.url === "string" && /^https?:\/\/\S+$/.test(src.url) && src.url.length <= 500 ? src.url : null;
   const sourceText = src ? str(src.text, 2000) : "";
   const ref = str(b.origin_ref, 64) || null;
+  const forX = origin === "x" && typeof b.for_x === "string" ? parseHandle(b.for_x)?.toLowerCase() ?? null : null;
 
   if (ref) {
     const { data, error } = await db.from("take_drafts").select(DRAFT_COLUMNS).eq("origin", origin).eq("origin_ref", ref).maybeSingle();
@@ -217,6 +223,7 @@ async function buildDraft(b: Record<string, unknown>) {
     summary: str(built.summary, 400) || null,
     context: str(b.context, 80) || null,
     origin_ref: ref,
+    for_x: forX,
     source_url: sourceUrl,
     source_label: sourceUrl ? str(src!.label, 60) || "the post" : null,
     source_kind: sourceUrl ? (src!.kind === "x" ? "x" : "link") : null,
@@ -233,6 +240,21 @@ async function buildDraft(b: Record<string, unknown>) {
     }
   }
   throw new Error("draft id collisions");
+}
+
+/** The X bot's drafts waiting for you: the ones it saved for the X account your login links. */
+async function myDrafts(req: Request) {
+  const did = await privyDid(req);
+  if (!did) throw new HttpError(401, "invalid_privy_token");
+  const x = await privyXUsername(did);
+  if (!x) return json(200, { x: null, drafts: [] });
+  const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await db.from("take_drafts")
+    .select("id, claim, legs, context, created_at")
+    .eq("for_x", x).is("take_id", null).gte("created_at", since)
+    .order("created_at", { ascending: false }).limit(10);
+  dbCheck(error);
+  return json(200, { x, drafts: data ?? [] });
 }
 
 /** You posted this draft: point it at your live take, unless someone's live take got there first. */
@@ -363,6 +385,9 @@ Deno.serve(async (req) => {
       case "GET x": return json(200, { accounts: await accounts(await me(req, false)) });
       case "PUT x/:id": return await copy(await me(req, true), id);
       case "DELETE x/:id": return await stopCopying(await me(req, true), id);
+      case "GET drafts/:id":
+        if (id === "mine") return await myDrafts(req);
+        return json(404, { error: "no_such_route" });
       case "PUT drafts/:id": return await draftPosted(await me(req, true), id, await body(req));
       default: return json(404, { error: "no_such_route" });
     }

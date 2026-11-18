@@ -1,28 +1,31 @@
 # @thesis/x
 
-The X bot, **@yourthesisxyz**. It answers everyone who mentions it. Under a post with a market view, "@yourthesisxyz make this a take" (or a take of your own, like "@yourthesisxyz nuclear wins the AI power race") gets a reply with the basket's picks and a link to a **draft take**. Whoever taps the link posts it as their take and buys in (`apps/www/app/d`).
+The X bot, **@yourthesisxyz**. It answers everyone who mentions it. Under a post with a market view, "@yourthesisxyz make this a take" (or a take of your own, like "@yourthesisxyz nuclear wins the AI power race") gets a reply with the basket's picks. The basket is saved as a **draft take** for the person who asked; the reply carries **no link** (a reply with a URL costs $0.20 on X, without one $0.015), and points to the link in the bot's bio instead. When they sign in to the web app with that X account, the draft waits at the top of their feed ("Your takes from X"), and posting it makes it their take (`apps/www/app/d`).
 
 ```
 Nuclear wins the AI power race.
 
 Constellation Energy 30%, Vistra 25%, Cameco 20%, +2 more
 
-Post it as your take: https://yourthesis.xyz/d/AbCdEfGh
+Saved for you: sign in with X at the link in our bio to post it as your take.
 ```
 
 ## How a mention is handled
 
 1. **Poll** `GET /2/users/:id/mentions` every 30 s, with the post each mention replies to or quotes.
 2. **Vet** (`src/vet.ts`): one model call fills a fixed schema (`ignore`, `take` with a neutral claim, or `explain`). Post text is treated as untrusted data. Anything hateful, sexual, about violence or tragedy, a token shill, a request for personal advice, an attempt to make the bot say something, culture-war bait or chatter is ignored. So is anything the model is unsure about.
-3. **Build** with the same take builder as iMessage (`@thesis/agent` `buildBasket`), crediting the parent post as "via @user on X". It's saved as a draft (`POST /source/drafts`, keyed on the mention id, so a retry reuses it).
-4. **Reply from a template** (`src/compose.ts`). The only model-written words that reach X are the vetted claim and the pick names. Both pass a blocklist, and the claim loses handles, links, hashtags and emoji. "No clean exposure" and "what is this" get fixed replies with no link (cheaper).
-5. **Limits:** 100 replies a day, 10 per person a day (every reply counts: takes, "no clean exposure" and help alike), 3 per thread a day. The bot never replies to itself or to retweets. On its first run it starts from the current time and never answers the backlog. State lives in `.data/state.json` and is saved after every mention, so a restart never answers a mention twice.
+3. **Build** with the same take builder as iMessage (`@thesis/agent` `buildBasket`), crediting the parent post as "via @user on X". It's saved as a draft for the asker's X username (`POST /source/drafts` with `for_x`, keyed on the mention id, so a retry reuses it). The web app reads them back through `GET /source/drafts/mine`, which takes the X username from the caller's Privy account, never from the client.
+4. **Reply from a template** (`src/compose.ts`), never with a link. The only model-written words that reach X are the vetted claim and the pick names. Both pass a blocklist, and the claim loses handles, links, hashtags and emoji. "No clean exposure" and "what is this" get fixed replies.
+5. **Opting out** (X's automation rules require it): a mention that's just "stop" gets one confirmation and no more replies, kept across days; "start" turns replies back on. The help reply says so.
+6. **Limits:** 100 replies a day, 10 per person a day (every reply counts: takes, "no clean exposure" and help alike), 3 per thread a day. The bot never replies to itself or to retweets. On its first run it starts from the current time and never answers the backlog. State lives in `.data/state.json` and is saved after every mention, so a restart never answers a mention twice.
 
 ## Cost
 
 X API pay-per-use (checked 2026-11-16, prepaid): reading the bot's own mentions is $0.001 a post. A reply with a link is up to $0.20. X also lists a "summoned" reply at $0.01, so the real price may be lower. Replies without a link are $0.015. So 100 take replies are at most about $20. Set a spending cap in the developer console too.
 
 ## Setup
+
+**Before going live, ask X for approval.** X's automation rules say any AI reply bot needs X's prior written approval: request it from the developer console (or your X contact). Replies here are templates, but the claim and picks come from a model, so ask.
 
 1. Sign in to [developer.x.com](https://developer.x.com) as @yourthesisxyz and create a project and app. Buy a few dollars of credits.
 2. App → **User authentication settings**: permissions **Read and write**. Type "Web App, Automated App or Bot". Any callback URL, e.g. https://yourthesis.xyz.

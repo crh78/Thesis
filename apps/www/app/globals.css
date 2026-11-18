@@ -279,6 +279,10 @@ button.menu-item:hover { background: var(--glass-on); }
 .suggest-card { flex: none; width: 128px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; padding: 12px 8px; border-radius: 18px; border: 1px solid var(--hairline); }
 .suggest-card b, .suggest-card span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .suggest-card .pill { margin-top: 4px; }
+.xdrafts { display: grid; gap: 8px; padding-top: 10px; }
+.xdraft { display: grid; gap: 4px; padding: 12px 14px; border-radius: 18px; border: 1px solid var(--hairline); }
+.xdraft b { font-family: var(--font-serif); font-size: 18px; font-weight: 400; line-height: 1.2; overflow-wrap: anywhere; }
+.xdraft .pill { justify-self: start; margin-top: 4px; }
 .trow { display: grid; grid-template-columns: 42px 1fr; gap: 12px; padding: 14px 16px 6px; border-bottom: 1px solid var(--hairline); }
 .trow-main { min-width: 0; display: grid; gap: 10px; }
 .trow-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }

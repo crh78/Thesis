@@ -3,6 +3,7 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { articleText, checkUrl, cleanClaim, decode, readSource, slugTitle, xPost } from "../_shared/source.ts";
 import { parseHandle } from "../_shared/x.ts";
+import { xUsernameOf } from "../_shared/x_account.ts";
 
 Deno.test("X post links: x.com, twitter.com, mobile, with tracking", () => {
   assertEquals(xPost("https://x.com/KobeissiLetter/status/2121729777891496181"), { username: "KobeissiLetter", id: "2121729777891496181" });
@@ -63,4 +64,10 @@ Deno.test("the page the phone fetched is read without fetching again", async () 
   assertEquals(s.label, "Reuters");
   assertEquals(s.title, "Gold hits a record");
   assertEquals(s.text, "Central banks keep buying.\nGold rose to a record on Friday as central banks kept buying and the dollar slid again.");
+});
+
+Deno.test("the X account among Privy's linked accounts", () => {
+  assertEquals(xUsernameOf([{ type: "email" }, { type: "twitter_oauth", username: "Jake_Trades" }]), "jake_trades");
+  assertEquals(xUsernameOf([{ type: "google_oauth", username: "jake" }]), null);
+  assertEquals(xUsernameOf([{ type: "twitter_oauth", username: "not a handle!" }]), null);
 });

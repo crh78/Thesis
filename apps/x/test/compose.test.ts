@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { safeClaim, takeReply, xLength } from "../src/compose.ts";
+import { EXPLAIN, OPTED_IN, OPTED_OUT, optCommand, safeClaim, TAKE_TAIL, takeReply, xLength } from "../src/compose.ts";
 
 test("safeClaim strips handles, links, tags and emoji, keeps cashtag names", () => {
   assert.equal(safeClaim("@elonmusk $TSLA beats deliveries https://t.co/abc #stocks 🚀."), "TSLA beats deliveries");
@@ -13,8 +13,7 @@ test("safeClaim refuses short, long, linked and blocked claims", () => {
   assert.equal(safeClaim("defense stocks rise because of the massacre"), null);
 });
 
-test("takeReply fits 280 with the link counted as 23", () => {
-  const link = "https://yourthesis.xyz/d/AbCdEfGh";
+test("takeReply fits 280 and carries no link", () => {
   const picks = [
     { name: "Constellation Energy", weight: 30 },
     { name: "Vistra", weight: 25 },
@@ -23,14 +22,28 @@ test("takeReply fits 280 with the link counted as 23", () => {
     { name: "Oklo", weight: 10 },
   ];
   const claim = "Nuclear power wins the AI data center build out over the next decade and utilities rerate on it";
-  const r = takeReply(claim, picks, link)!;
+  const r = takeReply(claim, picks)!;
   assert.ok(r);
   assert.ok(xLength(r) <= 280, `${xLength(r)} chars`);
-  assert.ok(r.endsWith(link));
+  assert.ok(r.endsWith(TAKE_TAIL));
+  assert.ok(!/https?:\/\//.test(r));
   assert.ok(r.startsWith(`${claim}.`));
   assert.ok(!/[—–]/.test(r));
 });
 
 test("takeReply refuses a blocked pick name", () => {
-  assert.equal(takeReply("Gold goes up", [{ name: "Hitler Fund", weight: 100 }], "https://x.co/d/AbCdEfGh"), null);
+  assert.equal(takeReply("Gold goes up", [{ name: "Hitler Fund", weight: 100 }]), null);
+});
+
+test("stop and start are whole-mention commands", () => {
+  for (const t of ["stop", "STOP", "Stop.", "unsubscribe", "opt out", "optout!"]) assert.equal(optCommand(t), "stop", t);
+  for (const t of ["start", "Start!", "opt in"]) assert.equal(optCommand(t), "start", t);
+  for (const t of ["stop the war on crypto", "make this a take", "", "starting to think gold wins"]) assert.equal(optCommand(t), null, t);
+});
+
+test("fixed replies fit and carry no link", () => {
+  for (const r of [EXPLAIN, OPTED_OUT, OPTED_IN]) {
+    assert.ok(r.length <= 280);
+    assert.ok(!/https?:\/\//.test(r));
+  }
 });

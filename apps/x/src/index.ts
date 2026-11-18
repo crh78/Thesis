@@ -2,7 +2,8 @@
 // (vet.ts), builds the take's basket as a draft (the same take builder and drafts as iMessage),
 // and replies with the draft's link, where whoever taps posts it as their take.
 import { basketConfigFromEnv } from "@thesis/agent";
-import { plan } from "./bot.ts";
+import { plan, type Plan } from "./bot.ts";
+import { OPTED_IN, OPTED_OUT, optCommand } from "./compose.ts";
 import { loadState, rollDay, saveState } from "./state.ts";
 import { vetter } from "./vet.ts";
 import { fullText, xClient, XError, type Mentions, type XPost } from "./x.ts";
@@ -69,15 +70,26 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
 
   if (p.author_id === me.id || p.referenced_tweets?.some((r) => r.type === "retweeted")) return true;
   const thread = p.conversation_id ?? p.id;
+  const text = stripHandles(fullText(p));
+  // Opt-out (X's automation rules): "stop" is recorded even past the caps; "start" only means
+  // something to someone who stopped, and anyone else's "start" is an ordinary mention.
+  const wasOut = !!state.optedOut[p.author_id];
+  const cmd = optCommand(text);
+  if (cmd === "stop") state.optedOut[p.author_id] = true;
+  if (cmd === "start" && wasOut) delete state.optedOut[p.author_id];
+  if (wasOut && cmd !== "start") { log("skip", { ...base, reason: "opted out" }); return true; }
   if (state.replies >= MAX_PER_DAY) { log("skip", { ...base, reason: "daily reply cap" }); return true; }
   if ((state.byAuthor[p.author_id] ?? 0) >= MAX_PER_AUTHOR) { log("skip", { ...base, reason: "author cap" }); return true; }
   if ((state.byConversation[thread] ?? 0) >= MAX_PER_THREAD) { log("skip", { ...base, reason: "thread cap" }); return true; }
 
-  const text = stripHandles(fullText(p));
   if (!text && !parentPost) { log("skip", { ...base, reason: "empty" }); return true; }
 
-  let out;
-  try {
+  let out: Plan;
+  if (cmd === "stop") {
+    out = { kind: "reply", text: OPTED_OUT, what: "opt_out" };
+  } else if (cmd === "start" && wasOut) {
+    out = { kind: "reply", text: OPTED_IN, what: "opt_in" };
+  } else try {
     out = await plan({
       id: p.id,
       text,
