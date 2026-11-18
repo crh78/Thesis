@@ -186,7 +186,7 @@ export class ForkService {
     this.#o = o;
     this.#program = thesisProgram(o.connection);
     this.#log = o.log ?? (() => {});
-    this.#store = new StateStore(o.statePath, o.lookupTable);
+    this.#store = new StateStore(o.statePath, o.lookupTable, (m) => (o.log ?? console.error)(m));
     this.#valuation = new Valuation(o, this.#store);
     this.#router = new Router(o);
     this.#phoenix = o.phoenix ? new PhoenixDesk(o, o.phoenix, this.#store, this.#program) : null;
@@ -954,6 +954,8 @@ export class ForkService {
     const legs = closes.length ? closes : await this.#phoenix.sweepLegs(owner);
     if (!legs.length) return { done: true as const };
     const payer = this.#o.appPayer.publicKey;
+    // The build's lifetime counts from before its blockhash is fetched.
+    const started = Date.now();
     const { blockhash } = await this.#o.connection.getLatestBlockhash("confirmed");
     const txs = legs.map((l) => {
       const message = new TransactionMessage({
@@ -964,7 +966,7 @@ export class ForkService {
       return new VersionedTransaction(message);
     });
     const buildId = randomUUID();
-    const expires = Date.now() + BUILD_TTL_MS;
+    const expires = started + BUILD_TTL_MS;
     this.#builds.set(buildId, {
       owner: owner.toBase58(),
       messages: txs.map((t) => Buffer.from(t.message.serialize())),
@@ -997,9 +999,11 @@ export class ForkService {
    * many claims per transaction as fit; the author signs each, the app's fee payer pays.
    */
   async buildClaimCreatorFees(author: string, takes?: string[]) {
+    // The build's lifetime counts from before its blockhash is fetched (inside fees.build).
+    const started = Date.now();
     const built = await this.#fees.build(author, takes);
     const buildId = randomUUID();
-    const expires = Date.now() + BUILD_TTL_MS;
+    const expires = started + BUILD_TTL_MS;
     const claims = built.flatMap((b) => b.takes);
     this.#builds.set(buildId, {
       owner: parseKey(author).toBase58(),
@@ -1044,6 +1048,7 @@ export class ForkService {
     const app = await this.#appTake(takeId, { fresh: true });
     // Only the take's author can put it on-chain: with someone else's wallet, the take, its creator
     // fees and its score would be theirs (posting take ids aren't secret: a feed can show one).
+    if (!app.author_wallet) throw new ApiError(409, "no_author_wallet", "This take's author has no wallet yet.");
     if (app.author_wallet !== author) throw new ApiError(403, "not_author", "Only the take's author can post it.");
     if (app.status === "live") throw new ApiError(409, "already_live");
     await this.#checkFunds(authorKey, usd);

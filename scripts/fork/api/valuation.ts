@@ -226,6 +226,7 @@ export class Valuation {
   async lendShareValue(shareMint: string, { retry = false } = {}): Promise<number | null> {
     const hit = this.#shareCache.get(shareMint);
     if (hit && hit.at > Date.now() - 60_000) return hit.usd;
+    if (!this.#o.jupiterApiKey) this.#keyless();
     const read = () => jupiterLendShareValue(shareMint, { apiKey: this.#o.jupiterApiKey }).catch(() => null);
     let v = await read();
     if (!v && retry) {
@@ -236,6 +237,17 @@ export class Valuation {
     return v?.usdcPerShare ?? hit?.usd ?? null;
   }
   #shareCache = new Map<string, { usd: number; at: number }>();
+
+  /**
+   * Prices go through api.jup.ag with JUPITER_API_KEY. Only without a key do they fall back to
+   * the keyless lite-api (slower limits, being phased out): said once, so a missing key shows.
+   */
+  #keyless() {
+    if (this.#warnedKeyless) return;
+    this.#warnedKeyless = true;
+    (this.#o.log ?? console.warn)("JUPITER_API_KEY isn't set: prices use Jupiter's keyless lite-api");
+  }
+  #warnedKeyless = false;
 
   /**
    * A stock's latest trade price (Alpaca), cached STOCK_CACHE_MS, one read per symbol at a time:
@@ -285,6 +297,7 @@ export class Valuation {
     const now = Date.now();
     const stale = mints.filter((m) => !((this.#priceCache.get(m)?.at ?? 0) > now - PRICE_CACHE_MS));
     const key = this.#o.jupiterApiKey;
+    if (!key && stale.length) this.#keyless();
     for (let i = 0; i < stale.length; i += 50) {
       const ids = stale.slice(i, i + 50).join(",");
       const r = await fetch(`${key ? "https://api.jup.ag" : "https://lite-api.jup.ag"}/price/v3?ids=${ids}`, {

@@ -143,7 +143,9 @@ export class Wallets {
         await this.#o.fork.setUsdc(owner, bal - out);
       }
       this.#store.state.cash.push({ wallet: addr, kind, usd, at: new Date().toISOString() });
-      this.#store.save();
+      // Written now, not debounced: the USDC is minted, and losing its record to a crash would
+      // let the wallet past the deposit cap.
+      this.#store.saveNow();
       this.#wallets.delete(addr);
     });
     // The chart snapshot runs in the background: on a wallet's first deposit it reads every take's

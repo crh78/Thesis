@@ -60,6 +60,8 @@ export class PortfolioHistory {
   #reads = new Map<string, Promise<Snapshot>>();
   /** The last value read for wallets whose chart isn't kept (see `active`). */
   #unkept = new Map<string, Snapshot>();
+  /** When each wallet's old snapshots were last thinned (unix s). */
+  #thinnedAt = new Map<string, number>();
 
   constructor(store: StateStore, connection: Connection, portfolio: PortfolioOf, holds: HoldsOf = () => false) {
     this.#store = store;
@@ -163,8 +165,11 @@ export class PortfolioHistory {
     if (!list.length) list.push(...this.#backfill(addr, positions));
     if (list.length && snap.at - list[list.length - 1].at < 60) list[list.length - 1] = snap;
     else list.push(snap);
-    // Thin the old part once an hour of it has piled up past the full-resolution window.
-    if (list[0].at < snap.at - FULL_RESOLUTION_S - HOUR_S) list = history[addr] = downsample(list, snap.at);
+    // Thin the old part at most once an hour per wallet, once it reaches past the full-resolution window.
+    if (list[0].at < snap.at - FULL_RESOLUTION_S && (this.#thinnedAt.get(addr) ?? 0) <= snap.at - HOUR_S) {
+      list = history[addr] = downsample(list, snap.at);
+      this.#thinnedAt.set(addr, snap.at);
+    }
     if (list.length > MAX_SNAPSHOTS) list.splice(0, list.length - MAX_SNAPSHOTS);
     this.#store.save();
     return snap;

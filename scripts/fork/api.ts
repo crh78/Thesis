@@ -236,7 +236,12 @@ async function serve(): Promise<void> {
   // The state file is written a few seconds after a change: write what's pending before stopping.
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
     process.once(signal, () => {
-      service.flush();
+      try {
+        service.flush();
+      } catch (e) {
+        log(`STATE NOT SAVED on ${signal}: ${e instanceof Error ? e.message : e}`);
+        process.exit(1);
+      }
       process.exit(0);
     });
   }

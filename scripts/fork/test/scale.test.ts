@@ -1,6 +1,6 @@
 // Fork API scale (review P1) and the publish author check (S2).
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -9,7 +9,7 @@ import { emptyState } from "../../../packages/venues/bank/src/state.ts";
 import { ApiError, type AppTake, type Snapshot } from "../api/common.ts";
 import { downsample } from "../api/history.ts";
 import { ForkService, type ServiceOpts } from "../api/service.ts";
-import { StateStore } from "../api/store.ts";
+import { SAVE_DEBOUNCE_MS, SAVE_RETRY_MS, StateStore } from "../api/store.ts";
 
 const TAKE_ID = "00000000-0000-4000-8000-0000000000cc";
 
@@ -66,19 +66,45 @@ test("reading a chart for a wallet with no deposit or position saves nothing", a
   assert.equal(existsSync(statePath), false, "no history entry, so no state write");
 });
 
-test("a deposit starts the wallet's chart; saves are debounced, compact and flushed on demand", async (t) => {
+test("a deposit is saved at once; the chart snapshot after it is debounced; saves are compact", async (t) => {
   const { options, statePath } = fixture(t);
   const service = new ForkService(options);
   const addr = Keypair.generate().publicKey.toBase58();
   await service.deposit(addr, 10);
   await service.history(addr, "1D");
-  assert.equal(existsSync(statePath), false, "written a few seconds later, not on every change");
+  // The deposit's record is on disk right away (its USDC is already minted)...
+  const first = JSON.parse(readFileSync(statePath, "utf8"));
+  assert.equal(first.cash.length, 1);
+  // ...the chart snapshot that followed waits for the debounce.
+  assert.equal(first.history, undefined, "written a few seconds later, not on every change");
   service.flush();
   const text = readFileSync(statePath, "utf8");
   assert.ok(!text.includes("\n"), "compact JSON");
-  const saved = JSON.parse(text);
-  assert.equal(saved.cash.length, 1);
-  assert.ok(saved.history[addr].length >= 1);
+  assert.ok(JSON.parse(text).history[addr].length >= 1);
+});
+
+test("a failed write doesn't throw from the timer: it's logged, kept pending and retried", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "thesis-store-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const missing = join(dir, "not-yet");
+  const path = join(missing, "api-state.json");
+  const logs: string[] = [];
+  const store = new StateStore(path, null, (m) => logs.push(m));
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  store.state.cash.push({ wallet: "w", kind: "deposit", usd: 1, at: new Date().toISOString() });
+  store.save();
+  // The debounced write fails (its folder doesn't exist): no throw out of the timer.
+  t.mock.timers.tick(SAVE_DEBOUNCE_MS);
+  assert.equal(store.pending, true, "still pending after the failure");
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /STATE NOT SAVED/);
+  assert.throws(() => store.flush(), /ENOENT/);
+  assert.equal(store.pending, true, "an explicit flush that fails keeps it pending too");
+  // Once the folder is there, the scheduled retry writes it.
+  mkdirSync(missing);
+  t.mock.timers.tick(SAVE_RETRY_MS);
+  assert.equal(store.pending, false);
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).cash.length, 1);
 });
 
 test("a debounced save writes the file atomically, once", async (t) => {
@@ -137,7 +163,10 @@ test("only the take's author can publish it", async (t) => {
   const { options } = fixture(t, { take: appTake(author) });
   await assert.rejects(new ForkService(options).buildPublish(TAKE_ID, someoneElse, 10), isNotAuthor);
 
-  // A take with no author wallet (a seeded demo take) can't be published by anyone.
+  // A take whose author has no wallet yet can't be published by anyone, and says why.
   const demo = fixture(t, { take: appTake(null) });
-  await assert.rejects(new ForkService(demo.options).buildPublish(TAKE_ID, someoneElse, 10), isNotAuthor);
+  await assert.rejects(
+    new ForkService(demo.options).buildPublish(TAKE_ID, someoneElse, 10),
+    (e: unknown) => e instanceof ApiError && e.status === 409 && e.code === "no_author_wallet",
+  );
 });
