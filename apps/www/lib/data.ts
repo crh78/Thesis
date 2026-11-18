@@ -172,9 +172,10 @@ export async function getProfileTakes(id: string): Promise<Take[]> {
 }
 
 /** A profile shows at most this many takes, and reads their receipts this many at a time, so one
- *  render doesn't send the fork API a burst of 40 receipt builds at once. */
+ *  render doesn't send the fork API a burst of 40 receipt builds at once (40 at 8 at a time is at
+ *  most 5 rounds of getReceipt's 5 s timeout). */
 const PROFILE_TAKES = 40;
-const RECEIPTS_AT_ONCE = 4;
+const RECEIPTS_AT_ONCE = 8;
 
 /** `fn` over `items`, at most `limit` running at once, results in order. */
 export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -216,9 +217,12 @@ export async function getReceipt(id: string): Promise<Receipt | null> {
   if (!UUID.test(id)) return null;
   const url = `${forkApiUrl()}/takes/${id}`; // outside the catch: a missing setting is a setup error
   const headers = { "x-thesis-service-key": forkServiceKey() };
-  const r = await fetch(url, { headers, next: { revalidate: 15 } }).catch(() => null);
-  return r?.ok ? ((await r.json()) as Receipt) : null;
+  // A slow receipt (cold position scans right after a fork API restart) gives up after 5 s and the
+  // page shows the social figure instead, as on a 429, so a profile render stays inside Vercel's limit.
+  const r = await fetch(url, { headers, next: { revalidate: 15 }, signal: AbortSignal.timeout(RECEIPT_TIMEOUT_MS) }).catch(() => null);
+  return r?.ok ? ((await r.json().catch(() => null)) as Receipt | null) : null;
 }
+const RECEIPT_TIMEOUT_MS = 5000;
 
 const FACE_COLORS = ["#FFD5DC", "#C0AEDE", "#B6E3F4", "#D1D4F9", "#FFDFBF", "#C8ECD4", "#FFFFFF"];
 
