@@ -62,6 +62,9 @@ export async function sendBuyIn(id: string, author: string, usd: number, signAnd
   } catch (e) {
     const landed = e instanceof ForkError && (e.code === "already_on_chain" || e.code === "already_live");
     if (landed) return;
+    // A split buy-in that stopped partway: the caller offers to finish it or swap it back
+    // (StoppedTrade); Me lists it too. Never "couldn't check".
+    if (e instanceof ForkError && e.code === "trade_incomplete") { markTraded(); throw e; }
     // The send may have landed even though the answer didn't come back.
     const onChain = await isOnChain(id);
     if (onChain === true) return;

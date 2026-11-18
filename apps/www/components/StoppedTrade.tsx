@@ -11,6 +11,7 @@ import { ForkError, retryTrade, sweepToCash, type Built, type Incomplete, type R
 const DONE: Record<Recovery, string> = {
   complete: "Done: the trade went through.",
   swept: "The leftover is back in your balance as cash.",
+  partial: "Most of the leftover is back in your balance as cash. If any is left, Me shows it with the same button.",
   nothing: "Nothing was left to swap: it's already back in your balance.",
   gone: "Nothing left to do: this trade was already cleared up.",
 };

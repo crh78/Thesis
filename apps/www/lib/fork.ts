@@ -219,8 +219,11 @@ export function stoppedTrade(e: unknown): { trade: Incomplete | null; retry: boo
   return { trade, retry: e.data?.retry === true && trade?.next !== "sweep" };
 }
 
-/** How a retry or sweep ended: `complete` when the trade went through after all (`trade_complete`). */
-export type Recovery = "complete" | "swept" | "nothing" | "gone";
+/**
+ * How a retry or sweep ended: `complete` when the trade went through after all (`trade_complete`);
+ * `partial` when the sweep still had something left after its last round.
+ */
+export type Recovery = "complete" | "swept" | "partial" | "nothing" | "gone";
 
 /**
  * Builds the rest of a stopped split trade once more and sends it (`POST /wallets/:w/retry`).
@@ -243,14 +246,23 @@ export async function retryTrade(address: string, position: string | null, signA
  * round until the API says `done`; Phoenix legs then go through the Phoenix cash-out.
  */
 export async function sweepToCash(address: string, position: string | null, signAndSubmit: (b: Built) => Promise<string[]>): Promise<Recovery> {
+  const ROUNDS = 4;
   let swept = false;
   let phoenix = false;
+  let done = false;
   try {
-    for (let round = 0; round < 4; round++) {
-      const r = await fork<{ done: boolean; buildId?: string; transactions?: string[]; phoenixCashOut?: boolean }>(
-        "POST", `/wallets/${address}/sweep`, position ? { position } : {});
+    for (let round = 0; round < ROUNDS && !done; round++) {
+      let r: { done: boolean; buildId?: string; transactions?: string[]; phoenixCashOut?: boolean };
+      try {
+        r = await fork("POST", `/wallets/${address}/sweep`, position ? { position } : {});
+      } catch (e) {
+        // A sweep that lands forgets the stopped trade, so asking again about it can answer
+        // 404 incomplete_missing: after a landed round, that means nothing is left.
+        if (swept && e instanceof ForkError && e.code === "incomplete_missing") { done = true; break; }
+        throw e;
+      }
       phoenix ||= !!r.phoenixCashOut;
-      if (r.done || !r.buildId || !r.transactions?.length) break;
+      if (r.done || !r.buildId || !r.transactions?.length) { done = true; break; }
       await signAndSubmit({ buildId: r.buildId, transactions: r.transactions });
       swept = true;
     }
@@ -259,6 +271,8 @@ export async function sweepToCash(address: string, position: string | null, sign
     throw e;
   }
   if (phoenix) await cashOutPhoenix(address, signAndSubmit);
+  // Every round landed and the API never said `done`: something may be left (Me still lists it).
+  if (swept && !done) return "partial";
   return swept || phoenix ? "swept" : "nothing";
 }
 
