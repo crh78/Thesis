@@ -17,11 +17,17 @@
 //   THESIS_WEBHOOK_AUTH          sent as the Authorization header (e.g. "Bearer <anon key>")
 //   FORK_RELAY_RECORD            appends each raw { notification, transaction } as a JSON line
 //                                to this file (for test fixtures)
+//   FORK_RELAY_STATE             the last transaction handled, default .data/fork/relay-state.json:
+//                                on start and on each reconnect the relay back-fills everything
+//                                since it (getSignaturesForAddress), so restarts lose nothing
+//
+// Deliveries are retried with backoff instead of dropped (`Relay`), and every RPC call and POST
+// has a timeout.
 //
 // No dependencies beyond Node 24 (global WebSocket and fetch), so it runs from anywhere.
 import { createHmac, randomUUID } from "node:crypto";
-import { appendFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { envVar } from "../../packages/venues/registry/src/lib/env.ts";
 
@@ -115,21 +121,35 @@ export function quicknodeHeaders(body: string, payload: unknown, token?: string)
 
 // --- Runner ------------------------------------------------------------------------------
 
-async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const body = (await res.json()) as { result?: T; error?: { message: string } };
-  if (body.error) throw new Error(`${method}: ${body.error.message}`);
-  return body.result as T;
+const REPO_ROOT = join(import.meta.dirname, "../..");
+/** Every RPC call gives up after this long, so one hung call (Surfpool waiting on Helius) can't stall the queue. */
+const RPC_TIMEOUT_MS = 15_000;
+const POST_TIMEOUT_MS = 30_000;
+
+export type RpcCall = <T>(method: string, params: unknown[]) => Promise<T>;
+
+/** JSON-RPC over HTTP, with a timeout on every call. */
+export function httpRpc(url: string): RpcCall {
+  return async <T>(method: string, params: unknown[]): Promise<T> => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`${method}: HTTP ${res.status}`);
+    const body = (await res.json()) as { result?: T; error?: { message: string } };
+    if (body.error) throw new Error(`${method}: ${body.error.message}`);
+    return body.result as T;
+  };
 }
 
-async function fetchTransaction(rpcUrl: string, signature: string): Promise<RpcTransaction | null> {
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+async function fetchTransaction(rpc: RpcCall, signature: string, wait: (ms: number) => Promise<void> = sleep): Promise<RpcTransaction | null> {
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
-      const tx = await rpc<RpcTransaction | null>(rpcUrl, "getTransaction", [
+      const tx = await rpc<RpcTransaction | null>("getTransaction", [
         signature,
         { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 },
       ]);
@@ -137,37 +157,57 @@ async function fetchTransaction(rpcUrl: string, signature: string): Promise<RpcT
     } catch (err) {
       if (attempt === 9) console.warn(`getTransaction ${signature}: ${(err as Error).message}`);
     }
-    await new Promise((r) => setTimeout(r, 300));
+    await wait(300);
   }
   return null;
 }
 
-/** Posts one payload to THESIS_WEBHOOK_URL (or prints it without one). True once delivered. */
-async function deliver(payload: unknown): Promise<boolean> {
-  const url = setting("THESIS_WEBHOOK_URL");
+/** One delivery attempt. `status` is null when the webhook didn't answer. */
+export type PostResult = { ok: true } | { ok: false; status: number | null; detail: string };
+
+/** POSTs one payload to `url`, signed like QuickNode (or prints it when there's no URL). */
+async function postPayload(url: string | undefined, payload: unknown): Promise<PostResult> {
   const body = JSON.stringify(payload);
   if (!url) {
     console.log(JSON.stringify(payload, null, 2));
+    return { ok: true };
+  }
+  try {
+    const headers = quicknodeHeaders(body, payload, setting("THESIS_WEBHOOK_TOKEN"));
+    const auth = setting("THESIS_WEBHOOK_AUTH");
+    if (auth) headers.authorization = auth;
+    const res = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(POST_TIMEOUT_MS) });
+    if (res.ok) {
+      console.log(`→ ${res.status} ${url}`);
+      return { ok: true };
+    }
+    return { ok: false, status: res.status, detail: (await res.text().catch(() => "")).slice(0, 300) };
+  } catch (err) {
+    return { ok: false, status: null, detail: (err as Error).message };
+  }
+}
+
+/** A 4xx other than 408 and 429 won't change on a retry. */
+const permanent = (status: number | null) => status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429;
+
+/**
+ * Posts one payload with a few quick retries (1 s apart). For `relayTransactions`, whose callers
+ * wait on it; the relay itself retries with backoff (`Relay`). True once delivered.
+ */
+async function deliver(payload: unknown): Promise<boolean> {
+  const url = setting("THESIS_WEBHOOK_URL");
+  if (!url) {
+    await postPayload(url, payload);
     return false;
   }
-  // Like the Stream: retry every second, give up after 3 retries.
   for (let attempt = 0; attempt <= 3; attempt++) {
-    try {
-      const headers = quicknodeHeaders(body, payload, setting("THESIS_WEBHOOK_TOKEN"));
-      const auth = setting("THESIS_WEBHOOK_AUTH");
-      if (auth) headers.authorization = auth;
-      const res = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(30_000) });
-      if (res.ok) {
-        console.log(`→ ${res.status} ${url}`);
-        return true;
-      }
-      console.warn(`→ ${res.status} ${url}: ${(await res.text()).slice(0, 300)}`);
-    } catch (err) {
-      console.warn(`→ ${url}: ${(err as Error).message}`);
-    }
-    if (attempt < 3) await new Promise((r) => setTimeout(r, 1000));
+    const r = await postPayload(url, payload);
+    if (r.ok) return true;
+    console.warn(`→ ${r.status ?? "no answer"} ${url}: ${r.detail}`);
+    if (permanent(r.status)) break;
+    if (attempt < 3) await sleep(1000);
   }
-  console.error("✗ Delivery failed after 3 retries; continuing with the next transaction.");
+  console.error("✗ Delivery failed; the relay delivers it from the program's logs.");
   return false;
 }
 
@@ -181,9 +221,10 @@ export const webhookConfigured = (): boolean => Boolean(setting("THESIS_WEBHOOK_
  * backend stores each event once. Returns how many were delivered.
  */
 export async function relayTransactions(rpcUrl: string, signatures: string[], filter: StreamFilter = loadFilter()): Promise<number> {
+  const rpc = httpRpc(rpcUrl);
   let delivered = 0;
   for (const signature of signatures) {
-    const tx = await fetchTransaction(rpcUrl, signature);
+    const tx = await fetchTransaction(rpc, signature);
     if (!tx || tx.meta?.err) continue;
     const note: LogsNotification = { context: { slot: tx.slot }, value: { signature, err: null, logs: tx.meta?.logMessages ?? [] } };
     const payload = relayPayload(filter, note, tx);
@@ -192,19 +233,302 @@ export async function relayTransactions(rpcUrl: string, signatures: string[], fi
   return delivered;
 }
 
+/** One `getSignaturesForAddress` entry. */
+export type SignatureInfo = { signature: string; slot: number; err: unknown };
+
+/**
+ * The address's confirmed transactions after `until`, oldest first. The RPC pages newest first,
+ * 1,000 at a time; at most `max` are read, and `truncated` says older ones (just after `until`)
+ * were left out.
+ */
+export async function signaturesSince(rpc: RpcCall, address: string, until: string | null, max: number): Promise<{ signatures: SignatureInfo[]; truncated: boolean }> {
+  const out: SignatureInfo[] = [];
+  let before: string | undefined;
+  while (out.length < max) {
+    const limit = Math.min(1000, max - out.length);
+    const page = await rpc<SignatureInfo[]>("getSignaturesForAddress", [
+      address,
+      { limit, commitment: "confirmed", ...(until ? { until } : {}), ...(before ? { before } : {}) },
+    ]);
+    out.push(...page);
+    if (page.length < limit) return { signatures: out.reverse(), truncated: false };
+    before = page[page.length - 1].signature;
+  }
+  return { signatures: out.reverse(), truncated: true };
+}
+
+/** Where the relay keeps the last transaction it handled, so a restart back-fills from there. */
+export type RelayState = { last(): string | null; save(signature: string): void };
+
+/** The state in a JSON file, rewritten atomically after each transaction. */
+export function fileRelayState(path: string): RelayState {
+  let last: string | null = null;
+  try {
+    last = (JSON.parse(readFileSync(path, "utf8")) as { lastSignature?: string }).lastSignature ?? null;
+  } catch {
+    // No file yet: the first start sets a starting point.
+  }
+  return {
+    last: () => last,
+    save(signature) {
+      last = signature;
+      mkdirSync(dirname(path), { recursive: true });
+      const tmp = `${path}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ lastSignature: signature, savedAt: new Date().toISOString() }));
+      renameSync(tmp, path);
+    },
+  };
+}
+
+export type RelayOptions = {
+  filter: StreamFilter;
+  rpc: RpcCall;
+  /** One delivery attempt. */
+  post: (payload: unknown) => Promise<PostResult>;
+  state: RelayState;
+  /** Back-fill from `state` on start and reconnect (default true). Off when only printing. */
+  backfill?: boolean;
+  log?: (line: string) => void;
+  error?: (line: string) => void;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  /** Live transactions queued at most; past it new ones are dropped and back-filled later. */
+  maxQueue?: number;
+  /** Transactions read per back-fill at most. */
+  maxBackfill?: number;
+  /** How long one delivery is retried before it's skipped, loudly. */
+  giveUpMs?: number;
+  /** The longest wait between retries. */
+  maxDelayMs?: number;
+  /** FORK_RELAY_RECORD: called with each live notification and its transaction. */
+  record?: (note: LogsNotification, tx: RpcTransaction | null) => void;
+};
+
+type Job = { kind: "tx"; signature: string; slot: number; failed: boolean; note?: LogsNotification } | { kind: "backfill" };
+
+/**
+ * The relay's delivery queue: one transaction at a time, in order, like the Stream.
+ *
+ * - **Back-fill.** On start and on every reconnect it reads the program's transactions since the
+ *   last one it handled (`getSignaturesForAddress(program, { until })`, kept in `state`) and
+ *   delivers them first, oldest first, so restarts and dropped sockets lose nothing. With no
+ *   state yet, it starts from the newest transaction and doesn't replay older history.
+ * - **Retries.** A failed delivery is retried with backoff (1 s doubling to a minute), not dropped
+ *   after 3 tries, and stays at the head of the queue so order holds. A 4xx other than 408/429 is
+ *   skipped at once; anything else is skipped after `giveUpMs`, with a loud log naming it.
+ * - **Cap.** Past `maxQueue` queued transactions new ones are dropped (loudly) and back-filled from
+ *   the state once the queue drains.
+ *
+ * Delivering a transaction twice is harmless: the webhook stores each event once.
+ */
+export class Relay {
+  #o: Required<Omit<RelayOptions, "record">> & Pick<RelayOptions, "record">;
+  #queue: Job[] = [];
+  #pending = new Set<string>();
+  #recent = new Set<string>();
+  #recentOrder: string[] = [];
+  #overflow = false;
+  #running: Promise<void> | null = null;
+
+  constructor(o: RelayOptions) {
+    this.#o = {
+      backfill: true,
+      log: (l) => console.error(l),
+      error: (l) => console.error(l),
+      sleep,
+      now: Date.now,
+      maxQueue: 10_000,
+      maxBackfill: 5_000,
+      giveUpMs: 60 * 60_000,
+      maxDelayMs: 60_000,
+      ...o,
+    };
+  }
+
+  /** A live `logsNotification`. */
+  notify(note: LogsNotification): void {
+    const signature = note.value.signature;
+    if (this.#pending.has(signature) || this.#recent.has(signature)) return;
+    if (this.#queue.length >= this.#o.maxQueue) {
+      if (!this.#overflow) this.#o.error(`✗ relay queue full (${this.#o.maxQueue}): dropping new transactions until it drains, then back-filling them`);
+      this.#overflow = true;
+      return;
+    }
+    this.#queue.push({ kind: "tx", signature, slot: note.context.slot, failed: note.value.err != null, note });
+    this.#pending.add(signature);
+    this.#kick();
+  }
+
+  /** Queues a back-fill (on start and on each reconnect, before subscribing). */
+  backfill(): void {
+    if (!this.#o.backfill || this.#queue.some((j) => j.kind === "backfill")) return;
+    this.#queue.push({ kind: "backfill" });
+    this.#kick();
+  }
+
+  /** Resolves once the queue is empty. */
+  async drained(): Promise<void> {
+    while (this.#running) await this.#running;
+  }
+
+  #kick() {
+    if (this.#running) return;
+    this.#running = this.#work()
+      .catch((e) => this.#o.error(`✗ relay: ${(e as Error).message}`))
+      .finally(() => {
+        this.#running = null;
+        if (this.#queue.length) this.#kick();
+      });
+  }
+
+  async #work() {
+    for (;;) {
+      const job = this.#queue.shift();
+      if (!job) {
+        if (!this.#overflow || !this.#o.backfill) return;
+        this.#overflow = false;
+        await this.#backfill();
+        continue;
+      }
+      if (job.kind === "backfill") {
+        await this.#backfill();
+        continue;
+      }
+      await this.#handle(job);
+      this.#pending.delete(job.signature);
+      this.#remember(job.signature);
+      try {
+        this.#o.state.save(job.signature);
+      } catch (e) {
+        this.#o.error(`✗ relay state not saved (${(e as Error).message}): a restart would back-fill from an older transaction`);
+      }
+    }
+  }
+
+  #remember(signature: string) {
+    this.#recent.add(signature);
+    this.#recentOrder.push(signature);
+    if (this.#recentOrder.length > 20_000) this.#recent.delete(this.#recentOrder.shift()!);
+  }
+
+  #delay(attempt: number) {
+    return Math.min(this.#o.maxDelayMs, 1000 * 2 ** attempt);
+  }
+
+  async #backfill() {
+    const until = this.#o.state.last();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        if (!until) {
+          // First start: begin at the newest transaction; older history isn't replayed.
+          const [newest] = await this.#o.rpc<SignatureInfo[]>("getSignaturesForAddress", [this.#o.filter.programId, { limit: 1, commitment: "confirmed" }]);
+          if (newest && !this.#o.state.last()) {
+            this.#o.state.save(newest.signature);
+            this.#o.log(`No relay state yet: starting after ${newest.signature}; earlier transactions aren't replayed`);
+          }
+          return;
+        }
+        const { signatures, truncated } = await signaturesSince(this.#o.rpc, this.#o.filter.programId, until, this.#o.maxBackfill);
+        if (truncated) this.#o.error(`✗ more than ${this.#o.maxBackfill} transactions since ${until}: back-filling the newest ${this.#o.maxBackfill}; older ones are lost`);
+        const jobs: Job[] = [];
+        for (const s of signatures) {
+          if (this.#pending.has(s.signature) || this.#recent.has(s.signature)) continue;
+          jobs.push({ kind: "tx", signature: s.signature, slot: s.slot, failed: s.err != null });
+          this.#pending.add(s.signature);
+        }
+        // Ahead of anything already queued: those came in live, so they're newer.
+        this.#queue.unshift(...jobs);
+        if (jobs.length) this.#o.log(`Back-filling ${jobs.length} transaction(s) since ${until}`);
+        return;
+      } catch (e) {
+        if (attempt >= 9) {
+          this.#o.error(`✗ back-fill failed (${(e as Error).message}); the next start or reconnect tries again`);
+          return;
+        }
+        this.#o.log(`back-fill: ${(e as Error).message}; retrying in ${this.#delay(attempt) / 1000}s`);
+        await this.#o.sleep(this.#delay(attempt));
+      }
+    }
+  }
+
+  async #handle(job: Extract<Job, { kind: "tx" }>) {
+    const { signature } = job;
+    if (job.failed) {
+      this.#o.log(`· skipped failed tx ${signature}`);
+      return;
+    }
+    const started = this.#o.now();
+    let tx: RpcTransaction | null = null;
+    let announced = false;
+    for (let attempt = 0; ; attempt++) {
+      let why: string;
+      if (!tx) tx = await fetchTransaction(this.#o.rpc, signature, this.#o.sleep);
+      if (attempt === 0 && job.note) this.#o.record?.(job.note, tx);
+      if (tx?.meta?.err) {
+        this.#o.log(`· skipped failed tx ${signature}`);
+        return;
+      }
+      // A live notification's logs stand in for a transaction the RPC can't return; a
+      // back-filled one has no logs, so it waits for the RPC.
+      const note: LogsNotification | null =
+        job.note ?? (tx ? { context: { slot: tx.slot }, value: { signature, err: null, logs: tx.meta?.logMessages ?? [] } } : null);
+      if (note) {
+        const payload = relayPayload(this.#o.filter, note, tx);
+        if (!payload) return;
+        if (!announced) {
+          const ixs = (payload as { transactions: { instructions: string[] }[] }).transactions.flatMap((t) => t.instructions);
+          this.#o.log(`· ${signature} slot ${tx?.slot ?? job.slot} [${ixs.join(", ")}]`);
+          announced = true;
+        }
+        const r = await this.#o.post(payload);
+        if (r.ok) return;
+        if (permanent(r.status)) {
+          this.#o.error(`✗ ${signature}: the webhook rejected it (HTTP ${r.status}): skipped. ${r.detail}`);
+          return;
+        }
+        why = `${r.status ? `HTTP ${r.status}` : "no answer"}${r.detail ? `: ${r.detail}` : ""}`;
+      } else {
+        why = "getTransaction returned nothing";
+      }
+      if (this.#o.now() - started >= this.#o.giveUpMs) {
+        this.#o.error(`✗ ${signature}: not delivered after ${Math.round(this.#o.giveUpMs / 60_000)} min (${why}): skipped. Replay it with relayTransactions once the webhook is back.`);
+        return;
+      }
+      const delay = this.#delay(attempt);
+      const line = `✗ ${signature}: ${why}; retry ${attempt + 1} in ${delay / 1000}s (${this.#queue.length} queued behind it)`;
+      (attempt >= 2 ? this.#o.error : this.#o.log)(line);
+      await this.#o.sleep(delay);
+    }
+  }
+}
+
 export function runRelay(): void {
   const wsUrl = process.env.FORK_WS_URL ?? "ws://127.0.0.1:18900";
   const rpcUrl = process.env.FORK_RPC_URL ?? "http://127.0.0.1:18899";
   const filter = loadFilter();
-  const target = setting("THESIS_WEBHOOK_URL") ?? "stdout";
-  // Deliveries go out one at a time, in order, like the Stream's.
-  let queue = Promise.resolve();
+  const url = setting("THESIS_WEBHOOK_URL");
+  const target = url ?? "stdout";
+  const statePath = setting("FORK_RELAY_STATE") ?? join(REPO_ROOT, ".data/fork/relay-state.json");
+  let memory: string | null = null;
+  const relay = new Relay({
+    filter,
+    rpc: httpRpc(rpcUrl),
+    post: (payload) => postPayload(url, payload),
+    // Printing only: nothing to catch up on, and no state file.
+    state: url ? fileRelayState(statePath) : { last: () => memory, save: (s) => void (memory = s) },
+    backfill: Boolean(url),
+    record: process.env.FORK_RELAY_RECORD
+      ? (notification, transaction) => appendFileSync(process.env.FORK_RELAY_RECORD!, JSON.stringify({ notification, transaction }) + "\n")
+      : undefined,
+  });
   let retryMs = 1000;
 
   const connect = () => {
     const ws = new WebSocket(wsUrl);
     ws.addEventListener("open", () => {
       retryMs = 1000;
+      // Queued before the subscription, so what landed while disconnected goes out first.
+      relay.backfill();
       ws.send(
         JSON.stringify({
           jsonrpc: "2.0",
@@ -213,28 +537,18 @@ export function runRelay(): void {
           params: [{ mentions: [filter.programId] }, { commitment: "confirmed" }],
         }),
       );
-      console.error(`Relaying ${filter.programId} logs from ${wsUrl} → ${target}`);
+      console.error(`Relaying ${filter.programId} logs from ${wsUrl} → ${target}${url ? ` (state in ${statePath})` : ""}`);
     });
     ws.addEventListener("message", (event) => {
-      const msg = JSON.parse(String(event.data));
+      let msg: { error?: { message: string }; method?: string; params?: { result: LogsNotification } };
+      try {
+        msg = JSON.parse(String(event.data));
+      } catch {
+        return;
+      }
       if (msg.error) console.error(`logsSubscribe: ${msg.error.message}`);
-      if (msg.method !== "logsNotification") return;
-      const note = msg.params.result as LogsNotification;
-      queue = queue.then(async () => {
-        if (note.value.err) {
-          console.error(`· skipped failed tx ${note.value.signature}`);
-          return;
-        }
-        const tx = await fetchTransaction(rpcUrl, note.value.signature);
-        if (process.env.FORK_RELAY_RECORD) {
-          appendFileSync(process.env.FORK_RELAY_RECORD, JSON.stringify({ notification: note, transaction: tx }) + "\n");
-        }
-        const payload = relayPayload(filter, note, tx);
-        if (!payload) return;
-        const ixs = (payload as { transactions: { instructions: string[] }[] }).transactions.flatMap((t) => t.instructions);
-        console.error(`· ${note.value.signature} slot ${note.context.slot} [${ixs.join(", ")}]`);
-        await deliver(payload);
-      }).catch((err) => console.error(`✗ ${(err as Error).message}`));
+      if (msg.method !== "logsNotification" || !msg.params) return;
+      relay.notify(msg.params.result);
     });
     ws.addEventListener("close", () => {
       console.error(`Websocket closed; reconnecting in ${retryMs / 1000}s`);
