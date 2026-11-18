@@ -258,6 +258,7 @@ mod props {
             status: TakeStatus::Open,
             result_bps: 0,
             bump: 0,
+            closed_at: 0,
         }
     }
 

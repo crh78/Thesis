@@ -270,15 +270,15 @@ fn an_author_who_sells_gets_the_escrow_back_before_the_horizon() {
     let author_pos = position_pda(&take, &author.pubkey(), AUTHOR_POSITION_ID);
     assert_eq!(env.fetch::<Position>(&author_pos).escrowed, 10 * USDC);
 
-    // The buy-in settles only with its take (its prices set the headline), but the sale pays
-    // its escrow back now.
+    // The buy-in settles only with its take (its sale sets the headline), but the sale pays its
+    // escrow back at once.
     env.set_time(NOW + DAY);
     let before = env.balance(&author.usdc);
     env.exit_position(&author, &take, &author_pos).unwrap();
     assert_eq!(env.balance(&author.usdc) - before, 10 * USDC);
     assert_eq!(env.fetch::<Position>(&author_pos).escrowed, 0);
     let t: Take = env.fetch(&take);
-    assert_eq!(t.status, TakeStatus::Open);
+    assert_eq!(t.status, TakeStatus::Closed);
 }
 
 #[test]

@@ -322,6 +322,39 @@ fn create_take_validates_basket_horizon_and_stake() {
 }
 
 #[test]
+fn the_launch_config_takes_only_a_one_year_horizon() {
+    // DEFAULT_CONFIG_PARAMS in packages/chain: 364 to 366 days, so every take auto-settles a
+    // year after posting (the fork API passes posting + 365 days).
+    let mut env = Env::new();
+    let admin = env.admin.insecure_clone();
+    let mut params = default_params();
+    params.min_horizon_secs = 364 * DAY;
+    params.max_horizon_secs = 366 * DAY;
+    let ix = env.update_config_ix(
+        &admin.pubkey(),
+        UpdateConfigArgs {
+            params,
+            new_admin: None,
+            new_settler: None,
+            new_badge_uri_base: None,
+        },
+    );
+    env.send(&[ix], &[&admin]).unwrap();
+
+    let author = env.user(100 * USDC);
+    for (id, horizon) in [(1, 30 * DAY), (2, 364 * DAY - 1), (3, 366 * DAY + 1)] {
+        let mut a = env.take_args(id, vec![spot_leg(10_000)], 10 * USDC);
+        a.horizon_end = NOW + horizon;
+        let ixs = env.create_take_ix(&author, &author.pubkey(), a);
+        assert_error(env.send(&ixs, &[&author.key]), "HorizonOutOfRange");
+    }
+    let mut a = env.take_args(4, vec![spot_leg(10_000)], 10 * USDC);
+    a.horizon_end = NOW + 365 * DAY;
+    let take = env.create_take(&author, a);
+    assert_eq!(env.fetch::<Take>(&take).horizon_end, NOW + 365 * DAY);
+}
+
+#[test]
 fn paused_blocks_new_takes_and_positions() {
     let (mut env, _author, take) = env_with_take();
     let admin = env.admin.insecure_clone();
@@ -424,6 +457,22 @@ fn fades_only_include_fadeable_legs_and_pay_the_creator_share() {
         (t.faders, t.total_faded, t.open_positions),
         (1, 10 * USDC, 2)
     );
+}
+
+#[test]
+fn an_author_cannot_fade_their_own_take() {
+    let mut env = Env::new();
+    let author = env.user(100 * USDC);
+    let take_args = env.take_args(1, vec![prediction_leg(10_000)], 10 * USDC);
+    let take = env.create_take(&author, take_args);
+    assert_error(
+        env.open_position(Side::Fade, &author, &take, args(1, 10 * USDC, 0b1)),
+        "AuthorCannotFade",
+    );
+    // Anyone else can.
+    let fader = env.user(100 * USDC);
+    env.open_position(Side::Fade, &fader, &take, args(1, 10 * USDC, 0b1))
+        .unwrap();
 }
 
 #[test]

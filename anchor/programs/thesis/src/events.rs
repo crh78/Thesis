@@ -137,3 +137,12 @@ pub struct BadgeMinted {
     pub kind: BadgeKind,
     pub mint: Pubkey,
 }
+
+/// The author sold their buy-in: the take takes no new backs or fades, and settles on the sale's
+/// prices (`settle_take`). Emitted after `PositionExited`, in the same instruction.
+#[event]
+pub struct TakeClosed {
+    pub take: Pubkey,
+    pub author: Pubkey,
+    pub closed_at: i64,
+}

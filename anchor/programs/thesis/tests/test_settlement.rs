@@ -410,7 +410,7 @@ fn settlement_rejects_positions_and_profiles_that_belong_to_someone_else() {
     let backer_pos = open(&mut env, Side::Back, &backer, &take, 1, 10 * USDC, 0b1);
     env.set_time(HORIZON + DELAY + 1);
 
-    // settle_take accounts: config, take, author_position, author_profile.
+    // settle_take accounts: config, take, author_position, author_profile, author_exit.
     let swap = |env: &Env, i: usize, key: Pubkey| {
         let mut ix = env.settle_take_ix(&take, &author.pubkey());
         ix.accounts[i].pubkey = key;
