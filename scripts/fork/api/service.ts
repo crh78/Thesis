@@ -20,7 +20,7 @@
 import { createHash, createPublicKey, randomUUID, verify } from "node:crypto";
 import BN from "bn.js";
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
-import { ComputeBudgetProgram, Keypair, PublicKey, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, PublicKey, TransactionMessage, VersionedMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import {
   BADGE_KIND_INDEX,
   BADGE_META,
@@ -113,6 +113,14 @@ const SUBMISSION_KEEP_MS = 10 * 60_000;
 export const SUBMISSION_WAIT_MAX_MS = 10_000;
 /** A sale or cash-out build waits at most this long for the owner's submits still confirming. */
 const AFTER_PENDING_MS = 10_000;
+/** A refresh keeps a build's quotes while they're at most this old; older: 409 quote_stale. */
+export const QUOTE_REFRESH_MS = 45_000;
+/** Builds refresh their market accounts from mainnet unless this process did in the last MARKET_FRESH_MS. */
+const MARKET_FRESH_MS = 30_000;
+/** A submit refreshes them again only past SUBMIT_MARKET_FRESH_MS (Phoenix's always: it refuses a stale mark). */
+const SUBMIT_MARKET_FRESH_MS = 60_000;
+/** How often the fork's clock is brought up to wall time, when the service is given `fork.syncClock`. */
+const CLOCK_SYNC_MS = 5_000;
 
 type SubmissionStatus = SavedSubmission["status"];
 
@@ -161,6 +169,16 @@ function submissionView(buildId: string, s: Pick<Submission, "status" | "signatu
   };
 }
 
+/**
+ * Routing's options for a trade build: the side and paper rules, the request's timings (routing
+ * may add its steps and lower `quotedAt`), and the Jupiter lane (routing.ts: 1 tap-time, 2 prebuild).
+ * Passed as a variable, so it compiles whether or not routing declares `timings` and `lane` yet.
+ */
+function routeKind(kind: TradeKind, timings: Timings, prebuild = false): TradeKind {
+  const o: TradeKind & { timings: Timings; lane: 1 | 2 } = { ...kind, timings, lane: prebuild ? 2 : 1 };
+  return o;
+}
+
 /** The signed transactions' bytes, hashed: what tells a repeat of a submit from a different one. */
 function signedDigest(signed: string[]): string {
   const h = createHash("sha256");
@@ -207,15 +225,40 @@ type Build = {
    * L-4). They're sent after the trade has landed, and a failure there doesn't fail the trade.
    */
   cleanup?: number;
+  /** When its quotes were made (unix ms): a refresh keeps them only while they're QUOTE_REFRESH_MS old at most. */
+  quotedAt?: number;
+  /** Built ahead of the tap (`prebuild`): the money action counts at its submit instead. */
+  prebuilt?: boolean;
+  /**
+   * The submit leaves `market` accounts refreshed less than this long ago (0: all of them, as
+   * before). Builds refresh them at quote time; Phoenix legs are always refreshed before the send.
+   */
+  marketFreshMs?: number;
+  /** What the build answered (the build route's whole response), for a refresh to answer the same. */
+  response?: Record<string, unknown>;
 };
 
-/** What every build route takes besides its own fields. `timings`: the request's (server.ts sends them as Server-Timing). */
-export type BuildOpts = { timings?: Timings };
+/**
+ * What every build route takes besides its own fields. `timings`: the request's (server.ts sends
+ * them as Server-Timing). `prebuild`: built ahead of the tap (the sheet opened, the amount
+ * changed): its Jupiter calls go in routing's prebuild lane, and its money action counts at submit.
+ */
+export type BuildOpts = { timings?: Timings; prebuild?: boolean };
 /**
  * `clientTimings`: the submit body's `timings` (the client's marks), logged with the build id.
  * `until: "accepted"`: answer once the fork accepted every transaction (see ForkService#submit).
  */
-export type SubmitOpts = { timings?: Timings; clientTimings?: unknown; until?: "accepted" };
+export type SubmitOpts = {
+  timings?: Timings;
+  clientTimings?: unknown;
+  until?: "accepted";
+  /**
+   * Runs once the signed transactions checked out, before anything is sent or the build used: a
+   * prebuilt build's money action counts here (server.ts). A throw refuses the submit, and the
+   * build can be submitted again.
+   */
+  admit?: (build: { owner: string; kind: string; prebuilt: boolean }) => void;
+};
 
 /** What's known about one take's positions (see ForkService#positionsOf). */
 type PositionEntry = {
@@ -329,6 +372,9 @@ export class ForkService {
       // Takes the author posted through this API (on-chain addresses).
       (author) => Object.values(this.#state.takes).filter((m) => m.author === author && !m.demoAuthorKey).map((m) => m.address),
     );
+    // The fork's clock, kept at wall time here rather than before every send (lib.ts syncClock).
+    const sync = o.fork.syncClock;
+    if (sync) setInterval(() => void sync().catch(() => {}), CLOCK_SYNC_MS).unref();
     // Warm each mirrored take's position scan (it can take ~10 s on Surfpool), so the first
     // receipt someone opens doesn't wait for it. It also fills the owner index (see #holds).
     for (const m of Object.values(this.#store.state.takes)) void this.#positionsOf(new PublicKey(m.address)).catch(() => {});
@@ -728,15 +774,15 @@ export class ForkService {
     const t = o.timings ?? new Timings();
     return this.#timed(`${side} build ${takeId.slice(0, 8)}`, t, async () => {
       const { address, venue, included, excluded, ix, position, feeUsd, escrowUsd } =
-        await this.#prepareBack(takeId, ownerKey, usd, this.#o.appPayer.publicKey, undefined, side, t).catch((e: unknown) => {
+        await this.#prepareBack(takeId, ownerKey, usd, this.#o.appPayer.publicKey, undefined, side, t, o.prebuild).catch((e: unknown) => {
           if (side === "fade" && e instanceof ApiError && e.code === "nothing_tradable") throw new ApiError(409, "fade_unavailable", FADE_NOTHING);
           throw e;
         });
       const receiptCu = side === "back" ? THESIS_COMPUTE_UNITS.back : THESIS_COMPUTE_UNITS.fade;
-      const composed = await t.time("compose", () => this.#compose(venue, ix, receiptCu, ownerKey, "back", position, true, false, {
-        trade: { takeId, side, usd, included, receipt: ix, receiptCu },
-      }));
-      return { ...composed, take: address.toBase58(), side, stakeUsd: usd, feeUsd, escrowUsd, included, excluded };
+      const composed = await this.#compose(venue, ix, receiptCu, ownerKey, "back", position, true, false, {
+        trade: { takeId, side, usd, included, receipt: ix, receiptCu }, quotedAt: t.quotedAt, prebuilt: o.prebuild, timings: t,
+      });
+      return this.#keep({ ...composed, take: address.toBase58(), side, stakeUsd: usd, feeUsd, escrowUsd, included, excluded });
     });
   }
 
@@ -869,7 +915,7 @@ export class ForkService {
       const venues: VenueLeg[] = [...closes, ...swaps.map((q) => q.venue), ...redeemLegs];
       // A sale with Phoenix closes may take several transactions (each order is ~640 bytes);
       // the exit is recorded in the last one.
-      const built = await t.time("compose", () => this.#compose(venues, ix, THESIS_COMPUTE_UNITS.exitPosition, owner, "exit", { take: takeKey, address: position, exit }, false, closes.length > 0));
+      const built = await this.#compose(venues, ix, THESIS_COMPUTE_UNITS.exitPosition, owner, "exit", { take: takeKey, address: position, exit }, false, closes.length > 0, { timings: t });
       const swapped = (k: "outAmount" | "otherAmountThreshold") => Number(swaps.reduce((n, q) => n + BigInt(q.quote[k]), 0n)) / USD;
       // The sale pays the escrow back in full, in the same transaction. Phoenix legs close at
       // most 1% from the mid (DEFAULT_SLIPPAGE).
@@ -1020,7 +1066,7 @@ export class ForkService {
     return { address, take };
   }
 
-  async #prepareBack(takeId: string, owner: PublicKey, usd: number, payer: PublicKey, maxLegs?: number, side: "back" | "fade" = "back", t = new Timings()) {
+  async #prepareBack(takeId: string, owner: PublicKey, usd: number, payer: PublicKey, maxLegs?: number, side: "back" | "fade" = "back", t = new Timings(), prebuild = false) {
     checkAmount(usd);
     await t.time("funds", () => this.#checkFunds(owner, usd));
     const app = await t.time("take", () => this.#appTake(takeId));
@@ -1034,8 +1080,7 @@ export class ForkService {
     const { address, take } = existing;
     // Authors can't fade their own take. The program refuses it too; this says why before a build.
     if (side === "fade" && take.author.equals(owner)) throw new ApiError(409, "cannot_fade_own_take", FADE_OWN_TAKE);
-    // Routing may add its own steps (quotes, swap instructions) to `timings`.
-    const kind: TradeKind & { timings?: Timings } = { side, paper: maxLegs === undefined, timings: t };
+    const kind = routeKind({ side, paper: maxLegs === undefined }, t, prebuild);
     const [{ venue, included, excluded }, config] = await t.time("legs", () => Promise.all([
       // The Blink (maxLegs) buys spot and yield legs only: Gemini legs are in the app.
       this.#router.venueLegs(onChainLegs(this.#mapLegs(app.legs), take.legs), owner, usd, payer, maxLegs, kind),
@@ -1291,10 +1336,11 @@ export class ForkService {
       if (e instanceof ApiError && e.code === "retry_unavailable") throw toSweep(422, e.code, e.message);
       throw e;
     });
+    const quotedAt = Date.now();
     const receipt = deserializeIx(rec.receipt);
     const trade: TradeContext = { takeId: rec.takeId, side: rec.side, usd: rec.usd, included: rec.included, receipt, receiptCu: rec.receiptCu };
-    const built = await this.#compose(venue, receipt, rec.receiptCu, owner, rec.kind, { take, address: position, publishTakeId: rec.publishTakeId }, true, false, { trade, retry: rec });
-    return { ...built, position: key, take: rec.take, side: rec.side, stakeUsd: rec.usd, legs: rec.remaining };
+    const built = await this.#compose(venue, receipt, rec.receiptCu, owner, rec.kind, { take, address: position, publishTakeId: rec.publishTakeId }, true, false, { trade, retry: rec, quotedAt });
+    return this.#keep({ ...built, position: key, take: rec.take, side: rec.side, stakeUsd: rec.usd, legs: rec.remaining });
   }
 
   /**
@@ -1345,12 +1391,13 @@ export class ForkService {
       const venue = await jupiterBuy({ quote, user: owner, payer, label: `Sell ${symbol}`, apiKey: this.#o.jupiterApiKey });
       return { leg: l.leg, mint, symbol, amount, venue, usd: Number(BigInt(quote.outAmount)) / USD, minimum: Number(BigInt(quote.otherAmountThreshold)) / USD };
     }))).filter((s) => s !== null);
+    const quotedAt = Date.now();
     const cancel = await cancelTradeIx(this.#program, { owner, position, rentPayer: payer });
     // Each sale tagged with its take leg, so a partly landed sweep knows what it sold.
     const venue = sells.map((s) => ({ ...s.venue, output: { leg: s.leg } }));
-    const built = await this.#compose(venue, cancel, THESIS_COMPUTE_UNITS.cancelTrade, owner, "sweep", { take: new PublicKey(rec.take), address: position });
+    const built = await this.#compose(venue, cancel, THESIS_COMPUTE_UNITS.cancelTrade, owner, "sweep", { take: new PublicKey(rec.take), address: position }, false, false, { quotedAt });
     const sum = (k: "usd" | "minimum") => (sells.some((s) => s[k] === null) ? null : sells.reduce((n, s) => n + s[k]!, 0));
-    return {
+    return this.#keep({
       done: false as const,
       ...built,
       position: position.toBase58(),
@@ -1359,7 +1406,7 @@ export class ForkService {
       minimumUsd: sum("minimum"),
       /** Phoenix legs landed: once this lands, build `phoenix/cash-out` to close them and move their cash back. */
       phoenixCashOut: ticket.phoenix !== 0,
-    };
+    });
   }
 
   /** Drops every open build for `position` (a retry or sweep of it is being sent: the others are stale). */
@@ -1401,7 +1448,7 @@ export class ForkService {
       }
       this.#dropBuildsFor(build.position.address);
       try {
-        return await this.#send(txs, build.market, t, accept);
+        return await this.#send(txs, build.market, t, accept, build.marketFreshMs);
       } catch (e) {
         const landed = e instanceof SendFailed ? e.landed.length : 0;
         const rec = this.#split.get(build.owner, position);
@@ -1473,10 +1520,10 @@ export class ForkService {
   /** Posts an app take on-chain with the author's own buy-in, signed by their wallet. */
   async buildPublish(takeId: string, author: string, usd: number, o: BuildOpts = {}) {
     const t = o.timings ?? new Timings();
-    return this.#timed(`publish build ${takeId.slice(0, 8)}`, t, () => this.#buildPublish(takeId, author, usd, t));
+    return this.#timed(`publish build ${takeId.slice(0, 8)}`, t, () => this.#buildPublish(takeId, author, usd, t, o));
   }
 
-  async #buildPublish(takeId: string, author: string, usd: number, t: Timings) {
+  async #buildPublish(takeId: string, author: string, usd: number, t: Timings, o: BuildOpts) {
     const authorKey = parseKey(author);
     checkAmount(usd);
     if (this.#state.takes[takeId]) throw new ApiError(409, "already_on_chain");
@@ -1491,16 +1538,16 @@ export class ForkService {
     const stopped = this.#split.list(authorKey.toBase58()).find(([, t]) => t.publishTakeId === takeId);
     if (stopped) throw incompleteError(stopped[0], stopped[1], 409);
     await t.time("funds", () => this.#checkFunds(authorKey, usd));
-    const kind: TradeKind & { timings?: Timings } = { timings: t };
+    const kind = routeKind({}, t, o.prebuild);
     const [{ venue, included, excluded }, config] = await t.time("legs", () => Promise.all([this.#router.venueLegs(this.#mapLegs(app.legs), authorKey, usd, undefined, undefined, kind), this.#config()]));
     t.quotedAt ??= Date.now();
     const { ix, address } = await this.#createIx(app, authorKey, usd, included);
     const position = { take: address, address: positionAddress(address, authorKey, 0n), publishTakeId: takeId };
     this.#recordPhoenix(position.address, authorKey, venue);
-    const built = await t.time("compose", () => this.#compose(venue, ix, THESIS_COMPUTE_UNITS.createTake, authorKey, "publish", position, true, false, {
-      trade: { takeId, side: "back", usd, included, receipt: ix, receiptCu: THESIS_COMPUTE_UNITS.createTake },
-    }));
-    return { ...built, take: address.toBase58(), stakeUsd: usd, feeUsd: Number(splitFee(BigInt(Math.round(usd * USD)), config.params, { isAuthor: true }).fee) / USD, included, excluded };
+    const built = await this.#compose(venue, ix, THESIS_COMPUTE_UNITS.createTake, authorKey, "publish", position, true, false, {
+      trade: { takeId, side: "back", usd, included, receipt: ix, receiptCu: THESIS_COMPUTE_UNITS.createTake }, quotedAt: t.quotedAt, prebuilt: o.prebuild, timings: t,
+    });
+    return this.#keep({ ...built, take: address.toBase58(), stakeUsd: usd, feeUsd: Number(splitFee(BigInt(Math.round(usd * USD)), config.params, { isAuthor: true }).fee) / USD, included, excluded });
   }
 
   /**
@@ -1559,6 +1606,7 @@ export class ForkService {
     // A sale of this position already on its way: the second one would fail on-chain anyway.
     const position = build.position.address.toBase58();
     if (build.kind === "exit" && this.#pendingExits.has(position)) throw new ApiError(409, "already_exited", "This position is being sold.");
+    o.admit?.({ owner: build.owner, kind: build.kind, prebuilt: Boolean(build.prebuilt) });
     // From here on the build is used: a repeat of it finds this submission instead.
     this.#builds.delete(buildId);
     const early = o.until === "accepted";
@@ -1715,7 +1763,7 @@ export class ForkService {
       this.#wallets.forgetActivity(build.owner);
       let sent: string[];
       try {
-        sent = await this.#send(txs, build.market, t, accept);
+        sent = await this.#send(txs, build.market, t, accept, build.marketFreshMs);
       } catch (e) {
         // The cleanup rides after the trade, so it wasn't sent: look again on the next build.
         if (cleanup.length) this.#split.suspect(build.owner);
@@ -1834,11 +1882,21 @@ export class ForkService {
     proof = false,
     /** A sale that may take several transactions (Phoenix closes first, the exit last). */
     splitExit = false,
-    /** A create_take, back or fade (`trade`); the retry of an incomplete one (`retry`: its ticket is open). */
-    extra: { trade?: TradeContext; retry?: IncompleteTrade } = {},
+    /**
+     * A create_take, back or fade (`trade`); the retry of an incomplete one (`retry`: its ticket is
+     * open). `quotedAt`: when its quotes were made; `prebuilt`: built ahead of the tap.
+     */
+    extra: { trade?: TradeContext; retry?: IncompleteTrade; quotedAt?: number; prebuilt?: boolean; timings?: Timings } = {},
   ) {
+    const t = extra.timings ?? new Timings();
+    const market = venue.flatMap((v) => v.marketAccounts);
+    const phoenix = kind === "phoenix" || splitExit || venue.some((v) => (v as Partial<TradeLeg>).how === "phoenix");
+    // Fresh pools and books now, at quote time (the simulation below reads them too), so the
+    // submit needn't wait for them; only accounts not refreshed in the last MARKET_FRESH_MS.
+    if (market.length) await t.time("markets", () => this.#o.fork.refreshMarkets(market, { freshMs: MARKET_FRESH_MS }));
     // The blockhash is fetched during composing: the build's lifetime counts from before that.
     const started = Date.now();
+    const composeStarted = started;
     const txs = await composeTransactions({
       payer: this.#o.appPayer.publicKey,
       legs: venue,
@@ -1848,7 +1906,8 @@ export class ForkService {
       connection: this.#o.connection,
       proof: proof ? { program: this.#program, owner, position: position.address, continued: Boolean(extra.retry) } : undefined,
     });
-    const txLegs = txs.map((t) => t.legs.map((j) => (venue[j] as Partial<TradeLeg>).output?.leg ?? -1));
+    t.add("compose", Date.now() - composeStarted);
+    const txLegs = txs.map((c) => c.legs.map((j) => (venue[j] as Partial<TradeLeg>).output?.leg ?? -1));
     if (kind === "exit" && txs.length !== 1 && !splitExit) throw new ApiError(422, "exit_too_large", "This position cannot be sold in one transaction.");
     // A trade the owner signs anyway also cancels their abandoned tickets. Not a sale: the app
     // expects exactly one transaction there. Each look is a getProgramAccounts, so it runs only
@@ -1868,8 +1927,8 @@ export class ForkService {
     const expires = Math.min(started + BUILD_TTL_MS, (position.exit?.horizonEnd ?? Infinity) * 1_000);
     this.#builds.set(buildId, {
       owner: owner.toBase58(),
-      messages: txs.map((t) => Buffer.from(t.tx.message.serialize())),
-      market: venue.flatMap((v) => v.marketAccounts),
+      messages: txs.map((c) => Buffer.from(c.tx.message.serialize())),
+      market,
       kind,
       expires,
       position,
@@ -1878,14 +1937,76 @@ export class ForkService {
       lend: venue.flatMap((v) => ((v as Partial<TradeLeg>).how === "lend" ? [(v as TradeLeg).output.leg] : [])),
       trade: extra.trade,
       retry: extra.retry,
+      quotedAt: extra.quotedAt,
+      prebuilt: Boolean(extra.prebuilt),
+      marketFreshMs: phoenix ? 0 : SUBMIT_MARKET_FRESH_MS,
     });
-    setTimeout(() => this.#builds.delete(buildId), Math.max(0, expires - Date.now())).unref();
+    this.#expireLater(buildId);
     return {
       buildId,
       /** Unsigned v0 transactions, base64: sign each with the user's wallet, in order, then submit. */
-      transactions: txs.map((t) => Buffer.from(t.tx.serialize()).toString("base64")),
-      steps: txs.map((t) => ({ labels: t.labels, bytes: t.bytes, computeUnits: t.computeUnits })),
+      transactions: txs.map((c) => Buffer.from(c.tx.serialize()).toString("base64")),
+      steps: txs.map((c) => ({ labels: c.labels, bytes: c.bytes, computeUnits: c.computeUnits })),
+      /** Unix ms: submit before this (or refresh it). */
+      expiresAt: expires,
+      /** Unix ms: when its quotes were made (none: it has none). */
+      quotedAt: extra.quotedAt ?? null,
     };
+  }
+
+  /** Remembers a build route's whole answer on its build, so a refresh answers the same. */
+  #keep<T extends { buildId: string }>(r: T): T {
+    const b = this.#builds.get(r.buildId);
+    if (b) b.response = r;
+    return r;
+  }
+
+  /** Drops a build once it expires (a refresh moves its expiry: it's checked again then). */
+  #expireLater(buildId: string) {
+    const b = this.#builds.get(buildId);
+    if (!b) return;
+    setTimeout(() => {
+      const now = this.#builds.get(buildId);
+      if (!now) return;
+      if (now.expires <= Date.now()) this.#builds.delete(buildId);
+      else this.#expireLater(buildId);
+    }, Math.max(0, b.expires - Date.now()) + 10).unref();
+  }
+
+  /**
+   * A fresh blockhash for a build not yet submitted (POST /builds/:id/refresh): the same
+   * instructions (quotes, sizes, compute limits) recompiled, with no Jupiter call, while its quotes
+   * are at most QUOTE_REFRESH_MS old (409 `quote_stale` after: build again). Its market accounts
+   * are refreshed if they're older than MARKET_FRESH_MS. The build keeps its id; the transactions
+   * it answered before can't be submitted any more. 410 `build_gone`: expired, submitted or unknown.
+   */
+  async refreshBuild(buildId: string, o: BuildOpts = {}) {
+    const t = o.timings ?? new Timings();
+    const kind = this.#builds.get(buildId)?.kind ?? "unknown";
+    return this.#timed(`${kind} refresh`, t, async () => {
+      const build = this.#builds.get(buildId);
+      if (!build || build.expires < Date.now()) throw new ApiError(410, "build_gone", "This build expired or was submitted. Build again.");
+      if (build.quotedAt !== undefined && Date.now() - build.quotedAt > QUOTE_REFRESH_MS) throw new ApiError(409, "quote_stale", "This build's prices are too old. Build again.");
+      if (build.market.length) await t.time("markets", () => this.#o.fork.refreshMarkets(build.market, { freshMs: MARKET_FRESH_MS }));
+      const started = Date.now();
+      const { blockhash } = await t.time("blockhash", () => this.#o.connection.getLatestBlockhash("confirmed"));
+      // Submitted while this ran: it's used.
+      if (this.#builds.get(buildId) !== build) throw new ApiError(410, "build_gone", "This build was submitted. Build again.");
+      const messages = build.messages.map((m) => {
+        const message = VersionedMessage.deserialize(m);
+        message.recentBlockhash = blockhash;
+        return message;
+      });
+      build.messages = messages.map((m) => Buffer.from(m.serialize()));
+      build.expires = Math.min(started + BUILD_TTL_MS, (build.position.exit?.horizonEnd ?? Infinity) * 1_000);
+      return {
+        ...(build.response ?? {}),
+        buildId,
+        transactions: messages.map((m) => Buffer.from(new VersionedTransaction(m).serialize()).toString("base64")),
+        expiresAt: build.expires,
+        quotedAt: build.quotedAt ?? null,
+      };
+    }, () => buildId);
   }
 
   /**
@@ -1895,10 +2016,10 @@ export class ForkService {
    * called once all were accepted, and then they're confirmed together. Either way it returns
    * once every one landed, or throws SendFailed with the ones that landed before the failure.
    */
-  async #send(txs: VersionedTransaction[], market: PublicKey[], t = new Timings(), accept?: () => void): Promise<string[]> {
-    if (accept) return this.#sendAccepted(txs, market, t, accept);
+  async #send(txs: VersionedTransaction[], market: PublicKey[], t = new Timings(), accept?: () => void, freshMs = 0): Promise<string[]> {
+    if (accept) return this.#sendAccepted(txs, market, t, accept, freshMs);
     const conn = this.#o.connection;
-    await t.time("refresh", () => this.#o.fork.refreshMarkets(market));
+    await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs }));
     const out: string[] = [];
     let unknown = false;
     try {
@@ -1951,8 +2072,8 @@ export class ForkService {
   }
 
   /** #send for until=accepted (api/send.ts): back to back, `accept` once all were accepted, then confirmed. */
-  async #sendAccepted(txs: VersionedTransaction[], market: PublicKey[], t: Timings, accept: () => void): Promise<string[]> {
-    await t.time("refresh", () => this.#o.fork.refreshMarkets(market));
+  async #sendAccepted(txs: VersionedTransaction[], market: PublicKey[], t: Timings, accept: () => void, freshMs: number): Promise<string[]> {
+    await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs }));
     const lifetimes = await Promise.all(txs.map((tx) => this.#lifetime(tx)));
     return sendBackToBack(this.#o.connection, txs, Math.max(0, ...lifetimes.map((l) => l.lastValidBlockHeight)), { accept, timings: t, log: this.#log });
   }

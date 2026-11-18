@@ -159,7 +159,10 @@ export type ServiceOpts = {
   fork: {
     addUsdc(wallet: PublicKey, usd: number): Promise<bigint>;
     setUsdc(wallet: PublicKey, baseUnits: bigint): Promise<void>;
-    refreshMarkets(accounts: PublicKey[]): Promise<unknown>;
+    /** `freshMs`: leave accounts refreshed less than that long ago (lib.ts refreshMarkets). */
+    refreshMarkets(accounts: PublicKey[], o?: { freshMs?: number }): Promise<unknown>;
+    /** Brings the fork's clock up to wall time; given, the service runs it every CLOCK_SYNC_MS. */
+    syncClock?(): Promise<unknown>;
   };
   log?: (m: string) => void;
   /** Phoenix perps (perp legs and fade shorts). Unset: those legs are left out with the reason. */
