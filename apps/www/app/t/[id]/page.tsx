@@ -5,7 +5,7 @@ import Avatar from "@/components/Avatar";
 import Basket from "@/components/Basket";
 import Comments from "@/components/Comments";
 import TradeDock from "@/components/TradeDock";
-import { authorName, calledIt, getReceipt, getTake, HORIZON, isDeleted, pct, takeReturn } from "@/lib/data";
+import { authorName, calledIt, closedReason, getReceipt, getTake, isDeleted, pct, stateLabel, takeReturn, takeState } from "@/lib/data";
 
 export const revalidate = 15;
 
@@ -23,7 +23,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const take = await getTake(id);
   if (!take) return { title: "Thesis" };
   const who = authorName(take.author);
-  const description = `${who}'s take on Thesis. Trade it or fade it.`;
+  // A closed take can't be traded any more: say how it ended instead.
+  const description = takeState(take).open ? `${who}'s take on Thesis. Trade it or fade it.` : `${who}'s take on Thesis. Closed at ${pct(take.ret)}.`;
   return {
     title: `${take.claim} · Thesis`,
     description,
@@ -38,7 +39,9 @@ export default async function TakePage({ params }: Props) {
   if (!take) notFound();
 
   const ret = takeReturn(take, receipt);
-  const settles = take.settles_at ? new Date(take.settles_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+  // Open until the author sells their buy-in; then closed, with its result final.
+  const state = takeState(take, receipt);
+  const handle = isDeleted(take.author) ? null : take.author.handle;
 
   return (
     <main className="page">
@@ -64,8 +67,7 @@ export default async function TakePage({ params }: Props) {
 
       <h1 className="claim">{take.claim}</h1>
       <div className="caps">
-        {take.risk} risk · {HORIZON[take.horizon] ?? take.horizon}
-        {settles ? ` · settles ${settles}` : ""}
+        {take.risk} risk · {stateLabel(state, handle, ret)}
       </div>
       {take.source && /^https?:\/\//.test(take.source.url) ? (
         <a className="via" href={take.source.url} target="_blank" rel="noopener noreferrer nofollow">
@@ -74,7 +76,7 @@ export default async function TakePage({ params }: Props) {
       ) : null}
 
       <div className={`big ${ret >= 0 ? "up" : "down"}`}>{pct(ret)}</div>
-      <div className="caps">{receipt?.onChain ? "on-chain · since posted" : "since posted"}</div>
+      <div className="caps">{receipt?.onChain ? "on-chain · " : ""}{state.open ? "since posted" : "final"}</div>
       {calledIt(ret) ? (
         <div className="tags">
           <Link className="tag tag-up" href={`/c/${take.id}`}>✓ Called it · share ↗</Link>
@@ -86,7 +88,7 @@ export default async function TakePage({ params }: Props) {
         <Basket legs={take.legs} receipt={receipt?.legs} />
       </div>
 
-      <TradeDock takeId={take.id} author={authorName(take.author)} receipt={receipt} />
+      <TradeDock takeId={take.id} author={authorName(take.author)} handle={handle} receipt={receipt} closed={state.open ? null : closedReason(state, handle)} />
 
       <Comments takeId={take.id} author={authorName(take.author)} claim={take.claim} initialCount={take.comments} />
     </main>

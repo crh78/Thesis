@@ -13,14 +13,27 @@ import EditProfile from "@/components/EditProfile";
 import { hasPhoenixCash, LiquidationLines, PhoenixCashCard } from "@/components/Phoenix";
 import { PostingRow } from "@/components/PostingRecovery";
 import ShareButton from "@/components/ShareButton";
-import { money, pct, rpcNow, topicImage, type Profile, type Take } from "@/lib/data";
-import { fork, holdings, markTraded, TRADED_AT_KEY, TRADED_EVENT, useForkWallet, type CreatorFees as Fees, type History, type Incomplete, type PhoenixCash, type Portfolio, type WalletSummary } from "@/lib/fork";
+import { dayLabel, money, pct, rpcNow, takeState, topicImage, type Profile, type Take } from "@/lib/data";
+import { fork, holdings, markTraded, TRADED_AT_KEY, TRADED_EVENT, useForkWallet, type CreatorFees as Fees, type History, type Incomplete, type PhoenixCash, type Portfolio, type PortfolioPosition, type WalletSummary } from "@/lib/fork";
 import StoppedTrade from "@/components/StoppedTrade";
 import { X_LOGIN } from "@/lib/flags";
 import { MY_TAKES_EVENT } from "@/lib/posting";
 import { useSession } from "@/lib/session";
 
 type Tab = "positions" | "takes" | "badges";
+
+/** Your take on Me: open until you sell your buy-in, then closed (and when). */
+function myTakeState(t: Take) {
+  const s = takeState(t);
+  if (s.open) return <><b>Open</b> · until you sell</>;
+  return <><b>Closed</b>{s.at ? ` ${dayLabel(s.at)}` : ""}</>;
+}
+
+/** "@jake", or "@jake sold" once the author's sale closed the take (your position stays open). */
+function byAuthor(p: PortfolioPosition): string | null {
+  if (!p.authorHandle) return p.takeStatus === "closed" ? "the author sold" : null;
+  return p.takeStatus === "closed" ? `@${p.authorHandle} sold` : `@${p.authorHandle}`;
+}
 const RANGES = ["1D", "1W", "1M", "All"] as const;
 const CAPTION: Record<string, string> = { "1D": "today", "1W": "past week", "1M": "past month", All: "all time" };
 
@@ -271,7 +284,7 @@ export default function MePage() {
                 <img className="tile" src={topicImage(p.topic)} alt="" />
                 <div className="item-main">
                   <div className="item-claim">{p.claim}</div>
-                  <div className="item-meta"><b className={p.side === "fade" ? "down" : "up"}>{p.side === "fade" ? "Faded" : "Traded"}</b> · {[p.authorHandle && `@${p.authorHandle}`, detail].filter(Boolean).join(" · ")}</div>
+                  <div className="item-meta"><b className={p.side === "fade" ? "down" : "up"}>{p.side === "fade" ? "Faded" : "Traded"}</b> · {[byAuthor(p), detail].filter(Boolean).join(" · ")}</div>
                   {/* Leveraged legs and fade shorts: where each is liquidated (the take page adds the leverage). */}
                   <LiquidationLines risks={p.phoenix} />
                 </div>
@@ -294,7 +307,7 @@ export default function MePage() {
                 <img className="tile" src={topicImage((t as Take & { topic?: string }).topic)} alt="" />
                 <div className="item-main">
                   <div className="item-claim">{t.claim}</div>
-                  <div className="item-meta"><b>Live</b> · {t.settles_at ? `ends ${new Date(t.settles_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ` : ""}{t.backs} traded</div>
+                  <div className="item-meta">{myTakeState(t)} · {t.backs} traded</div>
                 </div>
                 <div className="item-num">
                   <div className="mono">{money((t as Take & { money_in?: number }).money_in ?? 0).replace(/\.00$/, "")}</div>

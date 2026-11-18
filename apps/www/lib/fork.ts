@@ -7,8 +7,11 @@ import { useCallback, useMemo, useRef } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useSignMessage, useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
 
-/** `phoenixCashOut`: a sale that closed Phoenix legs; their cash comes back with `cashOutPhoenix`. */
-export type Built = { buildId: string; transactions: string[]; feeUsd?: number; phoenixCashOut?: boolean };
+/**
+ * `phoenixCashOut`: a sale that closed Phoenix legs; their cash comes back with `cashOutPhoenix`.
+ * `closesTake` (sales only): this is the author selling their buy-in, which closes the take.
+ */
+export type Built = { buildId: string; transactions: string[]; feeUsd?: number; phoenixCashOut?: boolean; closesTake?: boolean };
 
 export type PortfolioPosition = {
   address: string;
@@ -24,6 +27,8 @@ export type PortfolioPosition = {
   pendingNote: string | null;
   canExit: boolean | null;
   exited: boolean | null;
+  /** The take's on-chain status: "open", "closed" (its author sold) or "settled". */
+  takeStatus?: string;
   /** Legs held on Phoenix (perp legs, a fade's shorts): where each is liquidated and how close it is. */
   phoenix?: PhoenixRisk[];
 };
@@ -97,8 +102,9 @@ const KNOWN: Record<string, string> = {
   withdrawals_off: "Withdrawals are off for now.",
   // The API's text carries the signature and the raw program error: never shown.
   transaction_failed: "That didn't go through. Check your balance, then try again.",
-  // Sent without a message (a sale after the take ended, a trade on a closed take).
-  take_closed: "This take has ended, so it can't be traded or sold now. It settles at its end date.",
+  // A trade or fade on a take that closed (its author sold, or it reached its year). Positions
+  // already in it aren't affected: their owners can still sell.
+  take_closed: "This take is closed, so it takes no new trades or fades.",
   // A trade split over several transactions where a later one failed: the earlier ones swapped
   // some cash into tokens that aren't in a position. StoppedTrade offers the retry, then the sweep.
   trade_incomplete: "This trade didn't finish: part of your cash was swapped into tokens that aren't in a position.",

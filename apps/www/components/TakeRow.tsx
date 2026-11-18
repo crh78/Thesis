@@ -2,7 +2,7 @@
 // The iOS feed's TakeRow: avatar column, then the take. The claim, return, sparkline and allocation
 // bar open the take page; Trade / Fade open it with that sheet up; then comments, save and share.
 import Link from "next/link";
-import { authorName, isDeleted, pct, SERIES, type Take } from "@/lib/data";
+import { authorName, closedReason, dayLabel, isDeleted, pct, SERIES, takeState, type Take } from "@/lib/data";
 import Avatar from "./Avatar";
 
 export type FeedTake = Take & { tags?: string[]; history?: number[]; topic?: string; money_in?: number; posting?: boolean };
@@ -53,6 +53,8 @@ export default function TakeRow({ take, saved, onSave, mine = false }: { take: F
   // A deleted author has no profile: their name and avatar open the take instead.
   const gone = isDeleted(take.author);
   const profile = gone ? href : `/u/${take.author.handle}`;
+  // Open until the author sells their buy-in; closed after, with no more trades or fades.
+  const state = takeState(take);
 
   async function share() {
     const url = new URL(href, window.location.origin).toString();
@@ -71,14 +73,14 @@ export default function TakeRow({ take, saved, onSave, mine = false }: { take: F
             <b>{authorName(take.author)}</b>
             <span className="muted">{gone ? "" : `@${take.author.handle} · `}{age(take.created_at)}</span>
           </Link>
-          <span className="caps trow-tag">{RISK[take.risk] ?? take.risk} · {take.horizon.toUpperCase()}</span>
+          <span className="caps trow-tag">{RISK[take.risk] ?? take.risk} · {state.open ? "OPEN" : "CLOSED"}</span>
         </div>
         <Link href={href} className="trow-body">
           <div className="trow-claim">{take.claim}</div>
           <div className="trow-ret">
             <div>
               <div className={`trow-pct ${up ? "up" : "down"}`}>{pct(take.ret)}</div>
-              <div className="caps" style={{ fontSize: 11 }}>since {new Date(take.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+              <div className="caps" style={{ fontSize: 11 }}>{state.open ? `since ${dayLabel(new Date(take.created_at))}` : state.at ? `closed ${dayLabel(state.at)}` : "closed"}</div>
             </div>
             <Sparkline values={take.history ?? []} up={up} />
           </div>
@@ -88,8 +90,14 @@ export default function TakeRow({ take, saved, onSave, mine = false }: { take: F
           <div className="muted small" style={{ padding: "10px 0" }}>Posting… only you can see it</div>
         ) : (
           <div className="trow-actions">
-            <Link href={`${href}?side=back`} className="sidepill up-pill"><Arrow /> Trade <span className="mono">{take.backs}</span></Link>
-            {mine ? null : <Link href={`${href}?side=fade`} className="sidepill down-pill"><Arrow down /> Fade <span className="mono">{take.fades}</span></Link>}
+            {state.open ? (
+              <>
+                <Link href={`${href}?side=back`} className="sidepill up-pill"><Arrow /> Trade <span className="mono">{take.backs}</span></Link>
+                {mine ? null : <Link href={`${href}?side=fade`} className="sidepill down-pill"><Arrow down /> Fade <span className="mono">{take.fades}</span></Link>}
+              </>
+            ) : (
+              <span className="muted small">{closedReason(state, gone ? null : take.author.handle)}</span>
+            )}
             <span style={{ flex: 1 }} />
             <Link href={`${href}?comments=1`} className="trow-icon" aria-label={`${take.comments} comments`}>
               <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden><path d="M4 5h16v11H9l-5 4V5Z" strokeLinejoin="round" /></svg>
