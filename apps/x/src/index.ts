@@ -24,7 +24,7 @@ const num = (k: string, d: number) => (Number(process.env[k]) > 0 ? Number(proce
 const DRY_RUN = process.env.X_DRY_RUN === "1";
 const POLL_MS = num("X_POLL_SECONDS", 30) * 1000;
 const MAX_PER_DAY = num("X_MAX_REPLIES_PER_DAY", 100);
-const MAX_PER_AUTHOR = num("X_MAX_PER_AUTHOR", 5);
+const MAX_PER_AUTHOR = num("X_MAX_PER_AUTHOR", 10);
 const MAX_PER_THREAD = num("X_MAX_PER_THREAD", 3);
 const STATE_FILE = process.env.X_STATE_FILE || new URL("../.data/state.json", import.meta.url).pathname;
 
