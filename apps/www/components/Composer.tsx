@@ -85,7 +85,7 @@ function Composer({ init, onClose }: { init: Open; onClose: () => void }) {
 function Header({ title, onClose, onBack }: { title: string; onClose?: () => void; onBack?: () => void }) {
   return (
     <header className="cmp-head">
-      {onBack ? <button className="back" onClick={onBack}>‹ Back</button> : <span />}
+      {onBack ? <button className="nav-back" onClick={onBack}>‹ Back</button> : <span />}
       <b>{title}</b>
       {onClose ? <button className="x" style={{ float: "none" }} aria-label="Close" onClick={onClose}>×</button> : <span />}
     </header>

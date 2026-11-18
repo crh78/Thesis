@@ -19,6 +19,9 @@ const CAPTION: Record<Board, string> = {
   backers: "Made for backers: what everyone who backed an account's takes made, losses subtracted. Fades and the author's own money don't count.",
   faders: "Faders: what each account made fading other people's takes, on fades that have settled or been sold.",
 };
+// The most rows `leaderboard` returns (its cap), always highest first. "Lowest first" turns that
+// list around, which is the true bottom of the board only while the whole board fits in it.
+const BOARD_MAX = 200;
 const EMPTY: Record<Board, string> = {
   own: "Nobody is on the board yet.",
   backers: "Nobody has posted a take yet.",
@@ -41,7 +44,7 @@ export default function ScoresPage() {
     let live = true;
     setRows(null);
     setError(null);
-    rpcNow<Row[]>("leaderboard", { p_period: period, p_board: board, p_sort: byCash ? "cash" : "pct" })
+    rpcNow<Row[]>("leaderboard", { p_period: period, p_board: board, p_sort: byCash ? "cash" : "pct", p_limit: BOARD_MAX })
       .then((r) => live && setRows(r))
       .catch((e) => { if (live) { setRows([]); setError(e instanceof Error ? e.message : String(e)); } });
     return () => { live = false; };
@@ -61,6 +64,9 @@ export default function ScoresPage() {
   const myTakes = myRow?.person.takes ?? mine?.takes ?? 0;
   const periodCaption = period === "all" ? "all time" : `this ${period}`;
   const top = sorted.map((r, i) => ({ r, rank: i + 1 })).filter(({ r }) => r.person.id !== me?.id).slice(0, 25);
+  // A board longer than one read: lowest first would show the bottom of the top 200, not the
+  // board's real bottom, with made-up ranks. Say so instead of ranking it.
+  const partial = !desc && (rows?.length ?? 0) >= BOARD_MAX;
 
   const primary = (cash: number, p: number) => (byCash ? money(cash, true) : pct(p));
   const secondary = (cash: number, p: number) => (byCash ? pct(p) : money(cash, true));
@@ -106,7 +112,7 @@ export default function ScoresPage() {
       {me ? (
         <LeaderRow
           me
-          rank={myRow ? `#${myIndex + 1}` : "—"}
+          rank={myRow && !partial ? `#${myIndex + 1}` : "—"}
           person={me}
           title="You"
           subtitle={`${myTakes} ${myTakes === 1 ? "take" : "takes"} · ${periodCaption}`}
@@ -119,7 +125,7 @@ export default function ScoresPage() {
       {top.map(({ r, rank }) => (
         <LeaderRow
           key={r.person.id}
-          rank={String(rank)}
+          rank={partial ? "·" : String(rank)}
           gold={rank === 1 && desc}
           person={r.person}
           title={r.person.handle ? `@${r.person.handle}` : (r.person.display_name ?? "Someone")}
@@ -134,6 +140,7 @@ export default function ScoresPage() {
       {rows != null && error ? <p className="err scores-empty">Couldn&apos;t load Scores. {error}</p> : null}
       {rows != null && !error && top.length === 0 && !myRow ? <p className="muted scores-empty">{EMPTY[board]}</p> : null}
 
+      {partial ? <p className="muted small scores-caption">Lowest first lists the bottom of the top {BOARD_MAX} for now, so it shows no ranks.</p> : null}
       <p className="muted small scores-caption">{CAPTION[board]}</p>
     </main>
   );

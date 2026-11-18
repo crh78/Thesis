@@ -3,10 +3,18 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Avatar from "@/components/Avatar";
+import FollowButton from "@/components/FollowButton";
 import ShareButton from "@/components/ShareButton";
-import { calledIt, getProfile, getProfileTakes, HORIZON, nameOf, pct, shortDate, usd } from "@/lib/data";
+import { calledIt, getProfile, getProfileTakes, HORIZON, money, nameOf, pct, shortDate } from "@/lib/data";
 
 export const revalidate = 30;
+
+// No pages at build time; each one renders on its first visit and is then cached and refreshed
+// every `revalidate` seconds (ISR). Next 16 needs this export for `revalidate` to apply to a
+// dynamic segment (docs: generate-static-params, "All paths at runtime").
+export function generateStaticParams() {
+  return [];
+}
 
 type Props = { params: Promise<{ handle: string }> };
 
@@ -33,6 +41,7 @@ export default async function ProfilePage({ params }: Props) {
   const rest = takes.filter((t) => !calledIt(t.ret));
   const best = called[0];
   const made = p.made ?? 0;
+  const backers = p.backers_made ?? 0;
 
   return (
     <main className="page">
@@ -47,15 +56,29 @@ export default async function ProfilePage({ params }: Props) {
         {p.bio ? <p className="bio">{p.bio}</p> : null}
       </section>
 
-      <div className="stats me-stats">
+      {/* The two scores every account shows (CLAUDE.md "Two scores, no formula"), in $ and %. */}
+      <div className="score-pair">
+        <div>
+          <span className="caps">Own P&amp;L</span>
+          <b className={made < 0 ? "down" : "up"}>{money(made, true)}</b>
+          <span className="mono small muted">{pct(p.return_pct ?? 0)}</span>
+        </div>
+        <div>
+          <span className="caps">Made for backers</span>
+          <b className={backers < 0 ? "down" : "up"}>{money(backers, true)}</b>
+          <span className="mono small muted">{pct(p.backers_pct ?? 0)}</span>
+        </div>
+      </div>
+
+      <div className="stats stats-3 me-stats">
         <div><span className="caps">Called it</span><b className={called.length ? "up" : ""}>{called.length}</b></div>
         <div><span className="caps">Takes</span><b>{takes.length}</b></div>
         <div><span className="caps">Best call</span><b className={best ? "up" : ""}>{best ? pct(best.ret) : "—"}</b></div>
-        <div><span className="caps">Made</span><b className={made >= 0 ? "up" : "down"}>{made < 0 ? "−" : ""}{usd(Math.abs(made)).replace(/\.00$/, "")}</b></div>
       </div>
 
-      <div className="actions" style={{ marginTop: 18 }}>
-        <ShareButton text={`${nameOf(p)}'s takes on Thesis`} label="Share profile" className="btn light" />
+      <div className="actions profile-actions" style={{ marginTop: 18 }}>
+        <FollowButton profileId={p.id} />
+        <ShareButton text={`${nameOf(p)}'s takes on Thesis`} label="Share profile" className="btn ghost" />
       </div>
 
       {called.length ? (
