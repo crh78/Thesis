@@ -85,7 +85,7 @@ function fakeJupiter(calls: { quotes: string[]; prices: number }) {
 
 test("poller: probe budget fits the Jupiter rate limit; probes only stale tokens; skips $1,000 when $100 fails", async () => {
   const dir = mkdtempSync(join(tmpdir(), "bank-"));
-  const config = loadBankConfig(() => null);
+  const config = loadBankConfig((k) => (k === "ASSET_BANK_JUPITER_RPM" ? "45" : null));
   const calls = { quotes: [] as string[], prices: 0 };
   const clock = manualClock(NOW);
   const state = fixtureState();
@@ -130,6 +130,7 @@ test("config: cadences come from env vars with sane defaults", () => {
   assert.equal(d.phoenixMs, 10 * MIN);
   assert.equal(d.phoenixGapMs, 4_000);
   assert.equal(d.maxAccounts, 30);
+  assert.equal(d.jupiterRpm, 25, "the free key's 60 a minute is shared with trades and the settler");
   const env: Record<string, string> = { ASSET_BANK_PRICES_SEC: "120", ASSET_BANK_JUPITER_RPM: "500" };
   const c = loadBankConfig((k) => env[k] ?? null);
   assert.equal(c.pricesMs, 120 * SEC);
@@ -151,4 +152,32 @@ test("poller: a restart doesn't sweep Gemini again while the last sweep is recen
   assert.equal(at(null), 0, "never swept: now");
   assert.equal(at(60 * MIN), 300 * MIN, "swept an hour ago: in 5 hours");
   assert.equal(at(7 * 60 * MIN), 0, "overdue: now");
+});
+
+test("poller: probes pause while trade builds are running, and pick up where they left off", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bank-"));
+  const config = loadBankConfig((k) => (k === "ASSET_BANK_JUPITER_RPM" ? "45" : null));
+  const calls = { quotes: [] as string[], prices: 0 };
+  const state = fixtureState();
+  for (const t of Object.values(state.tokens)) {
+    t.jupiterPooledUsd = 1e6;
+    t.probe = null; // every token due
+  }
+  let busy = false;
+  const logs: string[] = [];
+  const poller = new AssetBankPoller(state, { sink: new FileSink(join(dir, "bank.json")), config, jupiter: fakeJupiter(calls), rpc: {} as any, clock: manualClock(NOW), log: (m) => logs.push(m), yieldToTrades: () => busy });
+  // Builds start during the first token's quotes: the run stops after it.
+  const quote = poller.jup.quote.bind(poller.jup);
+  poller.jup.quote = (async (...a: Parameters<JupiterClient["quote"]>) => {
+    busy = true;
+    return quote(...a);
+  }) as JupiterClient["quote"];
+  await poller.probes();
+  assert.equal(Object.values(poller.state.tokens).filter((t) => t.probe).length, 1);
+  assert.ok(logs.some((l) => /paused after 1\//.test(l)));
+  // Builds done: the next run probes the rest.
+  busy = false;
+  poller.jup.quote = quote;
+  await poller.probes();
+  assert.equal(Object.values(poller.state.tokens).filter((t) => t.probe).length, 16);
 });

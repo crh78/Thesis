@@ -51,7 +51,9 @@ export const CONFIG_ENV = {
   cardsMs: ["ASSET_BANK_CARDS_MIN", 15, MIN],
   yieldMs: ["ASSET_BANK_YIELD_MIN", 15, MIN],
   flushMs: ["ASSET_BANK_FLUSH_SEC", 15, 1000],
-  jupiterRpm: ["ASSET_BANK_JUPITER_RPM", 45, 1],
+  // The free Jupiter key allows 60 a minute for the whole organisation (fork API, settler, marker
+  // and this poller): 25 leaves the rest for trades. Probes get what prices and discovery leave.
+  jupiterRpm: ["ASSET_BANK_JUPITER_RPM", 25, 1],
   quoteFloorUsd: ["ASSET_BANK_QUOTE_FLOOR_USD", 100, 1],
   maxAccounts: ["ASSET_BANK_MAX_ACCOUNTS", 30, 1],
   tradeableCostPct: ["ASSET_BANK_TRADEABLE_COST_PCT", 1, 1],

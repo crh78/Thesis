@@ -6,48 +6,44 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { positionReturnBps, thesisProgram } from "@thesis/chain";
 import { effectiveMultiplier } from "@thesis/venues/bank";
-import { bookProblem, legPrice } from "@thesis/venues/gemini";
-import { toPriceUnits } from "../settler/pricing.ts";
-import { spotNow, type BankLookup, type PickAsset, type Snapshot } from "./mark.ts";
+import { toPriceUnits, valueLeg, type LegValue } from "../settler/leg-value.ts";
+import type { BankLookup, PickAsset, Snapshot } from "./mark.ts";
 
-/** USD per underlying unit the settler would sign as this leg's exit now, or null. */
+/** USD per underlying unit the settler would sign as this leg's exit now, or null (the shared rules: valueLeg). */
 export function positionExit(asset: PickAsset, side: "back" | "fade", snap: Snapshot, bank: BankLookup | null, openedAtSec: number | null): number | null {
   switch (asset.type) {
     case "void":
       return null;
     case "yield":
-      return snap.lend && snap.lend > 0 ? snap.lend : null;
+      return priceOf(valueLeg({ kind: "yield", held: side }, { lendShareValue: snap.lend }));
     // A card leg (never faded): its insured value as the asset bank last read it.
     case "card":
-      return snap.cards?.get(asset.cardId) ?? null;
+      return priceOf(valueLeg({ kind: "card", held: side }, { cardInsuredUsd: snap.cards?.get(asset.cardId) }));
     case "prediction": {
-      const c = snap.events.get(asset.eventTicker)?.find((x) => x.instrumentSymbol === asset.instrument);
-      if (!c || (!c.resolutionSide && bookProblem(c))) return null;
-      return legPrice(c, asset.side, side, "exit");
+      const contract = snap.events.get(asset.eventTicker)?.find((x) => x.instrumentSymbol === asset.instrument);
+      return priceOf(valueLeg({ kind: "prediction", held: side, prediction: { side: asset.side } }, { contract }));
     }
-    case "perp": {
-      const p = snap.perps.get(asset.symbol);
-      return p && p.price > 0 ? p.price / asset.units : null;
-    }
+    case "perp":
+      return priceOf(valueLeg({ kind: "perp", held: side, perp: { unitsPerContract: asset.units } }, { perp: snap.perps.get(asset.symbol)?.price }));
     case "spot": {
       if (side === "fade") {
         // A fade's spot leg is a Phoenix short on the same underlying.
         const perp = asset.underlyingKey ? bank?.perpFor(asset.underlyingKey) : null;
-        const p = perp ? snap.perps.get(perp.symbol) : undefined;
-        return perp && p && p.price > 0 ? p.price / (perp.unitsPerContract || 1) : null;
+        if (!perp) return null;
+        return priceOf(valueLeg({ kind: "spot", held: "fade", perp: { unitsPerContract: perp.unitsPerContract } }, { perp: snap.perps.get(perp.symbol)?.price }));
       }
-      const now = spotNow(asset, snap);
-      if (!now) return null;
       // The entry was signed in the terms of the multiplier then (the audit log has the exact one;
       // the multiplier in force when the position opened is the same unless it changed that minute).
       const live = snap.tokens.get(asset.mint)?.scaledUi;
       const cfg = live !== undefined ? live : asset.scaledUi;
-      if (cfg === undefined || openedAtSec === null) return now.price;
-      const m0 = effectiveMultiplier(cfg, openedAtSec);
-      return now.price * (effectiveMultiplier(cfg, snap.nowSec) / m0);
+      const scale = cfg === undefined || openedAtSec === null ? 1 : effectiveMultiplier(cfg, snap.nowSec) / effectiveMultiplier(cfg, openedAtSec);
+      const stock = asset.stock ? snap.stocks.get(asset.stock)?.price : undefined;
+      return priceOf(valueLeg({ kind: "spot", held: "back", spot: { perUi: asset.perUi, basis: null, scale } }, { token: snap.tokens.get(asset.mint), stock }));
     }
   }
 }
+
+const priceOf = (v: LegValue): number | null => (v.ok ? v.price : null);
 
 export type ChainLeg = { kind: object; weightBps: number; leverage: number };
 export type ChainPosition = { side: object; legsMask: number; entrySet: number; entries: bigint[] };
