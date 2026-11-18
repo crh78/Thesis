@@ -18,11 +18,14 @@ ExecStartPre=-/usr/bin/docker rm -f thesis-surfpool
 # and `docker run -e NAME` passes it from this environment without its value. Only root can see
 # it (the env file, `docker inspect`); the `thesis` user isn't in the docker group.
 EnvironmentFile=-/etc/thesis/executor.env
+# --disable-instruction-profiling: Surfpool otherwise profiles every transaction instruction by
+# instruction (for Studio), about 145 ms per instruction measured on this VM, so a trade's send
+# took 1-1.5 s. --no-studio: nothing uses Studio, and its port isn't published.
 ExecStart=/bin/sh -c 'if [ -n "$$FORK_DATASOURCE_RPC_URL" ]; then export SURFPOOL_DATASOURCE_RPC_URL="$$FORK_DATASOURCE_RPC_URL"; src="-e SURFPOOL_DATASOURCE_RPC_URL"; net=""; else src=""; net="--network mainnet"; fi; \
   exec /usr/bin/docker run --name thesis-surfpool --rm $$src \
   -p 127.0.0.1:18899:8899 -p 127.0.0.1:18900:8900 \
   surfpool/surfpool:1.7.0 \
-  start $$net --host 0.0.0.0 --port 8899 --ws-port 8900 --no-tui --no-deploy --airdrop-amount 0'
+  start $$net --host 0.0.0.0 --port 8899 --ws-port 8900 --no-tui --no-deploy --airdrop-amount 0 --disable-instruction-profiling --no-studio'
 # In case Surfpool echoes its datasource: drop any log line carrying a key (systemd 253+).
 LogFilterPatterns=~api-key=
 ExecStop=/usr/bin/docker stop thesis-surfpool
