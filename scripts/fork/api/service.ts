@@ -2050,9 +2050,10 @@ export class ForkService {
       const build = this.#builds.get(buildId);
       if (!build || build.expires < Date.now()) throw new ApiError(410, "build_gone", "This build expired or was submitted. Build again.");
       if (build.quotedAt !== undefined && Date.now() - build.quotedAt > QUOTE_REFRESH_MS) throw new ApiError(409, "quote_stale", "This build's prices are too old. Build again.");
-      const reset = build.market.length ? await t.time("markets", () => this.#o.fork.refreshMarkets(build.market, { freshMs: MARKET_FRESH_MS })) : null;
-      // A reset is lazy: read the accounts again now, not in the send's preflight.
-      if (((reset as { reset?: number } | null)?.reset ?? 0) > 0) await t.time("warm", () => this.#warm(build.messages.map((m) => VersionedMessage.deserialize(m))));
+      if (build.market.length) await t.time("markets", () => this.#o.fork.refreshMarkets(build.market, { freshMs: MARKET_FRESH_MS }));
+      // A reset is lazy: read the accounts again now, not in the send's preflight (about a
+      // millisecond when the fork already holds them).
+      await t.time("warm", () => this.#warm(build.messages.map((m) => VersionedMessage.deserialize(m))));
       const started = Date.now();
       const { blockhash } = await t.time("blockhash", () => this.#o.connection.getLatestBlockhash("confirmed"));
       // Submitted while this ran: it's used.
