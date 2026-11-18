@@ -9,6 +9,9 @@ insert into public.profiles (id, handle, display_name, is_demo) values ('0000000
 insert into public.takes (id, author_id, claim, risk, horizon, settles_at) values
   ('00000000-0000-4000-8000-0000000000bb', '00000000-0000-4000-8000-0000000000aa', 'Chip stocks keep leading', 'medium', '3mo', now() + interval '90 days'),
   ('00000000-0000-4000-8000-0000000000bd', '00000000-0000-4000-8000-0000000000ad', 'Demo copper call', 'medium', '3mo', now() + interval '90 days');
+-- A newer demo take with the tester's claim: the tester's own take must still win T1.
+insert into public.takes (id, author_id, claim, risk, horizon, settles_at, created_at) values
+  ('00000000-0000-4000-8000-0000000000be', '00000000-0000-4000-8000-0000000000ad', 'Chip stocks keep leading', 'medium', '3mo', now() + interval '90 days', now() + interval '1 minute');
 update public.take_stats set backs = 7, fades = 1, money_in = 140 where take_id = '00000000-0000-4000-8000-0000000000bb';
 
 do $$
@@ -36,8 +39,9 @@ begin
     jsonb_build_object('signature', 's9', 'ordinal', 1, 'slot', 9, 'block_time', 1800000000, 'name', 'takeCreated',
       'data', jsonb_build_object('take', 'TD', 'author', 'STANDIN', 'claimHash',
         (select to_jsonb(array_agg(get_byte(sha256(convert_to('Demo copper call', 'UTF8')), i) order by i)) from generate_series(0, 31) i)))));
-  if (select take_id from public.chain_takes where network = 'solana-mainnet-fork' and address = 'T9') is not null then
-    raise exception 'another wallet''s on-chain take was linked by claim hash';
+  -- (It may land on the demo take with that claim, which is how demo mirrors are found.)
+  if (select take_id from public.chain_takes where network = 'solana-mainnet-fork' and address = 'T9') = '00000000-0000-4000-8000-0000000000bb' then
+    raise exception 'another wallet''s on-chain take was linked to the tester''s take by claim hash';
   end if;
   if (select take_id from public.chain_takes where network = 'solana-mainnet-fork' and address = 'TD') is distinct from '00000000-0000-4000-8000-0000000000bd' then
     raise exception 'a demo take must still match its mirror by claim hash';

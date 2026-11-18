@@ -70,9 +70,28 @@ const PUBLIC = { "news.example.com": ["93.184.216.34"], "cdn.example.com": ["260
 Deno.test("a host must resolve to public addresses only", async () => {
   await checkHost(new URL("https://news.example.com/"), dns(PUBLIC));
   await checkHost(new URL("http://8.8.8.8/"), dns({})); // a literal needs no lookup
-  for (const ips of [[], ["10.0.0.5"], ["100.64.1.1"], ["93.184.216.34", "127.0.0.1"], ["::1"], ["fe80::2"], ["::ffff:192.168.0.1"]]) {
-    await assertRejects(() => checkHost(new URL("https://evil.example.com/"), dns({ "evil.example.com": ips })), Error, "invalid_url");
+  await assertRejects(() => checkHost(new URL("https://gone.example.com/"), dns({})), Error, "unresolved_host");
+  for (const ips of [["10.0.0.5"], ["100.64.1.1"], ["93.184.216.34", "127.0.0.1"], ["::1"], ["fe80::2"], ["::ffff:192.168.0.1"]]) {
+    await assertRejects(() => checkHost(new URL("https://evil.example.com/"), dns({ "evil.example.com": ips })), Error, "private_host");
   }
+});
+
+Deno.test("the lookup gets the fetch's deadline", async () => {
+  let got: AbortSignal | undefined;
+  const resolve = (host: string, signal?: AbortSignal) => {
+    got = signal;
+    return Promise.resolve(PUBLIC[host as keyof typeof PUBLIC] ?? []);
+  };
+  const f = fakeFetch({ "https://news.example.com/a": page("<p>hi</p>") });
+  await fetchPublic("https://news.example.com/a", "text/html", { fetch: f.fetch, resolve });
+  assertEquals(got instanceof AbortSignal, true);
+  // A lookup that outlives the deadline fails, rather than reading as "no records".
+  const slow = (_host: string, signal?: AbortSignal) =>
+    new Promise<string[]>((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason)));
+  const ctl = new AbortController();
+  const pending = checkHost(new URL("https://news.example.com/"), slow, ctl.signal);
+  ctl.abort(new DOMException("timed out", "TimeoutError"));
+  await assertRejects(() => pending, DOMException, "timed out");
 });
 
 Deno.test("redirects: every hop is checked before it's requested", async () => {
@@ -89,19 +108,24 @@ Deno.test("redirects: every hop is checked before it's requested", async () => {
     assertEquals(f.asked.length, 3);
   }
   // To a private address, a private name, another port, or another scheme: never requested.
-  for (const to of ["http://169.254.169.254/latest/meta-data", "http://inside.example.com/", "https://cdn.example.com:8080/", "file:///etc/passwd", "http://[::1]/"]) {
+  for (
+    const [to, why] of [
+      ["http://169.254.169.254/latest/meta-data", "invalid_url"], ["http://inside.example.com/", "private_host"],
+      ["https://cdn.example.com:8080/", "invalid_url"], ["file:///etc/passwd", "invalid_url"], ["http://[::1]/", "invalid_url"],
+    ]
+  ) {
     const f = fakeFetch({ "https://news.example.com/a": redirect(to) });
     await assertRejects(
       () => fetchPublic("https://news.example.com/a", "text/html", { fetch: f.fetch, resolve: dns({ ...PUBLIC, "inside.example.com": ["10.1.1.1"] }) }),
       Error,
-      "invalid_url",
+      why,
     );
     assertEquals(f.asked, ["https://news.example.com/a"], to);
   }
   // A name that resolves privately isn't requested even first.
   {
     const f = fakeFetch({});
-    await assertRejects(() => fetchPublic("https://127.0.0.1.nip.io/", "text/html", { fetch: f.fetch, resolve: dns({ "127.0.0.1.nip.io": ["127.0.0.1"] }) }), Error, "invalid_url");
+    await assertRejects(() => fetchPublic("https://127.0.0.1.nip.io/", "text/html", { fetch: f.fetch, resolve: dns({ "127.0.0.1.nip.io": ["127.0.0.1"] }) }), Error, "private_host");
     assertEquals(f.asked, []);
   }
   // At most 3 redirects.

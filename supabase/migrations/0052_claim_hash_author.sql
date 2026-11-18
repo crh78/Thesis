@@ -27,6 +27,11 @@ alter table public.takes
 
 create index takes_claim_hash on public.takes (claim_hash);
 
+-- Called only when a take is written, by the service role (create_take) or a definer function;
+-- reading the stored column doesn't call it.
+revoke execute on function public.claim_sha256(text) from public, anon, authenticated;
+grant execute on function public.claim_sha256(text) to service_role;
+
 create or replace function public.ingest_chain_events(p_network text, p_events jsonb) returns integer
 language plpgsql
 security definer
@@ -77,7 +82,8 @@ begin
           join public.profiles p on p.id = t.author_id
           where t.claim_hash = hash
             and (p.solana_address = d ->> 'author' or (p.is_demo and p.solana_address is null))
-          order by t.created_at desc
+          -- The author's own take before a demo take with the same claim.
+          order by (p.solana_address = d ->> 'author') desc nulls last, t.created_at desc
           limit 1
         ),
         d ->> 'author',

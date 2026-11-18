@@ -84,8 +84,9 @@ declare
   want jsonb;
   checked int := 0;
 begin
-  if exists (select 1 from public.securities where display_name is distinct from public.asset_display_name(name)) then
-    raise exception 'display_name must be asset_display_name(name)';
+  -- Expression indexes need it immutable.
+  if (select provolatile from pg_proc where oid = 'public.asset_display_name(text)'::regprocedure) <> 'i' then
+    raise exception 'asset_display_name must stay immutable';
   end if;
 
   foreach q in array array[

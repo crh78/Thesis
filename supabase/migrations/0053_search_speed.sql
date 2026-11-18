@@ -4,21 +4,20 @@
 -- asset_display_name (five regular expressions) twice on each of the ~22,000 tradeable rows, and
 -- matched names with LIKE '%…%' on every row.
 --
---   securities.display_name   asset_display_name(name), stored when a row is written.
---   trigram indexes           on lower(name), display_name and the themes, tradeable rows only,
---                             so LIKE '%…%' is answered by an index; plain indexes for tickers.
---   search_securities         same results and order as 0044_prediction_expiry: candidates come
---                             through the indexes first (every row that could score above 0), then
---                             they're scored exactly as before.
+--   indexes             on asset_display_name(name) (btree and trigram), lower(name) and the themes
+--                       (trigram), and the tickers, tradeable rows only, so equality and LIKE
+--                       '%…%' are answered by an index. Expression indexes, not a stored column:
+--                       adding a column would rewrite the whole table under an exclusive lock.
+--                       Building them blocks writes to securities for a few seconds, not reads.
+--   search_securities   same results and order as 0044_prediction_expiry: candidates come through
+--                       the indexes first (every row that could score above 0), and only they are
+--                       scored, exactly as before.
 --   chain_events (network, name, block_time)   chain_wallet_stats reads takeSettled by network
 --                                              on every leaderboard call (it scanned the table).
 --   chain_positions (network, take), settled   "made for backers" joins settled positions by take;
 --                                              the only such index covered open ones.
 
 create extension if not exists pg_trgm with schema extensions;
-
-alter table public.securities
-  add column display_name text generated always as (public.asset_display_name(name)) stored;
 
 -- The themes as one lowercased string, for a trigram index. Searched as a first filter only: the
 -- score still checks each theme on its own.
@@ -29,12 +28,18 @@ as $$
   select lower(pg_catalog.array_to_string(p_themes, E'\n'))
 $$;
 
+-- search_securities runs as its caller, and callers include the publishable key (the executor's
+-- dogfood script), so the helper is callable like asset_display_name (0023). It's pure.
+revoke execute on function public.securities_themes_text(text[]) from public;
+grant execute on function public.securities_themes_text(text[]) to anon, authenticated, service_role;
+
+-- asset_display_name is immutable (0023_assets), as an expression index needs.
 create index securities_tradeable on public.securities (kind) where liquidity = 'tradeable';
 create index securities_tradeable_symbol on public.securities (lower(symbol)) where liquidity = 'tradeable';
 create index securities_tradeable_underlying on public.securities (lower(underlying)) where liquidity = 'tradeable';
-create index securities_tradeable_display on public.securities (display_name) where liquidity = 'tradeable';
+create index securities_tradeable_display on public.securities (public.asset_display_name(name)) where liquidity = 'tradeable';
 create index securities_tradeable_display_trgm on public.securities
-  using gin (display_name extensions.gin_trgm_ops) where liquidity = 'tradeable';
+  using gin (public.asset_display_name(name) extensions.gin_trgm_ops) where liquidity = 'tradeable';
 create index securities_tradeable_name_trgm on public.securities
   using gin (lower(name) extensions.gin_trgm_ops) where liquidity = 'tradeable';
 create index securities_tradeable_themes_trgm on public.securities
@@ -43,8 +48,8 @@ create index securities_tradeable_themes_trgm on public.securities
 -- Same signature, columns and scoring as 0044_prediction_expiry. Every way to score above 0 has
 -- its own candidate query, each answered by one of the indexes above:
 --   100  ticker or underlying, exactly       lower(symbol), lower(underlying)
---   95   display name, exactly               display_name
---   80   display name starts with it         display_name (trigram)
+--   95   display name, exactly               asset_display_name(name)
+--   80   display name starts with it         asset_display_name(name) (trigram)
 --   60   a word in the name starts with it   lower(name) (trigram): the name contains it
 --   40   the name contains it                lower(name) (trigram)
 --   30   a theme contains it                 themes (trigram), then each theme checked
@@ -72,9 +77,9 @@ begin
     union
     select s.id from public.securities s where s.liquidity = 'tradeable' and q <> '' and lower(s.underlying) = q
     union
-    select s.id from public.securities s where s.liquidity = 'tradeable' and q <> '' and s.display_name = q
+    select s.id from public.securities s where s.liquidity = 'tradeable' and q <> '' and public.asset_display_name(s.name) = q
     union
-    select s.id from public.securities s where s.liquidity = 'tradeable' and q <> '' and s.display_name like q || '%'
+    select s.id from public.securities s where s.liquidity = 'tradeable' and q <> '' and public.asset_display_name(s.name) like q || '%'
     union
     select s.id from public.securities s where s.liquidity = 'tradeable' and q <> '' and lower(s.name) like '%' || q || '%'
     union
@@ -86,8 +91,8 @@ begin
       case
         when q = '' then 1
         when lower(s.symbol) = q or lower(s.underlying) = q or lower(s.symbol) = q || 'x' then 100
-        when s.display_name = q then 95
-        when s.display_name like q || '%' then 80
+        when public.asset_display_name(s.name) = q then 95
+        when public.asset_display_name(s.name) like q || '%' then 80
         when ' ' || lower(s.name) like '% ' || q || '%' then 60
         when length(q) >= 3 and lower(s.name) like '%' || q || '%' then 40
         when length(q) >= 3 and exists (select 1 from unnest(s.themes) th where lower(th) like '%' || q || '%') then 30

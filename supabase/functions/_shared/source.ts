@@ -132,10 +132,10 @@ export function checkUrl(raw: string): URL {
   return u;
 }
 
-/** A host name's addresses (A and AAAA); none when it doesn't resolve. */
-export type Resolve = (host: string) => Promise<string[]>;
+/** A host name's addresses (A and AAAA); none when it doesn't resolve. Gives up when `signal` aborts. */
+export type Resolve = (host: string, signal?: AbortSignal) => Promise<string[]>;
 
-export const resolveHost: Resolve = async (host) => {
+export const resolveHost: Resolve = async (host, signal) => {
   // Without DNS nothing can be checked, so nothing is fetched: say so rather than fail quietly.
   if (typeof Deno.resolveDns !== "function") {
     console.error("source: Deno.resolveDns is unavailable, so pages aren't fetched");
@@ -144,20 +144,25 @@ export const resolveHost: Resolve = async (host) => {
   const found: string[] = [];
   for (const type of ["A", "AAAA"] as const) {
     try {
-      found.push(...await Deno.resolveDns(host, type));
-    } catch {
+      found.push(...await Deno.resolveDns(host, type, { signal }));
+    } catch (e) {
+      if (signal?.aborted) throw e; // out of time: not "no records"
       // No records of this type.
     }
   }
   return found;
 };
 
-/** Refuses a host unless it resolves, and every address it resolves to is public. */
-export async function checkHost(u: URL, resolve: Resolve = resolveHost): Promise<void> {
+/**
+ * Refuses a host unless it resolves, and every address it resolves to is public:
+ * unresolved_host or private_host.
+ */
+export async function checkHost(u: URL, resolve: Resolve = resolveHost, signal?: AbortSignal): Promise<void> {
   const h = u.hostname.replace(/\.$/, "");
   if (ipv4(h)) return; // a literal: checkUrl already checked it
-  const ips = await resolve(h);
-  if (!ips.length || !ips.every(isPublicIp)) throw new SourceError("invalid_url");
+  const ips = await resolve(h, signal);
+  if (!ips.length) throw new SourceError("unresolved_host");
+  if (!ips.every(isPublicIp)) throw new SourceError("private_host");
 }
 
 export type FetchDeps = { fetch?: typeof fetch; resolve?: Resolve };
@@ -171,7 +176,7 @@ export async function fetchPublic(raw: string, accept: string, deps: FetchDeps =
   const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
   let u = checkUrl(raw);
   for (let hop = 0;; hop++) {
-    await checkHost(u, deps.resolve);
+    await checkHost(u, deps.resolve, signal);
     const r = await get(u.toString(), { headers: { accept, "user-agent": USER_AGENT }, redirect: "manual", signal });
     const location = r.status >= 300 && r.status < 400 ? r.headers.get("location") : null;
     if (!location) return { url: u, response: r };
@@ -320,8 +325,10 @@ export async function readSource(
       } else {
         await r.body?.cancel();
       }
-    } catch {
-      // Unreachable, blocked, or not a public host: what the phone sent is all there is.
+    } catch (e) {
+      // Unreachable, blocked, or not a public host: what the phone sent is all there is. Logged
+      // (host and reason only), so DNS trouble on the hosted runtime doesn't go unnoticed.
+      console.warn(`source: didn't fetch ${u.hostname}: ${e instanceof Error ? e.message || e.name : String(e)}`);
     }
   }
   if (html) {

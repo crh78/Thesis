@@ -86,6 +86,10 @@ begin
   if (select claim_hash from public.takes where id = posting) <> encode(sha256(convert_to('Chips keep leading', 'UTF8')), 'hex') then
     raise exception 'takes.claim_hash is not the claim''s sha256';
   end if;
+  if has_function_privilege('anon', 'public.claim_sha256(text)', 'execute')
+     or has_function_privilege('authenticated', 'public.claim_sha256(text)', 'execute') then
+    raise exception 'claim_sha256 must not be callable with the publishable key';
+  end if;
 
   -- Someone else's wallet publishing the same claim doesn't make it live.
   select to_jsonb(array_agg(get_byte(sha256(convert_to('Chips keep leading', 'UTF8')), i) order by i))
