@@ -28,19 +28,81 @@ struct ForkAPI {
         try await get("takes/\(takeID)", query: [URLQueryItem(name: "viewer", value: wallet.address)])
     }
 
-    /// Backs (or fades) a take for `amount`: build, sign every transaction, submit. Returns the
-    /// transaction signatures.
-    @discardableResult
-    func trade(_ takeID: String, side: Side, amount: Double) async throws -> [String] {
-        struct Body: Encodable { let owner: String; let side: String; let usd: Double }
-        let built: ForkBuild = try await post("takes/\(takeID)/trades",
-                                              Body(owner: wallet.address, side: side == .back ? "back" : "fade", usd: amount))
-        return try await signAndSubmit(built)
+    // A trade is two steps, so the slow one happens before the tap: `prepareTrade` builds it (the
+    // sheet does that as it opens, and again as the amount changes), and `commit` signs and sends
+    // it when you tap. `prebuild` marks a build made ahead of a tap: the fork API counts the money
+    // action at submit instead, and says so with `prebuilt: true`. Without that answer it was a
+    // normal build (an older fork API, or one that can't defer the money action).
+
+    /// Builds a back (or fade) of a take for `amount`, ready to sign.
+    func prepareTrade(_ takeID: String, side: Side, amount: Double, prebuild: Bool = false) async throws -> ForkPrepared {
+        struct Body: Encodable { let owner: String; let side: String; let usd: Double; let prebuild: Bool? }
+        let body = Body(owner: wallet.address, side: side == .back ? "back" : "fade", usd: amount, prebuild: prebuild ? true : nil)
+        return try await prepared { try await post("takes/\(takeID)/trades", body) }
     }
 
-    func quoteExit(_ takeID: String, position: String) async throws -> ForkBuild {
-        struct Body: Encodable { let owner: String }
-        return try await post("takes/\(takeID)/positions/\(position)/exit", Body(owner: wallet.address))
+    /// Builds the sale of one position (the whole position), ready to sign.
+    func prepareExit(_ takeID: String, position: String, prebuild: Bool = false) async throws -> ForkPrepared {
+        struct Body: Encodable { let owner: String; let prebuild: Bool? }
+        let body = Body(owner: wallet.address, prebuild: prebuild ? true : nil)
+        return try await prepared { try await post("takes/\(takeID)/positions/\(position)/exit", body) }
+    }
+
+    /// The same build with a fresh blockhash (and its quote, when that's old). Nil when it has to be
+    /// built again: the quote is too old, the build is gone, or the fork API can't refresh builds.
+    func refresh(_ old: ForkPrepared) async throws -> ForkPrepared? {
+        struct Empty: Encodable {}
+        do {
+            let fresh = try await prepared { try await post("builds/\(old.build.buildId)/refresh", Empty()) }
+            return ForkPrepared(build: fresh.build.keeping(old.build), expires: fresh.expires)
+        } catch let e as ForkAPIError where Self.buildAgain.contains(e.code) {
+            return nil
+        }
+    }
+
+    /// `GET /submissions` answers that mean "nothing to learn here" (all 404s).
+    static let unknownSubmission: Set<String> = ["no_such_submission", "no_such_route", "http_404", "not_found"]
+
+    private static let buildAgain: Set<String> = ["quote_stale", "build_gone", "build_expired", "no_such_route", "http_404", "http_409", "http_410"]
+
+    /// Signs every transaction of a build at once and sends them. Returns as soon as the fork has
+    /// accepted them (`pending`: confirmation follows, see `submission`), or, from a fork API that
+    /// confirms before it answers, once they landed. `marks` go along as the submit's `timings`.
+    func commit(_ build: ForkBuild, marks: TradeMarks? = nil) async throws -> ForkSubmission {
+        let signed = try await signAll(build, marks: marks)
+        marks?.mark("signed")
+        struct Body: Encodable { let buildId: String; let transactions: [String]; let until: String; let timings: [String: Double]? }
+        marks?.mark("submit")
+        return try await post("submit", Body(buildId: build.buildId, transactions: signed, until: "accepted", timings: marks?.values),
+                              authorized: false)
+    }
+
+    /// Where a submitted build stands. Waits up to `wait` seconds while it's pending (a long poll).
+    /// Nil when the fork API doesn't know it (`no_such_submission`: it restarted without it, or kept
+    /// it past 10 minutes) or can't answer this: an unknown, so stop asking and check the wallet.
+    func submission(_ buildID: String, wait: Int = 10) async throws -> ForkSubmission? {
+        var req = URLRequest(url: base.appending(path: "submissions/\(buildID)").appending(queryItems: [
+            URLQueryItem(name: "wait", value: String(wait * 1000)),
+        ]))
+        req.timeoutInterval = TimeInterval(wait + 15)
+        do {
+            return try await send(req)
+        } catch let e as ForkAPIError where Self.unknownSubmission.contains(e.code) {
+            return nil
+        }
+    }
+
+    /// How long a build is good for after it was asked for, if the fork API doesn't say (its
+    /// builds last 55 s from when it starts on them).
+    static let buildLifetime: TimeInterval = 50
+
+    private func prepared(_ build: () async throws -> ForkBuild) async throws -> ForkPrepared {
+        let asked = Date.now
+        let built = try await build()
+        var expires = asked.addingTimeInterval(Self.buildLifetime)
+        // The API's own expiry, when it gives one, on its clock: never later than ours.
+        if let at = built.expiresAt { expires = min(expires, Date(timeIntervalSince1970: at / 1000)) }
+        return ForkPrepared(build: built, expires: expires)
     }
 
     /// Puts a just-posted take on-chain with the author's buy-in. When the build leaves legs out,
@@ -64,16 +126,33 @@ struct ForkAPI {
         return try await post("takes/\(takeID)/confirm", Empty())
     }
 
+    /// Signs and sends a build, and returns once it landed (posting, claims, Phoenix cash-out).
     func signAndSubmit(_ built: ForkBuild) async throws -> [String] {
-        var signed: [String] = []
-        for b64 in built.transactions {
-            guard let tx = Data(base64Encoded: b64) else { throw ForkAPIError(code: "bad_transaction", message: nil) }
-            signed.append(try await wallet.sign(tx).base64EncodedString())
-        }
+        let signed = try await signAll(built, marks: nil)
         struct Body: Encodable { let buildId: String; let transactions: [String] }
         struct Sent: Decodable { let signatures: [String] }
-        let sent: Sent = try await post("submit", Body(buildId: built.buildId, transactions: signed))
+        let sent: Sent = try await post("submit", Body(buildId: built.buildId, transactions: signed), authorized: false)
         return sent.signatures
+    }
+
+    /// The wallet's signature on every transaction, all asked for at once, in the build's order.
+    private func signAll(_ built: ForkBuild, marks: TradeMarks?) async throws -> [String] {
+        let txs = try built.transactions.map { b64 in
+            guard let tx = Data(base64Encoded: b64) else { throw ForkAPIError(code: "bad_transaction", message: nil) }
+            return tx
+        }
+        let sign = wallet.sign
+        return try await withThrowingTaskGroup(of: (Int, String).self) { group in
+            for (i, tx) in txs.enumerated() {
+                group.addTask { (i, try await sign(tx).base64EncodedString()) }
+            }
+            var signed = [String](repeating: "", count: txs.count)
+            for try await (i, sig) in group {
+                signed[i] = sig
+                marks?.mark("sign_\(i)")
+            }
+            return signed
+        }
     }
 
     /// The program's rules: the fee, the creator's share, the minimum stake (the config account).
@@ -150,13 +229,15 @@ struct ForkAPI {
         return try await send(URLRequest(url: url))
     }
 
-    private func post<T: Decodable, B: Encodable>(_ path: String, _ body: B) async throws -> T {
+    /// `authorized: false` for /submit, which needs no token (the API only sends what it built, and
+    /// checks the wallet's signature on it), so the tap doesn't wait on Privy for one.
+    private func post<T: Decodable, B: Encodable>(_ path: String, _ body: B, authorized: Bool = true) async throws -> T {
         var req = URLRequest(url: base.appending(path: path))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "content-type")
         // Money routes need proof the wallet is yours: your Privy access token (the fork API's
-        // abuse limits, scripts/fork/README.md). Sent on every POST; harmless where it isn't needed.
-        if let token = try? await accessToken() {
+        // abuse limits, scripts/fork/README.md). Sent on every other POST; harmless where it isn't needed.
+        if authorized, let token = try? await tokens.token(accessToken) {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "authorization")
         }
         req.httpBody = try JSONEncoder().encode(body)
@@ -165,8 +246,20 @@ struct ForkAPI {
         return try await send(req)
     }
 
+    /// One session for the fork API, kept for the app's life, so trades reuse a warm connection
+    /// (the sheet's first build or receipt read opens it) instead of queueing behind images.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.waitsForConnectivity = false
+        config.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: config)
+    }()
+
+    /// The Privy token, reused while it's good (each copy of this API shares it).
+    private let tokens = TokenCache()
+
     private func send<T: Decodable>(_ req: URLRequest) async throws -> T {
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await Self.session.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let err = try? Self.decoder.decode(ForkAPIError.self, from: data)
@@ -174,6 +267,87 @@ struct ForkAPI {
         }
         return try Self.decoder.decode(T.self, from: data)
     }
+}
+
+/// The Privy access token for fork API calls, reused until a minute before it expires (at most
+/// five minutes), so a trade doesn't ask Privy for one on every request.
+private actor TokenCache {
+    private var token: String?
+    private var until = Date.distantPast
+
+    func token(_ fetch: () async throws -> String) async throws -> String {
+        if let token, Date.now < until { return token }
+        let fresh = try await fetch()
+        token = fresh
+        until = min(Date.now.addingTimeInterval(300), Self.expiry(of: fresh)?.addingTimeInterval(-60) ?? .now)
+        return fresh
+    }
+
+    /// A JWT's `exp`, if it reads as one.
+    private static func expiry(of jwt: String) -> Date? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var b64 = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        b64 += String(repeating: "=", count: (4 - b64.count % 4) % 4)
+        guard let data = Data(base64Encoded: b64),
+              let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let exp = claims["exp"] as? Double else { return nil }
+        return Date(timeIntervalSince1970: exp)
+    }
+}
+
+/// A build ready to sign, and when it stops being sendable (its blockhash), on this phone's clock.
+struct ForkPrepared {
+    let build: ForkBuild
+    let expires: Date
+    /// When the answer came in.
+    var madeAt = Date.now
+
+    /// Signing and sending take well under a second; this leaves room for a slow network.
+    static let sendMargin: TimeInterval = 5
+    /// A sheet that's still open refreshes a build with less than this left.
+    static let refreshBelow: TimeInterval = 15
+
+    var secondsLeft: TimeInterval { expires.timeIntervalSinceNow }
+    var isFresh: Bool { secondsLeft > Self.sendMargin }
+}
+
+/// What `POST /submit` and `GET /submissions/:buildId` answer.
+struct ForkSubmission: Decodable {
+    enum Status: String { case pending, landed, failed, incomplete }
+
+    struct Problem: Decodable, Equatable {
+        let code: String
+        let message: String?
+    }
+
+    /// Nil from a fork API that confirms before it answers: then it has landed.
+    private let status: String?
+    let signatures: [String]?
+    let error: Problem?
+
+    var state: Status { status.flatMap(Status.init(rawValue:)) ?? .landed }
+
+    init(state: Status, signatures: [String]? = nil, error: Problem? = nil) {
+        status = state.rawValue
+        self.signatures = signatures
+        self.error = error
+    }
+}
+
+/// When each step of a trade happened, in ms after the tap (a build made before the tap is
+/// negative). Sent with the submit as `timings`, which the fork API logs with the build.
+final class TradeMarks: @unchecked Sendable {
+    private let start = Date.now
+    private let lock = NSLock()
+    private var marks: [String: Double] = [:]
+
+    func mark(_ name: String, at date: Date = .now) {
+        let ms = (date.timeIntervalSince(start) * 1000).rounded()
+        lock.withLock { marks[name] = ms }
+    }
+
+    var values: [String: Double] { lock.withLock { marks } }
 }
 
 struct ForkAPIError: Error, Decodable, LocalizedError {
@@ -220,10 +394,25 @@ struct ForkBuild: Decodable {
     /// A sale of the author's own buy-in on an open take: it closes the take (no new trades, and
     /// its result is final at today's prices). Missing on older forks and on other builds.
     var closesTake: Bool? = nil
+    /// Unix ms: when the transactions' blockhash expires, and when the quote behind them was made.
+    /// Missing on older fork APIs (`ForkAPI.buildLifetime` stands in).
+    var expiresAt: Double? = nil
+    var quotedAt: Double? = nil
+    /// The fork API served a `prebuild: true` request as a prebuild (its money action counts at
+    /// submit). Missing: it was a normal build, so the app stops building ahead (`PrebuildSupport`).
+    var prebuilt: Bool? = nil
 
     struct LeftOut: Decodable, Equatable {
         let name: String
         let reason: String
+    }
+
+    /// A refreshed build, with what it left out of its answer taken from the build it replaces.
+    func keeping(_ old: ForkBuild) -> ForkBuild {
+        ForkBuild(buildId: buildId, transactions: transactions, expectedUsd: expectedUsd ?? old.expectedUsd,
+                  minimumUsd: minimumUsd ?? old.minimumUsd, phoenixCashOut: phoenixCashOut ?? old.phoenixCashOut,
+                  excluded: excluded ?? old.excluded, closesTake: closesTake ?? old.closesTake,
+                  expiresAt: expiresAt, quotedAt: quotedAt ?? old.quotedAt, prebuilt: prebuilt ?? old.prebuilt)
     }
 }
 

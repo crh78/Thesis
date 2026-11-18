@@ -3,6 +3,7 @@ import SwiftUI
 /// Fork mode: the take's on-chain receipt. Counts and money in come from the Thesis program on
 /// the mainnet fork; the return is the author's position at current prices (or the settled result).
 struct ForkReceiptView: View {
+    @Environment(AppState.self) private var app
     let receipt: ForkReceipt?
     /// Sell: the on-chain positions behind one of your holdings (every buy is its own position).
     var onExit: (([String]) -> Void)? = nil
@@ -99,6 +100,10 @@ struct ForkReceiptView: View {
         }
     }
 
+    private func sold(_ p: ForkReceipt.MyHolding) -> Bool {
+        !p.addresses.isEmpty && p.addresses.allSatisfy(app.soldPositions.contains)
+    }
+
     @ViewBuilder
     private func positions(_ r: ForkReceipt) -> some View {
         let mine = ForkReceipt.MyHolding.group(r.viewerPositions ?? [])
@@ -111,7 +116,8 @@ struct ForkReceiptView: View {
                             .font(.geist(14))
                         Spacer()
                         // What the wallet holds now against what it paid (fee included).
-                        if p.exited {
+                        // Sold here (confirming, or the receipt hasn't caught up yet) shows as sold.
+                        if p.exited || sold(p) {
                             Text("Sold").font(.mono(13, .semibold))
                         } else if let pnl = p.pnl, let value = p.valueUsd {
                             Text("\(Fmt.usd(value, cents: true)) · \(Fmt.pct(pnl.pct * 100))")
@@ -127,7 +133,7 @@ struct ForkReceiptView: View {
                     ForEach(p.phoenix, id: \.leg) { risk in
                         liquidationLine(risk, legName: r.legs.first { $0.index == risk.leg }?.name ?? risk.symbol)
                     }
-                    if p.canExit, let onExit {
+                    if p.canExit, !sold(p), let onExit {
                         Button("Sell position") { onExit(p.addresses) }
                             .font(.geist(13, .semibold))
                             .buttonStyle(.bordered)
