@@ -212,14 +212,81 @@ export function checkAmount(usd: number, min = MIN_STAKE_USD) {
 /** A random nonzero u64 below 2^53 (0 is the author's buy-in). */
 export const randomPositionId = () => 1n + (randomBytes(8).readBigUInt64LE() % (2n ** 53n - 1n));
 
-/** Builds and sends slower than this log where their time went. */
-export const SLOW_MS = 2_000;
+/**
+ * Where one request's time went: each step's milliseconds (a step that runs twice adds up) and
+ * short notes ("quotes": "hit"). Every build, refresh and submit logs it (`line`) and sends it as
+ * a `Server-Timing` header (`header`). Routing may fill in its own steps and set `quotedAt`
+ * earlier than the build (a quote it reused).
+ */
+export class Timings {
+  readonly started: number;
+  #steps = new Map<string, number>();
+  #notes = new Map<string, string>();
+  #now: () => number;
+  /** When the oldest quote in the build was made (unix ms), if it has quotes. */
+  quotedAt?: number;
 
-/** Logs `what` with each part's seconds when it took longer than SLOW_MS: "slow back build 1a2b3c4d 6.2 s: legs and quotes 3.1 s, …". */
-export function logSlow(log: (m: string) => void, what: string, totalMs: number, parts: Record<string, number>) {
-  if (totalMs < SLOW_MS) return;
-  const s = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
-  log(`slow ${what} ${s(totalMs)}: ${Object.entries(parts).map(([k, ms]) => `${k} ${s(ms)}`).join(", ")}`);
+  constructor(now: () => number = Date.now) {
+    this.#now = now;
+    this.started = now();
+  }
+
+  /** Adds `ms` to step `name`. */
+  add(name: string, ms: number) {
+    this.#steps.set(name, (this.#steps.get(name) ?? 0) + Math.max(0, Math.round(ms)));
+  }
+
+  /** Runs `work` and adds how long it took to step `name`, whether it succeeds or throws. */
+  async time<T>(name: string, work: () => Promise<T>): Promise<T> {
+    const t = this.#now();
+    try {
+      return await work();
+    } finally {
+      this.add(name, this.#now() - t);
+    }
+  }
+
+  note(name: string, value: string | number) {
+    this.#notes.set(name, String(value));
+  }
+
+  /** Each step's milliseconds, in the order they first ran. */
+  get steps(): Record<string, number> {
+    return Object.fromEntries(this.#steps);
+  }
+
+  /** `Server-Timing`: each step as `name;dur=ms`, each note as `name;desc="…"`, then `total`. */
+  header(): string {
+    const token = (s: string) => s.replace(/[^A-Za-z0-9_.-]+/g, "-");
+    return [
+      ...[...this.#steps].map(([k, ms]) => `${token(k)};dur=${ms}`),
+      ...[...this.#notes].map(([k, v]) => `${token(k)};desc="${v.replace(/["\\\r\n]/g, "")}"`),
+      `total;dur=${this.#now() - this.started}`,
+    ].join(", ");
+  }
+
+  /** For the log: "1234 ms: funds 12, mirror 0, legs 800 (quotes hit)". */
+  line(): string {
+    const notes = [...this.#notes].map(([k, v]) => `${k} ${v}`).join(", ");
+    const steps = [...this.#steps].map(([k, ms]) => `${k} ${ms}`).join(", ");
+    return `${this.#now() - this.started} ms${steps ? `: ${steps}` : ""}${notes ? ` (${notes})` : ""}`;
+  }
+}
+
+/** At most this many client marks are logged per submit, each name at most 40 characters. */
+const CLIENT_MARKS = 24;
+
+/**
+ * A submit's `timings` (the client's marks, ms relative to the tap) as one log line, or null if
+ * there are none. Only finite numbers under plain names are kept: they go to the log as they are.
+ */
+export function clientMarks(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const marks = Object.entries(raw as Record<string, unknown>)
+    .filter(([k, v]) => /^[A-Za-z0-9_.:-]{1,40}$/.test(k) && typeof v === "number" && Number.isFinite(v))
+    .slice(0, CLIENT_MARKS)
+    .map(([k, v]) => `${k} ${Math.round(v as number)}`);
+  return marks.length ? marks.join(", ") : null;
 }
 
 const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";

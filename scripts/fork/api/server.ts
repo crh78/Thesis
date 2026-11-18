@@ -9,7 +9,10 @@
 //   POST /takes/:id/publish  { author, usd }        → same, for posting an app take with the author's buy-in
 //   POST /takes/:id/confirm                         → { onChain, take?, relayed }: is the author's publish
 //                                                     on-chain here? If so, its events go to the backend again
-//   POST /submit             { buildId, transactions[] }  signed by the user → { signatures[] }
+//   POST /submit             { buildId, transactions[], timings? }  signed by the user → { signatures[] };
+//                                                     `timings`: the client's marks (ms from the tap), logged
+//
+// Builds and submits answer with a Server-Timing header: where the server's time went.
 //   GET  /wallets/:address                          USDC, holdings, activity
 //   GET  /wallets/:address/portfolio                open positions across takes, and badges held
 //   GET  /wallets/:address/history?range=1D|1W|1M|ALL  portfolio value over time, for the chart
@@ -36,7 +39,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { checkWalletAuth } from "./creator-fees.ts";
 import type { Guard } from "./guard.ts";
-import { parseKey } from "./common.ts";
+import { Timings, parseKey } from "./common.ts";
 import { ApiError, type ForkService } from "./service.ts";
 
 const header = (req: IncomingMessage, name: string) => {
@@ -44,11 +47,11 @@ const header = (req: IncomingMessage, name: string) => {
   return Array.isArray(v) ? v[0] : v;
 };
 
-/** What a browser may send and read across origins (the README's "Direct browser calls"). */
+/** What a browser may send and read across origins (the README's "Direct browser calls"): a 429's Retry-After, and Server-Timing. */
 export const CORS = {
   methods: "GET, POST, OPTIONS",
   headers: "authorization, content-type, x-thesis-wallet-auth",
-  expose: "retry-after",
+  expose: "retry-after, server-timing",
   /** Seconds a browser may reuse a preflight (Chrome caps it at 7,200). */
   maxAge: "600",
 };
@@ -81,7 +84,8 @@ export function parseCorsOrigins(raw: string | null | undefined): Set<string> {
 export function corsHeaders(allowed: Set<string>, origin: string | undefined): Record<string, string> {
   if (!allowed.size) return {};
   if (!origin || !allowed.has(origin)) return { vary: "Origin" };
-  return { vary: "Origin", "access-control-allow-origin": origin, "access-control-expose-headers": CORS.expose };
+  // Timing-Allow-Origin: the page's resource timing may read Server-Timing too.
+  return { vary: "Origin", "access-control-allow-origin": origin, "access-control-expose-headers": CORS.expose, "timing-allow-origin": origin };
 }
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -138,15 +142,26 @@ export function forkApiServer(
     parseKey(wallet);
     if (guard) await guard.checkMoney(req, wallet, route);
   };
-  /** Builds that call Jupiter wait their turn behind the guard's queue. */
-  const queued = <T>(work: () => Promise<T>) => (guard ? guard.build(work) : work());
+  /** Builds that call Jupiter wait their turn behind the guard's queue (the wait is step `queue`). */
+  const queued = <T>(work: () => Promise<T>, t?: Timings) => {
+    if (!guard) return work();
+    const waiting = Date.now();
+    return guard.build(() => {
+      t?.add("queue", Date.now() - waiting);
+      return work();
+    });
+  };
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const started = Date.now();
     const url = new URL(req.url ?? "/", "http://localhost");
     const parts = url.pathname.split("/").filter(Boolean);
     const allow = corsHeaders(cors, header(req, "origin"));
+    /** Builds, refreshes and submits: where the time went, sent as Server-Timing (errors too). */
+    let timings: Timings | undefined;
+    const timed = () => (timings = new Timings());
     const send = (status: number, payload: unknown, headers: Record<string, string> = {}) => {
-      res.writeHead(status, { "content-type": "application/json", ...allow, ...headers });
+      const serverTiming: Record<string, string> = timings ? { "server-timing": timings.header() } : {};
+      res.writeHead(status, { "content-type": "application/json", ...allow, ...serverTiming, ...headers });
       res.end(JSON.stringify(payload));
       log(`${req.method} ${url.pathname} ${status} ${Date.now() - started}ms`);
     };
@@ -181,12 +196,14 @@ export function forkApiServer(
           const owner = str(b.owner, "owner");
           const usd = num(b.usd, "usd");
           await money(req, owner, "trades");
-          return send(200, await queued(() => service.buildTrade(parts[1], owner, side, usd)));
+          const t = timed();
+          return send(200, await queued(() => service.buildTrade(parts[1], owner, side, usd, { timings: t }), t));
         }
         if (m === "POST" && parts[2] === "positions" && parts[3] && parts[4] === "exit" && parts.length === 5) {
           const owner = str((await body(req)).owner, "owner");
           await money(req, owner, "sell");
-          return send(200, await queued(() => service.buildExit(parts[1], parts[3], owner)));
+          const t = timed();
+          return send(200, await queued(() => service.buildExit(parts[1], parts[3], owner, { timings: t }), t));
         }
         if (m === "POST" && parts[2] === "confirm" && parts.length === 3) {
           // Harmless (it only re-delivers a landed publish), so it counts as a read.
@@ -198,14 +215,16 @@ export function forkApiServer(
           const author = str(b.author, "author");
           const usd = num(b.usd, "usd");
           await money(req, author, "publish");
-          return send(200, await queued(() => service.buildPublish(parts[1], author, usd)));
+          const t = timed();
+          return send(200, await queued(() => service.buildPublish(parts[1], author, usd, { timings: t }), t));
         }
       }
       // No token needed: the API only sends what it built, and checks the owner's signature on it.
       if (m === "POST" && url.pathname === "/submit") {
         const b = await body(req);
         if (!Array.isArray(b.transactions) || !b.transactions.every((t) => typeof t === "string")) throw new ApiError(400, "missing_transactions");
-        return send(200, await service.submit(str(b.buildId, "buildId"), b.transactions as string[]));
+        const t = timed();
+        return send(200, await service.submit(str(b.buildId, "buildId"), b.transactions as string[], { timings: t, clientTimings: b.timings }));
       }
       if (parts[0] === "wallets" && parts[1] && parts[2] === "creator-fees") {
         if (m === "GET" && parts.length === 3) {
