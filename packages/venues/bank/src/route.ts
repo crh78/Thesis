@@ -6,7 +6,8 @@
 //
 // outAmount already reflects price impact and pool fees (Jupiter quotes net of
 // both; Thesis sets no platform fee). The multiplier is re-read from chain when an
-// RPC is available, so a dividend or split since the last discovery is counted.
+// RPC is available (at most once a minute per mint), so a dividend or split since the last
+// discovery is counted.
 //
 // Skipped, with a reason in `skipped`:
 //   - default-frozen (permissioned) or paused mints
@@ -40,8 +41,11 @@ export type BestIssuerOpts = {
   state?: BankState;
   /** Jupiter quote function (default: a client built from JUPITER_API_KEY). */
   quote?: QuoteFn;
-  /** Live ScaledUiAmount configs by mint (default: one getMultipleAccounts call); null skips the re-read. */
-  readMints?: ((mints: string[]) => Promise<Map<string, ScaledUi | null>>) | null;
+  /**
+   * Live ScaledUiAmount configs by mint (default: one getMultipleAccounts call for the mints not
+   * read in the last MINT_READ_TTL_MS); null skips the re-read.
+   */
+  readMints?: ReadMints | null;
   now?: number;
   /** Quote only these issuers (e.g. re-sizing a leg whose winner is already known). */
   onlyMints?: string[];
@@ -114,10 +118,33 @@ function defaults() {
   return { jup: defaultJup, rpc: defaultRpc! };
 }
 
-async function readMintsLive(mints: string[]): Promise<Map<string, ScaledUi | null>> {
+export type ReadMints = (mints: string[]) => Promise<Map<string, ScaledUi | null>>;
+
+/** How long a mint's live ScaledUiAmount config is reused (a multiplier changes on a dividend or split, rarely). */
+export const MINT_READ_TTL_MS = 60_000;
+
+/**
+ * `read` with each mint's answer reused for `ttlMs`: only mints not read within it are fetched,
+ * in one call. A failed read caches nothing (and throws, as `read` does).
+ */
+export function cachedMintReads(read: ReadMints, ttlMs = MINT_READ_TTL_MS, now: () => number = Date.now): ReadMints {
+  const cache = new Map<string, { at: number; value: ScaledUi | null }>();
+  return async (mints) => {
+    const t = now();
+    const stale = [...new Set(mints)].filter((m) => !((cache.get(m)?.at ?? -Infinity) > t - ttlMs));
+    if (stale.length) {
+      const fresh = await read(stale);
+      for (const m of stale) cache.set(m, { at: t, value: fresh.get(m) ?? null });
+    }
+    return new Map(mints.map((m) => [m, cache.get(m)!.value]));
+  };
+}
+
+/** Live ScaledUiAmount configs from the configured RPC, each reused for MINT_READ_TTL_MS. */
+const readMintsLive: ReadMints = cachedMintReads(async (mints) => {
   const accs = await defaults().rpc.getAccounts(mints, "jsonParsed");
   return new Map(mints.map((m) => [m, accs.get(m) ? readScaledUi(accs.get(m)) : null]));
-}
+});
 
 const TIE_BREAKS: [string, (a: Candidate, b: Candidate, ta: TokenEntry, tb: TokenEntry) => number][] = [
   ["lower price impact", (a, b) => a.priceImpactPct - b.priceImpactPct],
