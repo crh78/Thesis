@@ -76,10 +76,12 @@ export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
   };
   const sent: VersionedTransaction[] = [];
   const refreshed: { accounts: PublicKey[]; freshMs?: number }[] = [];
+  /** Every getMultipleAccountsInfo call's keys, as strings. */
+  const reads: string[][] = [];
   const connection = {
     getAccountInfo: async (key: PublicKey) => info(key),
     getAccountInfoAndContext: async (key: PublicKey) => ({ context: { slot: 1 }, value: info(key) }),
-    getMultipleAccountsInfo: async (keys: PublicKey[]) => keys.map(info),
+    getMultipleAccountsInfo: async (keys: PublicKey[]) => (reads.push(keys.map(String)), keys.map(info)),
     // Only the abandoned-ticket scan (it filters on the rent payer at offset 72) finds anything.
     getProgramAccounts: async (_: PublicKey, c?: { filters?: { memcmp?: { offset: number } }[] }) =>
       (c?.filters ?? []).some((f) => f.memcmp?.offset === 72) ? tickets : [],
@@ -117,7 +119,7 @@ export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
       return Buffer.from(tx.serialize()).toString("base64");
     });
   const sigs = () => sent.map((tx) => base58(tx.signatures[0]));
-  return { service, options, wallet, owner, appPayer, take, sent, sigs, sign, logs, refreshed, statePath };
+  return { service, options, wallet, owner, appPayer, take, sent, sigs, sign, logs, refreshed, reads, statePath };
 }
 
 /** Resolves on the next turns of the event loop (lets background work move on). */

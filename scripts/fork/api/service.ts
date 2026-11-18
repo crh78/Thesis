@@ -34,6 +34,7 @@ import {
   badgeMintAddress,
   claimHash,
   composeTransactions,
+  loadLookupTables,
   createTakeIx,
   exitAddress,
   exitPositionIx,
@@ -1936,6 +1937,10 @@ export class ForkService {
       proof: proof ? { program: this.#program, owner, position: position.address, continued: Boolean(extra.retry) } : undefined,
     });
     t.add("compose", Date.now() - composeStarted);
+    // Nothing above simulates, so the send's preflight would be the first to read these accounts,
+    // and the fork reads every one it doesn't hold (or was reset) from mainnet one at a time
+    // (~20 ms each, ~850 ms for a swap). Read them now, in batches, while nobody has tapped.
+    await t.time("warm", () => this.#warm(txs.map((c) => c.tx.message)));
     const txLegs = txs.map((c) => c.legs.map((j) => (venue[j] as Partial<TradeLeg>).output?.leg ?? -1));
     if (kind === "exit" && txs.length !== 1 && !splitExit) throw new ApiError(422, "exit_too_large", "This position cannot be sold in one transaction.");
     // A trade the owner signs anyway also cancels their abandoned tickets. Not a sale: the app
@@ -2013,6 +2018,31 @@ export class ForkService {
    * refresh ran) can still be submitted, while their blockhash lasts; the first submit uses the
    * build, and other bytes after it are 409 `build_used`. 410 `build_gone`: expired, submitted or unknown.
    */
+  /**
+   * Reads every account `messages` touch (lookup-table addresses included), in batches, so the
+   * fork holds them before the send. Best effort: a failure only means the send reads them itself.
+   */
+  async #warm(messages: VersionedMessage[]): Promise<void> {
+    try {
+      const tables = await loadLookupTables(this.#o.connection, messages.flatMap((m) => m.addressTableLookups.map((l) => l.accountKey)));
+      const keys = new Map<string, PublicKey>();
+      for (const m of messages) {
+        const lookups = m.addressTableLookups.map((l) => tables.get(l.accountKey.toBase58())).filter((a) => a !== undefined);
+        const all = m.getAccountKeys({ addressLookupTableAccounts: lookups });
+        for (let i = 0; i < all.length; i++) {
+          const k = all.get(i);
+          if (k) keys.set(k.toBase58(), k);
+        }
+      }
+      const list = [...keys.values()];
+      const reads: Promise<unknown>[] = [];
+      for (let i = 0; i < list.length; i += 100) reads.push(this.#o.connection.getMultipleAccountsInfo(list.slice(i, i + 100), "processed"));
+      await Promise.all(reads);
+    } catch {
+      // The send reads what it needs.
+    }
+  }
+
   async refreshBuild(buildId: string, o: BuildOpts = {}) {
     const t = o.timings ?? new Timings();
     const kind = this.#builds.get(buildId)?.kind ?? "unknown";
@@ -2020,7 +2050,9 @@ export class ForkService {
       const build = this.#builds.get(buildId);
       if (!build || build.expires < Date.now()) throw new ApiError(410, "build_gone", "This build expired or was submitted. Build again.");
       if (build.quotedAt !== undefined && Date.now() - build.quotedAt > QUOTE_REFRESH_MS) throw new ApiError(409, "quote_stale", "This build's prices are too old. Build again.");
-      if (build.market.length) await t.time("markets", () => this.#o.fork.refreshMarkets(build.market, { freshMs: MARKET_FRESH_MS }));
+      const reset = build.market.length ? await t.time("markets", () => this.#o.fork.refreshMarkets(build.market, { freshMs: MARKET_FRESH_MS })) : null;
+      // A reset is lazy: read the accounts again now, not in the send's preflight.
+      if (((reset as { reset?: number } | null)?.reset ?? 0) > 0) await t.time("warm", () => this.#warm(build.messages.map((m) => VersionedMessage.deserialize(m))));
       const started = Date.now();
       const { blockhash } = await t.time("blockhash", () => this.#o.connection.getLatestBlockhash("confirmed"));
       // Submitted while this ran: it's used.
