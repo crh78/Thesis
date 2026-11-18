@@ -13,15 +13,20 @@
 //   `FORK_API_READ_LIMIT`: `report` (default) logs who'd be limited; `enforce` refuses (429).
 //   Verified tokens are cached for a minute (at most until they expire), so a read or a money
 //   route checks a token's signature once, not on every request.
-// - Builds that call Jupiter wait their turn: a few at once, a short queue, then 503 `busy` with
-//   Retry-After instead of hanging (the free Jupiter key is shared by everything on the fork).
-//   While builds run or wait, the asset bank's `trade-builds.busy` file is touched every few
-//   seconds (`busyFile`), so the poller's probes leave the Jupiter key to trades.
+// - Jupiter calls, not whole builds, wait their turn (JupiterBudget): the free key allows 60
+//   requests a minute for the whole organisation, shared with the asset bank and the settler, so
+//   the API keeps to 30 a minute (bursts of 10) in three lanes: (1) builds at tap time wait for a
+//   request, up to a few seconds, then get 503 `busy`; (2) prebuilds and (3) route checks fail
+//   fast instead, whenever fewer than 6 requests are left (kept for taps) or Jupiter just answered
+//   429, and never wait out a 429. While builds' calls run or wait, the asset bank's
+//   `trade-builds.busy` file is touched every few seconds (`busyFile`), so the poller's probes
+//   leave the Jupiter key to trades.
 //
 // Limits are kept in memory, so they reset when the API restarts.
 import { createPublicKey, timingSafeEqual, verify, type KeyObject } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { markBuildsBusy } from "@thesis/venues/bank";
+import { JUPITER_MAX_429_WAIT_MS, type FetchFn } from "@thesis/venues/jupiter";
 import { ApiError } from "./common.ts";
 
 export type Mode = "off" | "report" | "enforce";
@@ -36,7 +41,9 @@ export type GuardOptions = {
   /** Privy app values; without them no token can be checked (every token reads as missing). */
   privy: { appId: string; verificationKey: string; appSecret: string } | null;
   limits?: Partial<Limits>;
-  /** The asset bank's busy file (buildsBusyFileFor), touched while builds run or wait; null: none. */
+  /** The Jupiter budget whose builds signal busy and log (default: the process's, jupiterBudget). */
+  budget?: JupiterBudget;
+  /** The asset bank's busy file (buildsBusyFileFor), touched while builds' Jupiter calls run or wait; null: none. */
   busyFile?: string | null;
   log?: (m: string) => void;
   fetch?: typeof fetch;
@@ -47,14 +54,12 @@ export type Limits = {
   moneyPerMinute: number;
   moneyPerDay: number;
   readsPerMinute: number;
-  buildsAtOnce: number;
-  buildQueue: number;
 };
 
 /** How often the busy signal repeats while builds run or wait (the bank's hold is 15 s). */
 export const BUSY_EVERY_MS = 5_000;
 
-export const DEFAULT_LIMITS: Limits = { moneyPerMinute: 10, moneyPerDay: 100, readsPerMinute: 120, buildsAtOnce: 2, buildQueue: 6 };
+export const DEFAULT_LIMITS: Limits = { moneyPerMinute: 10, moneyPerDay: 100, readsPerMinute: 120 };
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -172,7 +177,6 @@ export class Guard {
   #moneyDay: Window;
   #reads: Window;
   #reported = new Map<string, number>();
-  #gate: BuildGate;
 
   constructor(o: GuardOptions) {
     this.#o = o;
@@ -182,7 +186,9 @@ export class Guard {
     this.#moneyDay = new Window(DAY, this.limits.moneyPerDay);
     this.#reads = new Window(MINUTE, this.limits.readsPerMinute);
     const busyFile = o.busyFile;
-    this.#gate = new BuildGate(this.limits.buildsAtOnce, this.limits.buildQueue, o.log, busyFile ? () => void markBuildsBusy(busyFile).catch(() => {}) : undefined);
+    const budget = o.budget ?? jupiterBudget;
+    budget.log ??= o.log;
+    if (busyFile) budget.onBusy = () => void markBuildsBusy(busyFile).catch(() => {});
     setInterval(() => this.sweep(), 10 * MINUTE).unref();
   }
 
@@ -347,16 +353,20 @@ export class Guard {
     return wallet;
   }
 
-  /** Runs a build that calls Jupiter in its turn (see BuildGate). */
+  /**
+   * Runs a build. Builds no longer queue as a whole: their Jupiter calls do, in the Jupiter
+   * budget's lanes (JupiterBudget), so a build that needs no Jupiter call never waits.
+   */
   build<T>(work: () => Promise<T>): Promise<T> {
-    return this.#gate.run(work);
+    return work();
   }
 }
 
 /**
- * At most `atOnce` builds run together and `queue` wait; anyone past that gets 503 `busy` with a
- * Retry-After from how long builds have been taking. Logs the queue whenever someone waits.
- * `onBusy` runs when a build is let in or queued, and every BUSY_EVERY_MS while any runs or waits.
+ * At most `atOnce` pieces of work (Jupiter calls, in JupiterBudget) run together and `queue` wait;
+ * anyone past that gets 503 `busy` with a Retry-After from how long they have been taking. Logs the
+ * queue whenever someone waits. `onBusy` runs when work is let in or queued, and every
+ * BUSY_EVERY_MS while any runs or waits.
  */
 export class BuildGate {
   #running = 0;
@@ -395,11 +405,12 @@ export class BuildGate {
     this.#busyTimer.unref?.();
   }
 
-  async run<T>(work: () => Promise<T>): Promise<T> {
+  /** Runs `work` in its turn; with `wait` false, refuses (503 busy) instead of queueing. */
+  async run<T>(work: () => Promise<T>, wait = true): Promise<T> {
     if (this.#running >= this.atOnce) {
-      if (this.#waiting.length >= this.queue) {
+      if (!wait || this.#waiting.length >= this.queue) {
         const s = Math.max(1, Math.ceil(((this.#waiting.length + 1) / this.atOnce) * (this.#avgMs / 1000)));
-        this.log?.(`builds busy: ${this.#running} running, ${this.#waiting.length} waiting; turned one away (retry in ${s} s)`);
+        if (wait) this.log?.(`builds busy: ${this.#running} running, ${this.#waiting.length} waiting; turned one away (retry in ${s} s)`);
         const e = new ApiError(503, "busy", `Lots of trades right now. Try again in ${s} s.`);
         e.headers = { "retry-after": String(s) };
         throw e;
@@ -424,3 +435,229 @@ export class BuildGate {
     }
   }
 }
+
+/**
+ * Which Jupiter lane a call is in. 1: a build at tap time (waits its turn); 2: a prebuild (built
+ * before the tap, so it may fail and be built again at the tap); 3: a route check (a receipt's
+ * "can this leg be bought right now").
+ */
+export type Lane = 1 | 2 | 3;
+export const LANE = { tap: 1, prebuild: 2, routeCheck: 3 } as const;
+
+export type BudgetLimits = {
+  /** Requests a minute the fork API spends (the free key's 60 are shared with the asset bank and the settler). */
+  perMinute: number;
+  /** Requests that can go at once after a quiet spell. */
+  burst: number;
+  /** Lanes 2 and 3 fail fast rather than leave fewer than this many requests for taps. */
+  reserve: number;
+  /** A tap-time call that would wait longer than this for its turn gets 503 busy instead. */
+  maxWaitMs: number;
+  /** Jupiter calls of builds in flight at once, and how many taps may queue for a slot. */
+  atOnce: number;
+  queue: number;
+};
+
+export const JUPITER_BUDGET: BudgetLimits = { perMinute: 30, burst: 10, reserve: 6, maxWaitMs: 8_000, atOnce: 8, queue: 24 };
+/** How long a 429 without `x-ratelimit-reset` stops every lane. */
+const PAUSE_ON_429_MS = 2_000;
+/** The longest a 429's `x-ratelimit-reset` stops every lane. */
+const MAX_PAUSE_MS = 15_000;
+
+/**
+ * One build's (or one route check's) use of Jupiter, for the timings log: requests made (each
+ * retry counts), how long it waited for its turn, and 429s seen. Routing adds what its caches saved.
+ */
+export type JupiterUse = {
+  lane: Lane;
+  /** Jupiter requests made: `quotes` plus `instructions` (swap and Lend instructions). */
+  calls: number;
+  quotes: number;
+  instructions: number;
+  /** Time spent waiting for the budget (tap-time builds only; the others fail fast). */
+  waitedMs: number;
+  /** 429s Jupiter answered. */
+  rateLimited: number;
+  /** Underlyings quoted against the issuer that last won (one quote) / against every issuer. */
+  winnerHits: number;
+  winnerMisses: number;
+  /** The first call the budget refused (lanes 2 and 3, or a full queue): routing answers 503 busy with it. */
+  refused?: ApiError;
+};
+
+export const newUse = (lane: Lane = 1): JupiterUse => ({ lane, calls: 0, quotes: 0, instructions: 0, waitedMs: 0, rateLimited: 0, winnerHits: 0, winnerMisses: 0 });
+
+/**
+ * The fork API's Jupiter budget: a token bucket (BudgetLimits) with lanes, behind a concurrency
+ * gate (BuildGate) for builds' calls. Tap-time calls queue for a request in order and wait up to
+ * `maxWaitMs`; prebuilds and route checks take one only while more than `reserve` are left and no
+ * tap is waiting, and are refused at once otherwise. A 429 (or a window Jupiter says is used up)
+ * empties the bucket until the window resets, so nothing else piles on.
+ */
+export class JupiterBudget {
+  readonly limits: BudgetLimits;
+  /** Logs turned-away calls (set by the Guard). */
+  log?: (m: string) => void;
+  /** Signals the asset bank while builds' calls (lanes 1 and 2) run or wait (set by the Guard). */
+  onBusy?: () => void;
+  /** Totals since start, by lane (index 0 unused). */
+  readonly stats = { calls: [0, 0, 0, 0], refused: [0, 0, 0, 0], rateLimited: 0, waitedMs: 0 };
+  #tokens: number;
+  #at: number;
+  #pausedUntil = 0;
+  #waiters: (() => void)[] = [];
+  #timer: NodeJS.Timeout | null = null;
+  #gate: BuildGate;
+  #now: () => number;
+
+  constructor(limits: Partial<BudgetLimits> = {}, now: () => number = Date.now) {
+    this.limits = { ...JUPITER_BUDGET, ...limits };
+    this.#now = now;
+    this.#tokens = this.limits.burst;
+    this.#at = now();
+    this.#gate = new BuildGate(this.limits.atOnce, this.limits.queue, (m) => this.log?.(`Jupiter calls: ${m}`), () => this.onBusy?.());
+  }
+
+  /** Requests left now (fractional while refilling). */
+  get tokens(): number {
+    this.#refill();
+    return this.#tokens;
+  }
+
+  #refill() {
+    const now = this.#now();
+    const from = Math.max(this.#at, this.#pausedUntil);
+    if (now > from) this.#tokens = Math.min(this.limits.burst, this.#tokens + ((now - from) * this.limits.perMinute) / 60_000);
+    this.#at = Math.max(now, this.#at);
+  }
+
+  /** ms until the bucket holds `n` requests. */
+  #msUntil(n: number): number {
+    const pause = Math.max(0, this.#pausedUntil - this.#now());
+    return pause + Math.ceil((Math.max(0, n - this.#tokens) * 60_000) / this.limits.perMinute);
+  }
+
+  #refuse(lane: Lane, ms: number, why: string): ApiError {
+    this.stats.refused[lane]++;
+    const s = Math.max(1, Math.ceil(ms / 1000));
+    const e = new ApiError(503, "busy", lane === 1 ? `Lots of trades right now. Try again in ${s} s.` : `Jupiter's rate limit is kept for trades right now (${why}). Try again in ${s} s.`);
+    e.headers = { "retry-after": String(s) };
+    return e;
+  }
+
+  /** Takes one request for `lane`: waits in line (lane 1) or is refused (lanes 2, 3). Returns ms waited. */
+  async #take(lane: Lane): Promise<number> {
+    this.#refill();
+    const now = this.#now();
+    if (lane !== 1) {
+      if (now < this.#pausedUntil) throw this.#refuse(lane, this.#pausedUntil - now, "Jupiter answered 429");
+      if (this.#waiters.length) throw this.#refuse(lane, this.#msUntil(this.#waiters.length + 1 + this.limits.reserve), "trades are waiting");
+      if (this.#tokens - 1 < this.limits.reserve) throw this.#refuse(lane, this.#msUntil(this.limits.reserve + 1), "the last few requests");
+      this.#tokens -= 1;
+      return 0;
+    }
+    if (!this.#waiters.length && now >= this.#pausedUntil && this.#tokens >= 1) {
+      this.#tokens -= 1;
+      return 0;
+    }
+    const wait = this.#msUntil(this.#waiters.length + 1);
+    if (wait > this.limits.maxWaitMs) {
+      this.log?.(`Jupiter budget: ${this.#waiters.length} waiting, ${this.#tokens.toFixed(1)} left; turned a trade away (${wait} ms to wait)`);
+      throw this.#refuse(1, wait, "busy");
+    }
+    await new Promise<void>((resolve) => {
+      this.#waiters.push(resolve);
+      this.#pump();
+    });
+    return this.#now() - now;
+  }
+
+  /** Lets waiting taps through, in order, as requests come back. */
+  #pump() {
+    if (this.#timer) return;
+    this.#refill();
+    while (this.#waiters.length && this.#now() >= this.#pausedUntil && this.#tokens >= 1) {
+      this.#tokens -= 1;
+      this.#waiters.shift()!();
+    }
+    if (!this.#waiters.length) return;
+    this.#timer = setTimeout(() => {
+      this.#timer = null;
+      this.#pump();
+    }, Math.max(1, this.#msUntil(1)));
+    this.#timer.unref?.();
+  }
+
+  /** Jupiter's 429, or a window it says is used up: no lane gets a request until it resets. */
+  rateLimited(resetSec?: number) {
+    const now = this.#now();
+    const until = resetSec !== undefined && Number.isFinite(resetSec) && resetSec > 0 ? Math.min(resetSec * 1000 + 250, now + MAX_PAUSE_MS) : now + PAUSE_ON_429_MS;
+    this.#refill();
+    this.#tokens = 0;
+    this.#pausedUntil = Math.max(this.#pausedUntil, until);
+    if (this.#timer) {
+      clearTimeout(this.#timer);
+      this.#timer = null;
+      this.#pump();
+    }
+  }
+
+  /** Runs one Jupiter request in `lane`'s turn, counted in `use`. */
+  async run<T>(lane: Lane, work: () => Promise<T>, use?: JupiterUse): Promise<T> {
+    const go = async () => {
+      const waited = await this.#take(lane);
+      this.stats.calls[lane]++;
+      this.stats.waitedMs += waited;
+      if (use) {
+        use.calls++;
+        use.waitedMs += waited;
+      }
+      return work();
+    };
+    try {
+      // Route checks skip the gate: they never wait, and they don't hold the asset bank's probes
+      // back. Builds' calls take a slot (taps queue for one, prebuilds don't).
+      return lane === 3 ? await go() : await this.#gate.run(go, lane === 1);
+    } catch (e) {
+      if (use && e instanceof ApiError && e.code === "busy") use.refused ??= e;
+      throw e;
+    }
+  }
+
+  /**
+   * A fetch for Jupiter's endpoints through the budget in `lane`: each request (retries too)
+   * takes its turn, and a 429 stops every lane until Jupiter's window resets.
+   */
+  fetchFn(lane: Lane, use?: JupiterUse, inner: FetchFn = fetch): FetchFn {
+    return (async (url: string | URL | Request, init?: RequestInit) => {
+      const r = await this.run(lane, () => inner(url, init), use);
+      if (use) {
+        if (String(url).includes("/swap/v1/quote?")) use.quotes++;
+        else use.instructions++;
+      }
+      const reset = Number(r.headers?.get?.("x-ratelimit-reset"));
+      const remaining = r.headers?.get?.("x-ratelimit-remaining");
+      if (r.status === 429) {
+        this.stats.rateLimited++;
+        if (use) use.rateLimited++;
+        this.rateLimited(reset);
+      } else if (remaining != null && remaining !== "" && Number(remaining) <= 0) {
+        this.rateLimited(reset);
+      }
+      return r;
+    }) as FetchFn;
+  }
+
+  /** How long a call in `lane` may wait out Jupiter's 429s: taps as before, the others not at all. */
+  max429WaitMs(lane: Lane): number {
+    return lane === 1 ? JUPITER_MAX_429_WAIT_MS : 0;
+  }
+
+  /** The budget at a glance, for logs. */
+  snapshot() {
+    return { tokens: Math.floor(this.tokens * 10) / 10, waiting: this.#waiters.length, pausedMs: Math.max(0, this.#pausedUntil - this.#now()), ...this.stats };
+  }
+}
+
+/** The process's Jupiter budget: routing and the guard share it, as every request shares the key. */
+export const jupiterBudget = new JupiterBudget();

@@ -1,11 +1,17 @@
 // Which legs a trade can buy on the fork, and the venue instructions for them: Jupiter swaps
 // through the best issuer, Jupiter Lend deposits for yield legs, and Phoenix for perp legs (long)
 // and fades' shorts (api/phoenix.ts).
+//
+// Every Jupiter request goes through the fork API's budget (api/guard.ts, JupiterBudget) in the
+// caller's lane: 1 for a build at tap time (the default), 2 for a prebuild, 3 for a route check.
+// Lanes 2 and 3 fail fast with 503 busy rather than wait, and a quote that failed rather than
+// found no route is never remembered as "no route".
 import type { PublicKey } from "@solana/web3.js";
-import { PRICEABLE_MIN_POOLED_USD, bestIssuer, issuerPool } from "@thesis/venues/bank";
+import { PRICEABLE_MIN_POOLED_USD, bestIssuer, issuerPool, type BestIssuerResult, type ReadMints } from "@thesis/venues/bank";
 import { ineligible, otherSide, type GeminiContract } from "@thesis/venues/gemini";
-import { jupiterBuy, jupiterLendDeposit, splitStake, type VenueLeg } from "@thesis/venues/jupiter";
+import { jupiterBuy, jupiterLendDeposit, jupiterQuote, quoteFn, splitStake, type JupiterAccess, type VenueLeg } from "@thesis/venues/jupiter";
 import { ApiError, MIN_STAKE_USD, USD, type ServiceOpts } from "./common.ts";
+import { jupiterBudget, newUse, type JupiterBudget, type JupiterUse, type Lane } from "./guard.ts";
 import { isPaper, type MappedLeg } from "./legs.ts";
 import { cardIdHex } from "@thesis/venues/collector-crypt";
 import type { PhoenixDesk, PhoenixLeg } from "./phoenix.ts";
@@ -37,8 +43,22 @@ export type Route = typeof ROUTE & { dexes?: string[] };
 export type TradeLeg = VenueLeg & { output: { leg: number; account: PublicKey }; how: "swap" | "lend" | "phoenix"; phoenix?: PhoenixLeg };
 type Winner = NonNullable<Awaited<ReturnType<typeof bestIssuer>>["winner"]>;
 type Excluded = { index: number; name: string; reason: string };
-/** Which side a trade takes (a fade holds the other side of a prediction leg), and whether paper legs can be in it. */
-export type TradeKind = { side?: "back" | "fade"; paper?: boolean };
+/**
+ * Which side a trade takes (a fade holds the other side of a prediction leg), and whether paper
+ * legs can be in it. `lane`: the Jupiter lane its calls use (default 1, a build at tap time; 2 for
+ * a prebuild). `use`: counts the build's Jupiter calls into this (default: a fresh one, returned
+ * as `jupiter`); pass one to read the counts when the build fails too.
+ */
+export type TradeKind = { side?: "back" | "fade"; paper?: boolean; lane?: Lane; use?: JupiterUse };
+
+/** Whether a best-issuer answer with no winner came from failed quotes rather than "no route". */
+const transient = (r: BestIssuerResult | null) => !r || (!r.winner && r.skipped.some((s) => TRANSIENT_QUOTE.test(s.reason)));
+
+const busy = (what: string) => {
+  const e = new ApiError(503, "busy", `Couldn't quote ${what} right now. Try again in a moment.`);
+  e.headers = { "retry-after": "5" };
+  return e;
+};
 
 const NO_PHOENIX = "Phoenix isn't connected on this fork";
 const APP_ONLY = "Gemini legs are in the Thesis app only";
@@ -73,9 +93,38 @@ export class Router {
    */
   #winners = new Map<string, { mint: string; at: number }>();
 
-  constructor(o: ServiceOpts) {
+  /** Every Jupiter request's turn (the process's budget unless a test passes its own). */
+  readonly budget: JupiterBudget;
+  /** Live mint reads for best-issuer routing (default: bestIssuer's, cached a minute; null: none, in tests). */
+  #readMints: ReadMints | null | undefined;
+
+  constructor(o: ServiceOpts, deps: { budget?: JupiterBudget; readMints?: ReadMints | null } = {}) {
     this.#o = o;
     this.route = { ...ROUTE, dexes: o.dexes };
+    this.budget = deps.budget ?? jupiterBudget;
+    this.#readMints = deps.readMints;
+  }
+
+  /**
+   * Jupiter for `lane`, counted in `use`: the key, the budget's fetch and how long a 429 may be
+   * waited out. For Jupiter calls outside the router too (sales, sweeps): pass it to jupiterBuy,
+   * jupiterLendRedeem, or use `quoteExactIn`.
+   */
+  jupiter(lane: Lane = 1, use?: JupiterUse): Required<JupiterAccess> & {
+    quoteExactIn(inputMint: string, outputMint: string, amount: bigint, o: { maxAccounts: number; slippageBps?: number; dexes?: string[] }): ReturnType<typeof jupiterQuote>;
+  } {
+    const access = { apiKey: this.#o.jupiterApiKey, fetchFn: this.budget.fetchFn(lane, use), max429WaitMs: this.budget.max429WaitMs(lane) };
+    return { ...access, quoteExactIn: (inputMint, outputMint, amount, o) => jupiterQuote({ ...access, inputMint, outputMint, amount, ...o }) };
+  }
+
+  /** Best-issuer options for a quote in `lane`: the bank, the routing limits and the budgeted quote. */
+  #best(lane: Lane, use: JupiterUse, onlyMints?: string[]) {
+    return { state: this.#o.bank(), ...this.route, onlyMints, quote: quoteFn(this.jupiter(lane, use)), readMints: this.#readMints };
+  }
+
+  /** The budget and how much the router's caches saved, for the timings log. */
+  jupiterStats() {
+    return { budget: this.budget.snapshot(), winners: this.#winners.size, noRoute: this.#noRoute.size };
   }
 
   /** A contract as currently known: the latest live read, else the asset bank's sweep, else the mapping's copy. */
@@ -139,21 +188,22 @@ export class Router {
    * Quotes swap legs whose routability isn't known yet (once per TTL), so the receipt, and the
    * trade sheet built from it, leaves out the same legs a build will. One check per underlying
    * at a time: receipts opened together wait for the same quotes instead of each quoting.
+   * Route checks are Jupiter's lane 3: refused when the budget runs low, and then (as when a
+   * quote fails) nothing is remembered, so the next receipt checks again.
    */
-  async checkRoutes(legs: MappedLeg[]) {
+  async checkRoutes(legs: MappedLeg[], use: JupiterUse = newUse(3)) {
     const now = Date.now();
     const unknown = legs.filter((l) => l.how === "swap" && !this.leftOut(l, now) && !((this.#winners.get(l.key!)?.at ?? 0) > now - NO_ROUTE_TTL_MS));
     if (!unknown.length) return;
-    const state = this.#o.bank();
     await Promise.all(
       [...new Set(unknown.map((l) => l.key!))].map((key) => {
         const pending = this.#checking.get(key);
         if (pending) return pending;
-        const check = bestIssuer(key, MIN_STAKE_USD, { state, ...this.route })
+        const check = bestIssuer(key, MIN_STAKE_USD, this.#best(3, use))
           .catch(() => null)
           .then((best) => {
             if (best?.winner) this.#winners.set(key, { mint: best.winner.mint, at: now });
-            else this.#noRoute.set(key, now + NO_ROUTE_TTL_MS);
+            else if (!transient(best)) this.#noRoute.set(key, now + NO_ROUTE_TTL_MS);
           })
           .finally(() => this.#checking.delete(key));
         this.#checking.set(key, check);
@@ -170,10 +220,16 @@ export class Router {
    * legs known to be unbuyable are dropped before quoting; every leg is quoted at once; swap
    * instructions are fetched only once the sizes are final; and if a leg has no route, the
    * others are re-sized by quoting just the issuer that already won.
+   *
+   * Quotes that fail (Jupiter busy, slow, down, or the budget refusing) are never remembered as
+   * "no route". At tap time (lane 1) such a leg is left out of this build, as before; a prebuild
+   * (lane 2) answers 503 busy instead, so a prebuilt trade never quietly lacks a leg.
    */
   async venueLegs(legs: MappedLeg[], user: PublicKey, usd: number, payer = this.#o.appPayer.publicKey, maxLegs?: number, kind: TradeKind = {}) {
     const now = Date.now();
     const side = kind.side ?? "back";
+    const use = kind.use ?? newUse(kind.lane ?? 1);
+    const lane = (use.lane = kind.lane ?? use.lane);
     const excluded: Excluded[] = [];
     let usable: MappedLeg[] = [];
     // A prediction leg goes in on its live market (the settler signs the entry from a live read too).
@@ -196,15 +252,17 @@ export class Router {
     const sorted = () => excluded.sort((a, b) => a.index - b.index);
     if (!usable.length) throw new ApiError(422, "nothing_tradable", "None of this take's legs can be bought on the fork right now");
 
-    const state = this.#o.bank();
     const stake = BigInt(Math.round(usd * USD));
     // Prediction and card legs aren't traded: the receipt escrows their share. The rest is split by weight.
     const traded = () => usable.filter((l) => !isPaper(l.how));
     const tradedStake = () => stake - escrowShare(usable, stake);
     const includedIdx = () => usable.map((l) => l.index).sort((a, b) => a - b);
-    if (!traded().length) return { venue: [] as TradeLeg[], included: includedIdx(), excluded: sorted() };
+    const done = (venue: TradeLeg[]) => ({ venue, included: includedIdx(), excluded: sorted(), jupiter: use });
+    if (!traded().length) return done([]);
     // A back's perp legs, and every traded leg of a fade (its shorts), trade on Phoenix.
     const onPhoenix = (l: MappedLeg) => side === "fade" || l.how === "perp";
+    /** Legs whose quotes failed rather than found no route (by take leg index). */
+    const failed = new Set<number>();
     const quoteAll = (ls: MappedLeg[], parts: bigint[], only?: (Winner | "lend" | "phoenix")[]) =>
       Promise.all(
         ls.map(async (l, j): Promise<Winner | "lend" | "phoenix" | null> => {
@@ -212,29 +270,44 @@ export class Router {
           if (l.how === "lend") return "lend";
           const usdPart = Number(parts[j]) / USD;
           const quote = (onlyMints?: string[]) =>
-            bestIssuer(l.key!, usdPart, { state, ...this.route, onlyMints })
-              .then((r) => r.winner)
-              .catch(() => null);
+            bestIssuer(l.key!, usdPart, this.#best(lane, use, onlyMints))
+              .catch(() => null)
+              .then((r) => {
+                if (transient(r)) failed.add(l.index);
+                return r?.winner ?? null;
+              });
           const prev = only?.[j];
           if (prev && prev !== "lend" && prev !== "phoenix") return quote([prev.mint]);
           const known = this.#winners.get(l.key!);
           if (known && known.at > now - WINNER_TTL_MS) {
             const w = await quote([known.mint]);
-            if (w) return w;
+            if (w) {
+              use.winnerHits++;
+              return w;
+            }
           }
+          use.winnerMisses++;
+          failed.delete(l.index);
           const w = await quote();
           if (w) this.#winners.set(l.key!, { mint: w.mint, at: Date.now() });
           return w;
         }),
       );
+    /** The budget refused a call, or (before the tap) a quote failed: the build answers busy. */
+    const busyOut = (ls: MappedLeg[], winners: unknown[]) => {
+      if (use.refused) throw use.refused;
+      const lost = ls.filter((l, j) => winners[j] === null && failed.has(l.index));
+      if (lane !== 1 && lost.length) throw busy(lost.map((l) => l.name).join(", "));
+    };
 
     let swapLegs = traded();
     let parts = splitStake(tradedStake(), swapLegs.map((l) => l.spec.weightBps));
     let winners = await quoteAll(swapLegs, parts);
+    busyOut(swapLegs, winners);
     if (winners.some((w) => w === null)) {
       for (const [j, l] of swapLegs.entries()) {
         if (winners[j] !== null) continue;
-        this.#noRoute.set(l.key!, now + NO_ROUTE_TTL_MS);
+        if (!failed.has(l.index)) this.#noRoute.set(l.key!, now + NO_ROUTE_TTL_MS);
         excluded.push({ index: l.index, name: l.name, reason: NO_ROUTE });
       }
       const kept = swapLegs.map((l, j) => [l, winners[j]] as const).filter(([, w]) => w !== null);
@@ -242,10 +315,11 @@ export class Router {
       usable = usable.filter((l) => isPaper(l.how) || keptIdx.has(l.index));
       if (!usable.length) throw new ApiError(422, "nothing_tradable", "None of this take's legs can be bought on the fork right now");
       swapLegs = traded();
-      if (!swapLegs.length) return { venue: [] as TradeLeg[], included: includedIdx(), excluded: sorted() };
+      if (!swapLegs.length) return done([]);
       // Dropping a leg changes the escrowed share too, so the traded part is split again.
       parts = splitStake(tradedStake(), swapLegs.map((l) => l.spec.weightBps));
       winners = await quoteAll(swapLegs, parts, kept.map(([, w]) => w!));
+      busyOut(swapLegs, winners);
       if (winners.some((w) => w === null)) throw new ApiError(502, "routing_failed", "A route disappeared while sizing the trade. Try again.");
     }
 
@@ -254,9 +328,11 @@ export class Router {
     const subs = phoenixLegs.length ? await this.phoenix!.prepare(user, phoenixLegs.length) : [];
     const subOf = new Map(phoenixLegs.map((l, k) => [l.index, subs[k]]));
     const venue = (await Promise.all(
-      swapLegs.map((l, j) => this.#legFor(l, parts[j], winners[j]!, user, payer, side, subOf.get(l.index))),
-    )).flat();
-    return { venue, included: includedIdx(), excluded: sorted() };
+      swapLegs.map((l, j) => this.#legFor(l, parts[j], winners[j]!, user, payer, side, subOf.get(l.index), lane, use)),
+    ).catch((e: unknown) => {
+      throw use.refused ?? e;
+    })).flat();
+    return done(venue);
   }
 
   /**
@@ -264,7 +340,7 @@ export class Router {
    * sized at the market's mid: collateral is the leg's part of the stake, the position that times
    * leverage.
    */
-  async #legFor(l: MappedLeg, part: bigint, w: Winner | "lend" | "phoenix", user: PublicKey, payer: PublicKey, side: "back" | "fade", sub?: number): Promise<TradeLeg[]> {
+  async #legFor(l: MappedLeg, part: bigint, w: Winner | "lend" | "phoenix", user: PublicKey, payer: PublicKey, side: "back" | "fade", sub: number | undefined, lane: Lane, use: JupiterUse): Promise<TradeLeg[]> {
     if (w === "phoenix") {
       const market = side === "fade" ? l.short! : l.phoenix!;
       const price = await this.phoenix!.venue.mid(market.symbol).catch(() => null);
@@ -283,10 +359,10 @@ export class Router {
       });
       return legs.map((v) => ({ ...v, output: { leg: l.index, account: v.outputAccount! }, how: "phoenix" as const, phoenix: { leg: l.index, sub: sub!, symbol: market.symbol } }));
     }
-    const apiKey = this.#o.jupiterApiKey;
+    const jupiter = this.jupiter(lane, use);
     const leg = w === "lend"
-      ? await jupiterLendDeposit({ user, payer, amount: part, label: `${l.name} (Jupiter Lend)`, apiKey: apiKey! })
-      : await jupiterBuy({ quote: w.quote, user, payer, label: `${l.name} (${w.symbol})`, apiKey });
+      ? await jupiterLendDeposit({ ...jupiter, user, payer, amount: part, label: `${l.name} (Jupiter Lend)`, apiKey: jupiter.apiKey! })
+      : await jupiterBuy({ ...jupiter, quote: w.quote, user, payer, label: `${l.name} (${w.symbol})` });
     // Proof of trade: the receipt checks this account grew (the take leg it buys, by index).
     if (!leg.outputAccount) throw new ApiError(502, "routing_failed", `Jupiter's route for ${l.name} doesn't deliver to your wallet's token account.`);
     return [{ ...leg, output: { leg: l.index, account: leg.outputAccount }, how: w === "lend" ? "lend" : "swap" }];
@@ -296,9 +372,21 @@ export class Router {
    * A split trade's retry (api/split.ts): the venue legs for the take legs in `remaining` only,
    * each sized as the first build sized it (the same included legs, stake and weights), with fresh
    * quotes. Phoenix legs trade in the child the first build recorded for them. `legs` are the
-   * legs the receipt opens. Throws 422 `retry_unavailable` when a leg can't be bought now.
+   * legs the receipt opens. Throws 422 `retry_unavailable` when a leg can't be bought now. Its
+   * Jupiter calls are lane 1 unless `o.lane` says otherwise.
    */
-  async rebuild(legs: MappedLeg[], user: PublicKey, usd: number, side: "back" | "fade", remaining: Set<number>, recorded: PhoenixLeg[], payer = this.#o.appPayer.publicKey): Promise<TradeLeg[]> {
+  async rebuild(
+    legs: MappedLeg[],
+    user: PublicKey,
+    usd: number,
+    side: "back" | "fade",
+    remaining: Set<number>,
+    recorded: PhoenixLeg[],
+    payer = this.#o.appPayer.publicKey,
+    o: { lane?: Lane; use?: JupiterUse } = {},
+  ): Promise<TradeLeg[]> {
+    const use = o.use ?? newUse(o.lane ?? 1);
+    const lane = (use.lane = o.lane ?? use.lane);
     const now = Date.now();
     const stake = BigInt(Math.round(usd * USD));
     const traded = legs.filter((l) => !isPaper(l.how));
@@ -312,9 +400,9 @@ export class Router {
       if (side === "fade" || l.how === "perp") {
         const sub = recorded.find((r) => r.leg === l.index)?.sub;
         if (sub === undefined) throw unavailable(l, "its Phoenix account isn't known");
-        return this.#legFor(l, parts[j], "phoenix", user, payer, side, sub);
+        return this.#legFor(l, parts[j], "phoenix", user, payer, side, sub, lane, use);
       }
-      if (l.how === "lend") return this.#legFor(l, parts[j], "lend", user, payer, side);
+      if (l.how === "lend") return this.#legFor(l, parts[j], "lend", user, payer, side, undefined, lane, use);
       const usdPart = Number(parts[j]) / USD;
       // Only a definite "no route" ends the retry: a quote that failed (Jupiter busy, slow, down)
       // answers 503 busy and leaves the retry for another try.
@@ -325,21 +413,18 @@ export class Router {
         // not in the bank at all
       }
       if (!pooled) throw unavailable(l, NO_ROUTE);
-      let transient = false;
+      let failed = false;
       const quote = async (onlyMints?: string[]) => {
-        const r = await bestIssuer(l.key!, usdPart, { state: this.#o.bank(), ...this.route, onlyMints }).catch(() => null);
-        if (!r || (!r.winner && r.skipped.some((s) => TRANSIENT_QUOTE.test(s.reason)))) transient = true;
+        const r = await bestIssuer(l.key!, usdPart, this.#best(lane, use, onlyMints)).catch(() => null);
+        if (transient(r)) failed = true;
         return r?.winner ?? null;
       };
       const known = this.#winners.get(l.key!);
       const w = (known && known.at > now - WINNER_TTL_MS ? await quote([known.mint]) : null) ?? await quote();
-      if (!w && transient) {
-        const e = new ApiError(503, "busy", `Couldn't quote ${l.name} right now. Try again in a moment.`);
-        e.headers = { "retry-after": "5" };
-        throw e;
-      }
+      if (use.refused) throw use.refused;
+      if (!w && failed) throw busy(l.name);
       if (!w) throw unavailable(l, NO_ROUTE);
-      return this.#legFor(l, parts[j], w, user, payer, side);
+      return this.#legFor(l, parts[j], w, user, payer, side, undefined, lane, use);
     }))).flat();
   }
 }
