@@ -3,31 +3,22 @@
 import type { TakeDraft } from "./data";
 
 export type Risk = "low" | "medium" | "high";
-export type Horizon = "2wk" | "1mo" | "3mo" | "6mo";
 
 export const RISKS: { key: Risk; label: string; note: string; basket: string }[] = [
   { key: "low", label: "Low", note: "Earns interest", basket: "Plain basket, plus interest on cash that isn't invested yet." },
   { key: "medium", label: "Medium", note: "Plain basket", basket: "Stocks and a prediction. No leverage." },
-  { key: "high", label: "High", note: "Adds leverage", basket: "Adds leverage, up to 5x, on picks that support it: more for short takes, less for long ones." },
+  { key: "high", label: "High", note: "Adds leverage", basket: "Adds leverage, up to 5x, on picks that support it: more on names that are the take, less on looser fits." },
 ];
 
-export const HORIZONS: { key: Horizon; short: string; long: string; unit: "week" | "month"; n: number }[] = [
-  { key: "2wk", short: "2 wks", long: "2 weeks", unit: "week", n: 2 },
-  { key: "1mo", short: "1 mo", long: "1 month", unit: "month", n: 1 },
-  { key: "3mo", short: "3 mo", long: "3 months", unit: "month", n: 3 },
-  { key: "6mo", short: "6 mo", long: "6 months", unit: "month", n: 6 },
-];
+/** There's no horizon to pick: a take runs until its author sells their buy-in, a year at most. */
+export const RUNS_COPY = "Your take runs until you sell your buy-in, or a year at most.";
 
-export const horizonOf = (k: Horizon) => HORIZONS.find((h) => h.key === k)!;
-
-/** When a take posted now settles, as the server's post_take sets settles_at. */
-export function settleDate(k: Horizon, from = new Date()): Date {
-  const h = horizonOf(k);
-  const d = new Date(from);
-  if (h.unit === "week") d.setDate(d.getDate() + 7 * h.n);
-  else d.setMonth(d.getMonth() + h.n);
-  return d;
-}
+/**
+ * The horizon sent with a new take (social POST /takes). The server now ignores it and settles
+ * every take a year out, but a server from before that still requires one: "12mo" is a year there
+ * too. Drop it once every server is past the change.
+ */
+export const POST_HORIZON = "12mo";
 
 export type Source = { url: string; label: string; kind: "x" | "link" };
 
@@ -49,7 +40,6 @@ export type Leg = {
 export type Draft = {
   claim: string;
   risk: Risk;
-  horizon: Horizon;
   buyIn: number;
   legs: Leg[] | null;
   summary: string | null;
@@ -64,7 +54,7 @@ export type Draft = {
 };
 
 export const newDraft = (init: Partial<Draft> = {}): Draft => ({
-  claim: "", risk: "medium", horizon: "3mo", buyIn: 25, legs: null, summary: null, noExposure: null, seed: null, edited: false, source: null, draftId: null, ...init,
+  claim: "", risk: "medium", buyIn: 25, legs: null, summary: null, noExposure: null, seed: null, edited: false, source: null, draftId: null, ...init,
 });
 
 export const predictionSide = (l: Leg) => (l.kind.startsWith("Prediction") ? (l.kind.endsWith("No") ? "no" : "yes") : undefined);
@@ -211,17 +201,16 @@ export function topicGuess(claim: string, legs: Leg[]): { topic: string; tags: s
 export function fromBotDraft(d: TakeDraft): Partial<Draft> {
   const b = basketFrom({ verdict: "basket", summary: d.summary, legs: d.legs });
   return {
-    claim: d.claim.slice(0, 140), risk: d.risk, horizon: d.horizon,
+    claim: d.claim.slice(0, 140), risk: d.risk,
     legs: normalized(b.legs), summary: b.summary,
     source: d.source && /^https?:\/\//.test(d.source.url) ? { url: d.source.url, label: d.source.label, kind: d.source.kind } : null,
     draftId: d.id,
   };
 }
 
-/** A drafted take from an X call (or its notification): risk and horizon words → the draft's keys. */
-export function fromCall(c: { claim: string; risk?: string | null; horizon?: string | null; url?: string | null; label: string }): Partial<Draft> & { autoBuild: boolean } {
+/** A drafted take from an X call (or its notification): its risk word → the draft's key. */
+export function fromCall(c: { claim: string; risk?: string | null; url?: string | null; label: string }): Partial<Draft> & { autoBuild: boolean } {
   const risk = (["low", "medium", "high"] as const).find((r) => r === c.risk?.toLowerCase()) ?? "medium";
-  const horizon = HORIZONS.find((h) => h.long === c.horizon || h.key === c.horizon)?.key ?? "3mo";
   const source = c.url && /^https?:\/\//.test(c.url) ? { url: c.url, label: c.label, kind: "x" as const } : null;
-  return { claim: c.claim.slice(0, 140), risk, horizon, source, autoBuild: true };
+  return { claim: c.claim.slice(0, 140), risk, source, autoBuild: true };
 }

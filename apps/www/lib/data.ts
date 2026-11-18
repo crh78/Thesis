@@ -56,9 +56,16 @@ export type Take = {
   claim: string;
   status: string;
   risk: string;
-  horizon: string;
+  /** Old takes' horizon ("3mo"); new takes all say "12mo". Not shown: a take runs until its author sells. */
+  horizon?: string | null;
   created_at: string;
+  /** When it auto-settles if its author never sells (a year after posting for new takes). */
   settles_at: string | null;
+  /** When the author sold their buy-in, which closed the take. Null while open; missing from older APIs. */
+  closed_at?: string | null;
+  /** The take's result is final on-chain (after the author's sale, or at settles_at). Missing from older APIs. */
+  settled?: boolean;
+  settled_at?: string | null;
   backs: number;
   fades: number;
   comments: number;
@@ -98,7 +105,12 @@ export type Position = {
 export type Receipt = {
   takeId: string;
   onChain: boolean;
+  /** "open", "closed" (its author sold) or "settled"; older APIs send only "open" and "settled". */
   status: string;
+  /** Unix seconds: when it auto-settles if the author never sells. */
+  horizonEnd?: number;
+  /** Unix seconds of the author's sale, once they sold (also once settled early). Missing from older APIs. */
+  closedAt?: number | null;
   backers?: number;
   faders?: number;
   totalBackedUsd?: number;
@@ -137,7 +149,8 @@ export type TakeDraft = {
   id: string;
   claim: string;
   risk: "low" | "medium" | "high";
-  horizon: "2wk" | "1mo" | "3mo" | "6mo";
+  /** Old drafts' horizon; ignored (a take runs until its author sells, a year at most). */
+  horizon?: string | null;
   summary: string | null;
   /** The take builder's legs, as it returned them (lib/compose.ts basketFrom reads them). */
   legs: import("./compose").Built["legs"];
@@ -182,7 +195,14 @@ export async function getProfileTakes(id: string): Promise<Take[]> {
   const takes = await rpc<Take[]>("profile_takes", { p_profile: id }).catch(() => []);
   const live = takes.filter((t) => t.status === "live").slice(0, PROFILE_TAKES);
   const receipts = await mapLimit(live, RECEIPTS_AT_ONCE, (t) => getReceipt(t.id));
-  return live.map((t, i) => ({ ...t, ret: takeReturn(t, receipts[i]) }));
+  return live.map((t, i) => ({ ...t, ...withClosed(t, receipts[i]), ret: takeReturn(t, receipts[i]) }));
+}
+
+/** closed_at / settled, filled in from the on-chain receipt where the take's copy doesn't have them
+ *  yet (a database from before take_json had them, or the chain event not ingested yet). */
+function withClosed(t: Take, r: Receipt | null): Pick<Take, "closed_at" | "settled"> {
+  const sold = r?.onChain && r.closedAt ? new Date(r.closedAt * 1000).toISOString() : null;
+  return { closed_at: t.closed_at ?? sold, settled: !!t.settled || (!!r?.onChain && r.status === "settled") };
 }
 
 /** A profile shows at most this many takes, and reads their receipts this many at a time, so one
@@ -252,7 +272,49 @@ export function avatar(url: string | null | undefined): { src: string | null; bg
   return { src: url, bg: FACE_COLORS[3] };
 }
 
-export const HORIZON: Record<string, string> = { "2wk": "2 weeks", "1mo": "1 month", "3mo": "3 months", "6mo": "6 months", "1yr": "1 year" };
+/**
+ * Where a take stands. It's open until its author sells their buy-in, which closes it: no new
+ * trades or fades, and its result is final. If they never sell, it settles a year after posting.
+ * Reads the new fields (take_json's closed_at / settled, the receipt's "closed" and closedAt) and
+ * the old ones (a receipt that's only "open" or "settled", a take without closed_at), so takes
+ * from before the change read right too. `bySale`: the author sold (else it settled at its end).
+ */
+export type TakeState = { open: true } | { open: false; at: Date | null; bySale: boolean };
+
+type StateFields = Pick<Take, "closed_at" | "settled" | "settled_at" | "settles_at">;
+
+export function takeState(take: StateFields | null, receipt?: Pick<Receipt, "onChain" | "status" | "closedAt"> | null): TakeState {
+  const r = receipt?.onChain ? receipt : null;
+  const closedAt = r?.closedAt ? new Date(r.closedAt * 1000) : take?.closed_at ? new Date(take.closed_at) : null;
+  const settled = r?.status === "settled" || !!take?.settled;
+  if (!closedAt && r?.status !== "closed" && !settled) return { open: true };
+  // Settled at its end (never sold): the day it settled, else the day it was due to.
+  const settledAt = take?.settled_at ?? (settled ? take?.settles_at : null) ?? null;
+  return { open: false, at: closedAt ?? (settledAt ? new Date(settledAt) : null), bySale: !!closedAt || r?.status === "closed" };
+}
+
+/** "Nov 18", with the year when it isn't this one. */
+export function dayLabel(d: Date): string {
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
+}
+
+/** "@jake", or "the author" for a deleted account. */
+const byline = (handle: string | null | undefined) => (handle ? `@${handle}` : "the author");
+
+/** "Open · until @jake sells" or "Closed Nov 18 · +4.2%" (take pages, link previews, rows). */
+export function stateLabel(state: TakeState, handle: string | null | undefined, ret?: number | null): string {
+  if (state.open) return `Open · until ${byline(handle)} sells`;
+  return [state.at ? `Closed ${dayLabel(state.at)}` : "Closed", ret != null ? pct(ret) : null].filter(Boolean).join(" · ");
+}
+
+/** "open" or "closed Nov 18", for tight spots (profile cards, link previews). */
+export const stateShort = (state: TakeState) => (state.open ? "open" : state.at ? `closed ${dayLabel(state.at)}` : "closed");
+
+/** Why a closed take can't be traded: "Closed: @jake sold", or that it settled at its end. */
+export function closedReason(state: TakeState, handle: string | null | undefined): string {
+  return state.open ? "" : state.bySale ? `Closed: ${byline(handle)} sold` : "Closed: this take has settled";
+}
 
 export const SERIES = ["#3987E5", "#D95926", "#199E70", "#C98500", "#D55181", "#8B6CEF", "#2BB3C0", "#8FB339", "#B07A4F", "#7C8BA1"];
 

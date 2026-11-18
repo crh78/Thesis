@@ -6,9 +6,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
-import { legName, pct, usd, type Position, type Receipt } from "@/lib/data";
+import { closedReason, legName, pct, takeState, usd, type Position, type Receipt } from "@/lib/data";
 // The fork client adds the Privy token on money calls and handles "Sign in again".
-import { cashOutPhoenix, centsInput, depositLeft, fork, markTraded, stoppedTrade, type Built, type Incomplete, type PhoenixLeg, type PhoenixRisk, type WalletSummary } from "@/lib/fork";
+import { cashOutPhoenix, centsInput, depositLeft, fork, ForkError, markTraded, stoppedTrade, type Built, type Incomplete, type PhoenixLeg, type PhoenixRisk, type WalletSummary } from "@/lib/fork";
 import { cardValue } from "@/lib/data";
 import { X_LOGIN } from "@/lib/flags";
 import { useSession } from "@/lib/session";
@@ -17,8 +17,13 @@ import SignIn from "./SignIn";
 import StoppedTrade from "./StoppedTrade";
 
 type Side = "back" | "fade";
-/** `incomplete`: a trade split over several transactions stopped partway (the fork API's `trade_incomplete`). */
-type Step = { kind: "closed" } | { kind: "signin" } | { kind: "trade"; side: Side } | { kind: "sell"; position: Position } | { kind: "incomplete"; trade: Incomplete | null; retry: boolean } | { kind: "done"; text: string };
+/**
+ * `incomplete`: a trade split over several transactions stopped partway (the fork API's `trade_incomplete`).
+ * `sell` with `closing`: the exit build said it's the author's buy-in (`closesTake`), so the sheet
+ * warns that selling closes the take before anything is signed; `built` is that build, kept to sign
+ * on the second tap (null once it's been used or failed, and the next tap builds again).
+ */
+type Step = { kind: "closed" } | { kind: "signin" } | { kind: "trade"; side: Side } | { kind: "sell"; position: Position; closing?: { built: Built | null } } | { kind: "incomplete"; trade: Incomplete | null; retry: boolean } | { kind: "done"; text: string };
 /** The receipt's legs and positions also carry their Phoenix details (lib/fork.ts). */
 type Leg = Receipt["legs"][number] & PhoenixLeg;
 const phoenixOf = (p: Position) => (p as Position & { phoenix?: PhoenixRisk[] }).phoenix;
@@ -28,7 +33,12 @@ const CHIPS = [10, 20, 50, 100];
 const b64ToBytes = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const bytesToB64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
 
-export default function TradeDock({ takeId, author, receipt: initial }: { takeId: string; author: string; receipt: Receipt | null }) {
+/**
+ * `closed`: why the take can't be traded ("Closed: @jake sold"), when the server render already
+ * knows it's closed; `handle` (the author's, null for a deleted account) words it when the receipt
+ * here finds out later (the author sold while the page was open).
+ */
+export default function TradeDock({ takeId, author, handle = null, receipt: initial, closed = null }: { takeId: string; author: string; handle?: string | null; receipt: Receipt | null; closed?: string | null }) {
   const { ready, authenticated, user } = usePrivy();
   const { phase, snapshot, logout } = useSession();
   const { wallets } = useWallets();
@@ -37,6 +47,10 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
   const [step, setStep] = useState<Step>({ kind: "closed" });
   const [pending, setPending] = useState<Side | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(initial);
+  // Closed (its author sold, or it settled): no Trade or Fade, only this. The receipt read here
+  // can find out after the server render did.
+  const now = takeState(null, receipt);
+  const closedText = now.open ? closed : closedReason(now, handle);
   // The receipt as this wallet sees it (canFade is false on your own take): a fade waits for it.
   const [viewerReceipt, setViewerReceipt] = useState(false);
   const [summary, setSummary] = useState<WalletSummary | null>(null);
@@ -93,12 +107,12 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
     if (!pending || phase.kind !== "ready" || !wallet) return;
     // A fade from a link opens only once the receipt for this viewer is in (the server's copy has no viewer).
     if (pending === "fade" && !viewerReceipt) return;
-    // Only a side this take allows right now (a link can ask for one it doesn't).
-    const allowed = pending === "back" ? (receipt?.canBack ?? true) : !!receipt?.canFade;
+    // Only a side this take allows right now (a link can ask for one it doesn't, or the take closed).
+    const allowed = !closedText && (pending === "back" ? (receipt?.canBack ?? true) : !!receipt?.canFade);
     if (allowed) setStep({ kind: "trade", side: pending });
     setPending(null);
     try { sessionStorage.removeItem(pendingKey); } catch { /* private mode */ }
-  }, [pending, phase.kind, wallet, pendingKey, receipt, viewerReceipt]);
+  }, [pending, phase.kind, wallet, pendingKey, receipt, viewerReceipt, closedText]);
 
   const start = (side: Side) => {
     setError(null);
@@ -144,6 +158,8 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
         await refresh().catch(() => {});
         return setStep({ kind: "incomplete", ...stopped });
       }
+      // The author sold while this was open: read the receipt again so the dock shows it's closed.
+      if (e instanceof ForkError && e.code === "take_closed") await refresh().catch(() => {});
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
@@ -156,11 +172,20 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
     setStep({ kind: "done", text });
   }
 
-  async function sell(position: Position) {
+  /**
+   * Sell the whole position. The author's own buy-in closes the take (`closesTake` on the build):
+   * the first tap only builds and shows that warning, and the second signs (`closing.built`, or a
+   * new build once that one was used or failed).
+   */
+  async function sell(position: Position, closing?: { built: Built | null }) {
     setError(null);
+    let built: Built | null = closing?.built ?? null;
     try {
       setBusy("Selling…");
-      const built = await fork<Built>("POST", `/takes/${takeId}/positions/${position.address}/exit`, { owner: address });
+      built ??= await fork<Built>("POST", `/takes/${takeId}/positions/${position.address}/exit`, { owner: address });
+      if (built.closesTake && !closing) return setStep({ kind: "sell", position, closing: { built } });
+      // A build is signed once: if this fails, the next tap builds again.
+      if (closing) setStep({ kind: "sell", position, closing: { built: null } });
       await signAndSubmit(built);
       markTraded();
       // A sale with Phoenix legs closed them; their cash comes back to USDC in a second step (as
@@ -171,11 +196,12 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
         await cashOutPhoenix(address!, signAndSubmit).catch(() => { stranded = true; });
       }
       await refresh();
+      const closedNote = built.closesTake ? " Your take is closed now: no new trades, and its result is final." : "";
       setStep({
         kind: "done",
-        text: stranded
+        text: (stranded
           ? "Sold, and the position is scored at today's prices. The cash from its leveraged legs is still on its way: tap Cash out on Me to move it to your balance."
-          : "Sold. The cash is back in your balance, and the position is scored at today's prices.",
+          : "Sold. The cash is back in your balance, and the position is scored at today's prices.") + closedNote,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -203,7 +229,7 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
   const canFade = !!receipt?.canFade;
   // The fork's own words when it can't trade this take at all (it says why, e.g. an earlier fork).
   const missing = !canBack ? (receipt?.missing ?? null) : null;
-  const blockedLabel = missing ? "Can't be traded here" : receipt?.status === "settled" ? "This take has settled" : "Can't trade right now";
+  const blockedLabel = missing ? "Can't be traded here" : "Can't trade right now";
 
   const ret = receipt?.returnBps != null ? receipt.returnBps / 100 : null;
 
@@ -235,7 +261,7 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
               <div style={{ textAlign: "right" }}>
                 <div className="mono">{usd(p.valueUsd)}</div>
                 {p.canExit ? (
-                  <button className="pill small" style={{ marginTop: 6 }} onClick={() => setStep({ kind: "sell", position: p })}>Sell</button>
+                  <button className="pill small" style={{ marginTop: 6 }} onClick={() => { setError(null); setStep({ kind: "sell", position: p }); }}>Sell</button>
                 ) : null}
               </div>
             </div>
@@ -255,12 +281,19 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
 
       <div className="dock">
         <div className="dock-inner">
-          {canFade ? (
-            <button className="btn fade" disabled={!ready} onClick={() => start("fade")}>Fade</button>
-          ) : null}
-          <button className="btn back" disabled={!ready || !canBack} onClick={() => start("back")}>
-            {canBack ? "Trade this take" : blockedLabel}
-          </button>
+          {closedText ? (
+            // Closed takes take no new trades or fades; positions in it can still be sold above.
+            <div className="dock-closed" role="status">{closedText}</div>
+          ) : (
+            <>
+              {canFade ? (
+                <button className="btn fade" disabled={!ready} onClick={() => start("fade")}>Fade</button>
+              ) : null}
+              <button className="btn back" disabled={!ready || !canBack} onClick={() => start("back")}>
+                {canBack ? "Trade this take" : blockedLabel}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -293,15 +326,21 @@ export default function TradeDock({ takeId, author, receipt: initial }: { takeId
             ) : null}
             {step.kind === "sell" ? (
               <>
-                <h3>Sell position</h3>
+                <h3>{step.closing ? "Sell and close your take" : "Sell position"}</h3>
                 <p className="muted">
                   Sells the whole position for fork USDC, including money held for prediction legs. It&apos;s scored at today&apos;s
                   prices and settles right away.
                 </p>
+                {step.closing ? (
+                  // The author's own buy-in (the exit build's closesTake).
+                  <p className="note">
+                    Selling closes this take: no new trades, and its result is final at today&apos;s prices. Others keep their positions.
+                  </p>
+                ) : null}
                 <div className="row"><span>Worth now</span><span className="mono">{usd(step.position.valueUsd)}</span></div>
                 {error ? <div className="err">{error}</div> : null}
-                <button className="btn light" style={{ width: "100%", marginTop: 16 }} disabled={!!busy} onClick={() => sell(step.position)}>
-                  {busy ?? "Confirm full sale"}
+                <button className="btn light" style={{ width: "100%", marginTop: 16 }} disabled={!!busy} onClick={() => sell(step.position, step.closing)}>
+                  {busy ?? (step.closing ? "Sell and close the take" : "Confirm full sale")}
                 </button>
               </>
             ) : null}

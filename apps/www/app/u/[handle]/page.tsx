@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import Avatar from "@/components/Avatar";
 import FollowButton from "@/components/FollowButton";
 import ShareButton from "@/components/ShareButton";
-import { calledIt, getProfile, getProfileTakes, HORIZON, money, nameOf, pct, shortDate } from "@/lib/data";
+import { calledIt, getProfile, getProfileTakes, money, nameOf, pct, shortDate, stateShort, takeState } from "@/lib/data";
 
 export const revalidate = 30;
 
@@ -102,7 +102,7 @@ export default async function ProfilePage({ params }: Props) {
         {rest.length === 0 && called.length === 0 ? <p className="muted">No takes yet.</p> : null}
         {rest.map((t) => (
           <Link className="card" key={t.id} href={`/t/${t.id}`}>
-            <span className="caps">{t.risk} · {HORIZON[t.horizon] ?? t.horizon} · {shortDate(t.created_at)}</span>
+            <span className="caps">{t.risk} · {stateShort(takeState(t))} · posted {shortDate(t.created_at)}</span>
             <div className="claim">{t.claim}</div>
             <div className="mono small">
               <span className={t.ret >= 0 ? "up" : "down"}>{pct(t.ret)}</span>

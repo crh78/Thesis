@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { basketFrom } from "@/lib/compose";
-import { getDraft, HORIZON, SERIES } from "@/lib/data";
+import { getDraft, SERIES } from "@/lib/data";
 import { ogCache } from "@/lib/og";
 
 export const size = { width: 1200, height: 630 };
@@ -33,7 +33,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 24 }}>
             <span style={{ fontSize: 30, color: "#F2F3F5" }}>{top}</span>
-            <span style={{ fontSize: 28, color: "#A6E3B8" }}>{d ? `${d.risk} risk · ${HORIZON[d.horizon] ?? d.horizon} · tap to post` : ""}</span>
+            <span style={{ fontSize: 28, color: "#A6E3B8" }}>{d ? `${d.risk} risk · tap to post` : ""}</span>
           </div>
           <div style={{ display: "flex", gap: 6, height: 14 }}>
             {legs.map((l) => (

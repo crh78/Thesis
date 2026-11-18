@@ -1,5 +1,5 @@
 "use client";
-// New take, like the iOS CreateFlow: write it (plus risk and horizon) → Thesis builds the basket →
+// New take, like the iOS CreateFlow: write it (plus a risk level) → Thesis builds the basket →
 // review it (risk, "change something…", weights, add or remove picks) → buy in and post. Buying in
 // is required to post: the take stays "posting" (yours only) until its on-chain buy-in confirms,
 // and this screen waits for that, then opens the take.
@@ -7,8 +7,8 @@ import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { cardValue, isCardKind, money, SERIES } from "@/lib/data";
 import {
-  adding, basketFrom, builderLegs, type Built, type Draft, HORIZONS, horizonOf, type Leg, MAX_PICKS, newDraft, type PickAsset,
-  removing, type Risk, RISKS, setting, settleDate, topicGuess,
+  adding, basketFrom, builderLegs, type Built, type Draft, type Leg, MAX_PICKS, newDraft, type PickAsset, POST_HORIZON,
+  removing, type Risk, RISKS, RUNS_COPY, setting, topicGuess,
 } from "@/lib/compose";
 import { centsInput, fork, ForkError, stoppedTrade, useForkWallet, type Incomplete, type WalletSummary } from "@/lib/fork";
 import { isOnChain, postingBuyIns, sendBuyIn, showMyTakes, UNCHECKED, UNCHECKED_TEXT, waitUntilLive } from "@/lib/posting";
@@ -101,7 +101,7 @@ function SourceMark({ draft }: { draft: Draft }) {
 
 function Write({ draft, setDraft, onClose, onNext }: { draft: Draft; setDraft: (f: (d: Draft) => Draft) => void; onClose: () => void; onNext: () => void }) {
   const ok = draft.claim.trim().length >= 3;
-  // Changing the take, risk, horizon or starting asset throws away the basket built for the old one,
+  // Changing the take, risk or starting asset throws away the basket built for the old one,
   // so an edited take never posts the old basket (and "no clean way" → edit → build builds again).
   const edit = (patch: Partial<Draft>) =>
     setDraft((d) => {
@@ -123,7 +123,7 @@ function Write({ draft, setDraft, onClose, onNext }: { draft: Draft; setDraft: (
           <div className="chip-line">via {draft.source.label}<button aria-label={`Don't credit ${draft.source.label}`} onClick={() => setDraft((d) => ({ ...d, source: null }))}>×</button></div>
         ) : null}
 
-        <div className="cmp-thesis"><span className="orb" aria-hidden /> <b>Thesis</b> <span className="muted">· two quick questions</span></div>
+        <div className="cmp-thesis"><span className="orb" aria-hidden /> <b>Thesis</b> <span className="muted">· one quick question</span></div>
 
         <h3 className="cmp-q">How much risk?</h3>
         <div className="risk-cards" role="radiogroup" aria-label="Risk">
@@ -133,14 +133,7 @@ function Write({ draft, setDraft, onClose, onNext }: { draft: Draft; setDraft: (
             </button>
           ))}
         </div>
-
-        <h3 className="cmp-q">How long should it run?</h3>
-        <div className="segmented four" role="radiogroup" aria-label="Horizon">
-          {HORIZONS.map((h) => (
-            <button key={h.key} role="radio" aria-checked={draft.horizon === h.key} className={draft.horizon === h.key ? "on" : ""} onClick={() => edit({ horizon: h.key })}>{h.short}</button>
-          ))}
-        </div>
-        <p className="muted small">Your take settles at the end, and the result goes on your record.</p>
+        <p className="muted small">{RUNS_COPY} When it closes, the result goes on your record.</p>
       </div>
       <div className="cmp-foot">
         <button className="obtn filled" disabled={!ok} onClick={onNext}>Build my basket →</button>
@@ -165,7 +158,8 @@ async function callBuilder(token: string, body: Record<string, unknown>): Promis
   return json as Built;
 }
 
-const builderBody = (d: Draft) => ({ claim: d.claim.trim(), risk: d.risk, horizon: horizonOf(d.horizon).long });
+// No horizon: the take builder picks leverage and prediction contracts for a take that may run a year.
+const builderBody = (d: Draft) => ({ claim: d.claim.trim(), risk: d.risk });
 
 function Building({ draft, setDraft, onClose, onBack, onNext, auto }: { draft: Draft; setDraft: (f: (d: Draft) => Draft) => void; onClose: () => void; onBack: () => void; onNext: () => void; auto: boolean }) {
   const { token } = useSession();
@@ -207,13 +201,13 @@ function Building({ draft, setDraft, onClose, onBack, onNext, auto }: { draft: D
         <div className={`take-card${done || error ? "" : " beam"}`}>
           <div className="muted small" style={{ fontWeight: 600 }}>Your take</div>
           <div className="take-card-claim">{draft.claim}</div>
-          <div className="muted small">{RISKS.find((r) => r.key === draft.risk)!.label} risk · {horizonOf(draft.horizon).long}</div>
+          <div className="muted small">{RISKS.find((r) => r.key === draft.risk)!.label} risk</div>
           <SourceMark draft={draft} />
         </div>
         <div className="build-status">
           <span className={`orb big${done || error ? " still" : ""}`} aria-hidden />
           <h2>{error ? "Couldn't build your basket" : done ? (draft.noExposure ? "No clean way to trade this" : "Your basket is ready") : current.title}</h2>
-          <p className="muted">{error ?? (done ? (draft.noExposure ?? `${draft.legs?.length ?? 0} ${draft.legs?.length === 1 ? "pick" : "picks"} · ${RISKS.find((r) => r.key === draft.risk)!.label} risk · ${horizonOf(draft.horizon).long}`) : current.sub)}</p>
+          <p className="muted">{error ?? (done ? (draft.noExposure ?? `${draft.legs?.length ?? 0} ${draft.legs?.length === 1 ? "pick" : "picks"} · ${RISKS.find((r) => r.key === draft.risk)!.label} risk`) : current.sub)}</p>
         </div>
         <div className="build-steps">
           {LABELS.map((l, i) => (
@@ -343,7 +337,7 @@ function Basket({ draft, setDraft, onClose, onBack, onPosted }: { draft: Draft; 
       <div className="cmp-body">
         <div style={{ textAlign: "center" }}>
           <div className="take-card-claim">{draft.claim}</div>
-          <div className="muted small">{horizonOf(draft.horizon).long} · settles {settleDate(draft.horizon).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+          <div className="muted small">{RUNS_COPY}</div>
           <SourceMark draft={draft} />
         </div>
         <div className="donut-wrap" style={{ opacity: rebuilding ? 0.4 : 1 }}>
@@ -498,7 +492,7 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
     const legs = draft.legs ?? [];
     const { topic, tags } = topicGuess(draft.claim, legs);
     const r = await social<{ take: { id: string } }>("POST", "takes", {
-      claim: draft.claim.trim(), topic, tags, risk: draft.risk, horizon: draft.horizon, await_chain: true,
+      claim: draft.claim.trim(), topic, tags, risk: draft.risk, horizon: POST_HORIZON, await_chain: true,
       legs: legs.map((l) => ({ name: l.name, kind: l.kind, weight: l.weight, why: l.why, slot: l.slot, fade_how: l.fadeHow, asset_id: l.assetId })),
     });
     // Retry on Me (after closing this, or a reload) sends the same buy-in.

@@ -147,7 +147,7 @@ export default function XCopyPage() {
                 <a className="xcall-post muted small" href={c.url} target="_blank" rel="noopener noreferrer nofollow">{c.text}</a>
               ) : <div className="xcall-post muted small">{c.text}</div>}
               <div className="xcall-foot">
-                <span className="mono muted" style={{ fontSize: 11 }}>{[c.risk && `${c.risk[0].toUpperCase()}${c.risk.slice(1)} risk`, c.horizon].filter(Boolean).join(" · ")}</span>
+                <span className="mono muted" style={{ fontSize: 11 }}>{c.risk ? `${c.risk[0].toUpperCase()}${c.risk.slice(1)} risk` : ""}</span>
                 <button className="up small" style={{ fontWeight: 600 }} onClick={() => composer.open(fromCall({ ...c, label: `@${a.username} on X` }))} aria-label="Copy this call">Copy →</button>
               </div>
             </div>

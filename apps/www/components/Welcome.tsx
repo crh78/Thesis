@@ -5,13 +5,13 @@ import { useEffect, useState } from "react";
 import { SERIES } from "@/lib/data";
 import SignIn from "./SignIn";
 
-type Story = { claim: string; ret: number; horizon: string; legs: { name: string; weight: number }[] };
+type Story = { claim: string; ret: number; risk: string; legs: { name: string; weight: number }[] };
 
 // The iOS hero's demo takes (MockData: aiPower, nuclear, fedCut).
 const STORIES: Story[] = [
-  { claim: "AI power demand is underrated.", ret: 14.0, horizon: "3 months", legs: [{ name: "Vistra", weight: 30 }, { name: "Constellation", weight: 30 }, { name: "NVIDIA", weight: 25 }, { name: "AI capex: Yes", weight: 15 }] },
-  { claim: "Nuclear restarts get fast-tracked.", ret: 9.4, horizon: "6 months", legs: [{ name: "Constellation", weight: 40 }, { name: "Vistra", weight: 30 }, { name: "Restart approved: Yes", weight: 30 }] },
-  { claim: "The Fed cuts in January.", ret: 3.1, horizon: "2 months", legs: [{ name: "Rate cut: Yes", weight: 50 }, { name: "T-bills", weight: 30 }, { name: "Cash", weight: 20 }] },
+  { claim: "AI power demand is underrated.", ret: 14.0, risk: "Medium risk", legs: [{ name: "Vistra", weight: 30 }, { name: "Constellation", weight: 30 }, { name: "NVIDIA", weight: 25 }, { name: "AI capex: Yes", weight: 15 }] },
+  { claim: "Nuclear restarts get fast-tracked.", ret: 9.4, risk: "High risk", legs: [{ name: "Constellation", weight: 40 }, { name: "Vistra", weight: 30 }, { name: "Restart approved: Yes", weight: 30 }] },
+  { claim: "The Fed cuts in January.", ret: 3.1, risk: "Low risk", legs: [{ name: "Rate cut: Yes", weight: 50 }, { name: "T-bills", weight: 30 }, { name: "Cash", weight: 20 }] },
 ];
 
 const EVENTS = [
@@ -60,7 +60,7 @@ function StoryHero() {
         <span className="typed">{story.claim.slice(0, typed)}{local < typeEnd + 500 ? <i className="caret" /> : null}</span>
       </div>
       <div className="hero-legs">
-        <div className="caps">{story.legs.length} picks · {story.horizon}</div>
+        <div className="caps">{story.legs.length} picks · {story.risk}</div>
         {story.legs.map((l, i) => (
           <div key={l.name} className="hero-leg" style={{ opacity: local > legStart(i) ? 1 : 0, transform: local > legStart(i) ? "none" : "translateY(6px)" }}>
             <i style={{ background: SERIES[i] }} />

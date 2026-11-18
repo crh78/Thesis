@@ -23,7 +23,7 @@ type Note = {
 type Inbox = { unread: number; notifications: Note[] };
 
 const GLYPH: Record<string, string> = {
-  new_take: "✦", comment: "💬", take_traded: "↗", take_faded: "↘", take_settled: "⚑", badge: "✪",
+  new_take: "✦", comment: "💬", take_traded: "↗", take_faded: "↘", take_settled: "⚑", take_closed: "⚑", badge: "✪",
   daily_positions: "📈", liquidation_risk: "⚠", x_call: "𝕏",
 };
 
@@ -86,7 +86,7 @@ export default function NotificationsBell() {
               if (call) {
                 return (
                   <button key={n.id} className="nrow" style={{ width: "100%", textAlign: "left" }}
-                    onClick={() => { setOpen(false); composer.open(fromCall({ claim: call.claim!, risk: call.risk, horizon: call.horizon, url: call.source_url, label: call.source_label ?? "X" })); }}>
+                    onClick={() => { setOpen(false); composer.open(fromCall({ claim: call.claim!, risk: call.risk, url: call.source_url, label: call.source_label ?? "X" })); }}>
                     {row}
                   </button>
                 );

@@ -7,7 +7,7 @@ import { notFound, redirect } from "next/navigation";
 import Basket from "@/components/Basket";
 import DraftActions from "@/components/DraftActions";
 import { basketFrom } from "@/lib/compose";
-import { getDraft, HORIZON } from "@/lib/data";
+import { getDraft } from "@/lib/data";
 
 export const revalidate = 10;
 
@@ -49,7 +49,7 @@ export default async function DraftPage({ params }: Props) {
 
       <div className="caps">{d.context ?? (d.origin === "x" ? "From X" : "From iMessage")} · not posted yet</div>
       <h1 className="claim">{d.claim}</h1>
-      <div className="caps">{d.risk} risk · {HORIZON[d.horizon] ?? d.horizon}</div>
+      <div className="caps">{d.risk} risk</div>
       {d.source && /^https?:\/\//.test(d.source.url) ? (
         <a className="via" href={d.source.url} target="_blank" rel="noopener noreferrer nofollow">via {d.source.label} ↗</a>
       ) : null}
@@ -61,7 +61,7 @@ export default async function DraftPage({ params }: Props) {
       </div>
 
       <p className="small muted" style={{ marginTop: 20, marginBottom: 96 }}>
-        Thesis built this from a chat. Post it and it&apos;s your take: you buy in, friends can trade or fade it, and the result goes on your record.
+        Thesis built this from a chat. Post it and it&apos;s your take: you buy in, friends can trade or fade it, and the result goes on your record. It runs until you sell your buy-in, or a year at most.
       </p>
 
       <DraftActions draft={d} />
