@@ -40,6 +40,11 @@ sudo -u thesis -H bash -c "cd $APP && pnpm install --frozen-lockfile" >/dev/null
 echo "• systemd units"
 install -m 0644 "$REPO_SRC"/infra/executor/systemd/*.service /etc/systemd/system/
 systemctl daemon-reload
+# Caddy (infra/executor/caddy) where it's set up: the Caddyfile from this commit, reloaded.
+if [ -f /etc/thesis/caddy.env ] && command -v caddy >/dev/null; then
+  install -m 0644 "$REPO_SRC/infra/executor/caddy/Caddyfile" /etc/caddy/Caddyfile
+  systemctl reload caddy && echo "• caddy reloaded"
+fi
 # The docker group is root-equivalent and only thesis-surfpool (a root unit) uses Docker. The
 # restarts below drop it from the running services too.
 gpasswd -d thesis docker >/dev/null 2>&1 && echo "• removed thesis from the docker group" || true

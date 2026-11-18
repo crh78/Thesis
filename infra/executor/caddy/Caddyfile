@@ -1,0 +1,24 @@
+# Caddy in front of the fork API: HTTPS on 443 straight to 127.0.0.1:18901, replacing Tailscale
+# Funnel for it (in the load test Funnel failed 19% of requests at 200 visitors; the VM itself
+# failed none). Installed by infra/executor/caddy/setup.sh. The host name is FORK_API_HOST from
+# /etc/thesis/caddy.env; Caddy gets and renews its certificate by itself (TLS-ALPN on 443).
+# It listens on FORK_API_BIND, the VM's own address (setup.sh finds it), not on every address:
+# Tailscale holds 443 on its own interface while Funnel is on.
+#
+# The fork API counts each visitor by the last X-Forwarded-For entry when the request comes from
+# loopback (scripts/fork/api/guard.ts). Caddy ignores what a client sends in that header and sets
+# it to the address it saw, so the per-IP limits can't be spoofed.
+{
+	servers {
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
+{$FORK_API_HOST} {
+	bind {$FORK_API_BIND}
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:18901
+}

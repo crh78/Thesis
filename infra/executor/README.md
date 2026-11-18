@@ -18,7 +18,7 @@ Always Free Arm (2 OCPUs, 12 GB) runs always-on at no cost, and the stack is sma
 
 ## Access
 
-- **Everything listens on 127.0.0.1.** Tailscale Funnel publishes the fork API and the fork Blink
+- **Everything listens on 127.0.0.1.** Caddy publishes the fork API (step 9), and Tailscale Funnel the fork Blink
   over HTTPS, publicly, so the app and teammates need nothing installed:
   - fork API: `https://<fork-host>` (`FORK_API_URL`; the iOS app reads it from
     `apps/ios/Config/Fork.local.xcconfig`, see its `.example`)
@@ -102,17 +102,24 @@ Always Free Arm (2 OCPUs, 12 GB) runs always-on at no cost, and the stack is sma
    On mainnet, the real settler key goes there instead.
    Then the marker (live returns, no key): `sudo systemctl enable --now thesis-marker`. It needs
    `MARKS_TOKEN` in the env file and the `marks` function deployed with the same secret.
-9. **Publish with Funnel.** The first run prints a link to turn Funnel on for the tailnet; approve
-   it and run again:
-   ```sh
-   sudo tailscale funnel --bg --https=443 http://127.0.0.1:18901    # fork API
-   sudo tailscale funnel --bg --https=8443 http://127.0.0.1:18902   # fork Blink
-   ```
-   Check from anywhere: `curl https://<fork-host>/config`.
+9. **Publish the fork API with Caddy** (`caddy/`). It's HTTPS on 443 straight to the fork API.
+   It replaced Tailscale Funnel for it: in the read load test, Funnel failed 19% of requests at 200
+   visitors, and the VM itself failed none.
+   1. DNS: an A record for the host (e.g. `api.<domain>`) pointing at the VM's public IP.
+   2. OCI console: Networking → Virtual cloud networks → the VM's VCN → Security Lists (or the
+      subnet's) → Add Ingress Rule: source `0.0.0.0/0`, TCP, destination port `443`.
+   3. `sudo bash infra/executor/caddy/setup.sh <host>`. It installs Caddy (the Ubuntu package),
+      opens 443 in the VM's own firewall (live and in `/etc/iptables/rules.v4`), and gets the
+      certificate by itself. `update.sh` reloads its Caddyfile from then on.
+   4. Check from anywhere: `curl https://<fork-host>/config`. Clients take the host from their
+      settings (`FORK_API_URL` / `NEXT_PUBLIC_FORK_API_URL`, the iOS `Fork.local.xcconfig`).
+
+   The Blink (closed, see CLAUDE.md) still goes through Funnel when it's on:
+   `sudo tailscale funnel --bg --https=8443 http://127.0.0.1:18902`.
 
 ## Mainnet RPC for the fork
 
-Set `FORK_DATASOURCE_RPC_URL` in `/etc/thesis/executor.env` (Helius free plan today; not the free QuickNode plan, which caps `getMultipleAccounts` at 5), then `sudo systemctl restart thesis-surfpool thesis-fork-up`. Public mainnet rate-limits heavy use (`Failed to fetch accounts`). Restarting Surfpool starts a fresh fork (its state is in memory). The unit hands the URL to Surfpool through the environment, never its command line; if a key was ever shown in `ps` or the journal, rotate it in the provider's dashboard, put the new URL in the env file and restart as above.
+Set `FORK_DATASOURCE_RPC_URL` in `/etc/thesis/executor.env` (QuickNode Build today; not the free QuickNode plan, which caps `getMultipleAccounts` at 5), then `sudo systemctl restart thesis-surfpool thesis-fork-up`. Public mainnet rate-limits heavy use (`Failed to fetch accounts`). Restarting Surfpool starts a fresh fork (its state is in memory). The unit hands the URL to Surfpool through the environment, never its command line; if a key was ever shown in `ps` or the journal, rotate it in the provider's dashboard, put the new URL in the env file and restart as above.
 
 ## Settler key in OCI Vault
 

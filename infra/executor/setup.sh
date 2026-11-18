@@ -69,6 +69,6 @@ Done. Next (infra/executor/README.md):
   3. copy thesis.so to $APP/anchor/target/deploy/, and seed $APP/.data/asset-bank.json
   4. systemctl enable --now thesis-surfpool thesis-fork-up thesis-asset-bank thesis-fork-api thesis-relay
   5. install -m 0600 $APP/.data/fork/settler.json /etc/thesis/settler.json && systemctl enable --now thesis-settler
-  6. tailscale funnel --bg --https=443 http://127.0.0.1:18901
-     tailscale funnel --bg --https=8443 http://127.0.0.1:18902
+  6. the fork API's DNS record and OCI ingress rule for 443, then
+     bash $APP/infra/executor/caddy/setup.sh <host>   (README step 9)
 NEXT
