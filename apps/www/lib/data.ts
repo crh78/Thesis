@@ -139,6 +139,11 @@ export type TakeDraft = {
   source: { url: string; label: string; kind: "link" | "x" } | null;
   /** Its live take, once someone posted it. */
   take_id: string | null;
+  /**
+   * An X draft's asker (lowercased, no @): only that X account may post it. Null (or missing, from
+   * a database before the field) for iMessage drafts, which anyone with the link may post.
+   */
+  for_x?: string | null;
 };
 
 export async function getDraft(id: string): Promise<TakeDraft | null> {
