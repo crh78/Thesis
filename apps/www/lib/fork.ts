@@ -105,6 +105,9 @@ const KNOWN: Record<string, string> = {
   // A retry that can't be built (each comes with retry: false: the sweep is what's left).
   retry_used: "It was already tried once. Swap the leftover back to cash instead.",
   retry_unavailable: "It can't be finished now. Swap the leftover back to cash instead.",
+  // The API's own words for these are for developers ("Build again: transactions expire…").
+  trade_changed: "This changed while you were signing. Try again.",
+  build_expired: "That took too long. Try again.",
   // A crash on the API's side: its message is a stack line, not for people.
   internal: "Something went wrong on our side. Try again.",
 };
