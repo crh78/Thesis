@@ -15,7 +15,7 @@ export default function SavedPage() {
   }, [social]);
   return (
     <main className="page">
-      <button className="back" onClick={() => router.back()}>‹ Back</button>
+      <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
       <h1 className="title">Saved</h1>
       {takes == null ? <p className="muted search-empty">Loading…</p> : null}
       {takes?.length === 0 ? <p className="muted search-empty">Tap the bookmark on a take to save it here.</p> : null}

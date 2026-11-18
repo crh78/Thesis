@@ -43,7 +43,7 @@ export default function PeoplePage() {
   const list = (people ?? []).filter((p) => !gone.has(p.id));
   return (
     <main className="page">
-      <button className="back" onClick={() => router.back()}>‹ Back</button>
+      <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
       <h1 className="title">{me?.display_name ?? "You"}</h1>
       <div className="segmented" style={{ gridTemplateColumns: "1fr 1fr" }} role="tablist">
         <Link href="/people/following" replace role="tab" aria-selected={tab === "following"} className={`seg-link${tab === "following" ? " on" : ""}`}>Following</Link>

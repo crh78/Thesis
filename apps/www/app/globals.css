@@ -130,6 +130,13 @@ a.tag-up:hover { background: rgba(169, 227, 186, 0.24); }
 .me h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.5px; margin: 14px 0 2px; }
 .bio { margin: 10px auto 0; max-width: 380px; line-height: 1.4; }
 .me-stats { margin-top: 22px; padding: 14px 12px; border-radius: 20px; background: var(--tile); border: 1px solid var(--hairline); text-align: center; }
+.stats-3 { grid-template-columns: repeat(3, 1fr); margin-top: 8px; }
+/* The two scores (own P&L, made for backers), each in dollars with its percent under it. */
+.score-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 22px; }
+.score-pair > div { display: grid; gap: 4px; justify-items: center; padding: 14px 10px; border-radius: 20px; background: var(--tile); border: 1px solid var(--hairline); text-align: center; }
+.score-pair b { font-family: var(--font-mono); font-weight: 500; font-size: 20px; font-variant-numeric: tabular-nums; }
+.profile-actions { flex-wrap: wrap; }
+.follow-err { order: 3; flex-basis: 100%; margin: 0; }
 .called-row { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--hairline); }
 .called-row b { font-size: 20px; font-weight: 500; }
 .called-claim { font-family: var(--font-serif); font-size: 21px; line-height: 1.2; margin: 8px 0 4px; overflow-wrap: anywhere; }
@@ -366,7 +373,9 @@ button.menu-item:hover { background: var(--glass-on); }
 .tlrow-claim { font-family: var(--font-serif); font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
 .tlrow-num { display: grid; justify-items: end; gap: 4px; }
 .tlrow-num b { font-size: 13px; font-weight: 600; }
-.back { display: flex; align-items: center; width: fit-content; color: var(--muted); font-size: 15px; height: 44px; margin-bottom: 4px; }
+/* "‹ Back" links. Not `.back`: that's the trade button's colour (.btn.back), and a bare .back here
+   shrank those buttons and the amount chips to 44 px. */
+.nav-back { display: flex; align-items: center; width: fit-content; color: var(--muted); font-size: 15px; height: 44px; margin-bottom: 4px; }
 .asset-name { font-family: var(--font-serif); font-weight: 400; font-size: 32px; line-height: 1.1; margin: 10px 0 4px; }
 .note-pill { display: inline-block; margin-top: 12px; padding: 7px 12px; border-radius: 999px; background: var(--tile); color: var(--muted); font-size: 13px; font-weight: 500; }
 .chart-none { min-height: 180px; display: grid; place-items: center; margin: 0; }
@@ -472,7 +481,7 @@ button.ditem:hover, a.ditem:hover { background: var(--tile); }
 .cmp { height: 100%; max-width: var(--col); margin: 0 auto; display: flex; flex-direction: column; }
 .cmp-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; height: 52px; padding: env(safe-area-inset-top) 16px 0; flex: none; }
 .cmp-head > :last-child { justify-self: end; }
-.cmp-head .back { margin: 0; justify-self: start; }
+.cmp-head .nav-back { margin: 0; justify-self: start; }
 .cmp-body { flex: 1; overflow-y: auto; padding: 8px 16px 24px; }
 .cmp-foot { flex: none; padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); display: grid; gap: 8px; border-top: 1px solid var(--hairline); background: var(--bg); }
 .claim-input { width: 100%; height: 140px; margin-top: 8px; padding: 12px 14px; border-radius: 22px; border: 1px solid var(--hairline); background: var(--glass); font-family: var(--font-serif); font-size: 28px; line-height: 1.15; resize: none; outline: none; }
@@ -502,7 +511,8 @@ button.ditem:hover, a.ditem:hover { background: var(--tile); }
 .donut-center b { font-size: 36px; font-weight: 700; }
 .basket-note { text-align: center; margin: 10px 8px 0; line-height: 1.4; }
 .ask-bar { display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 6px 0 14px; margin-top: 14px; border-radius: 999px; background: var(--glass); border: 1px solid var(--hairline); }
-.ask-bar input { flex: 1; min-width: 0; background: none; border: 0; outline: none; font-size: 15px; }
+/* 16 px: smaller text fields make iOS Safari zoom in on focus. */
+.ask-bar input { flex: 1; min-width: 0; background: none; border: 0; outline: none; font-size: 16px; }
 .legs { margin-top: 10px; display: grid; gap: 2px; }
 .leg-row { display: flex; align-items: flex-start; border-radius: 18px; }
 .leg-row.on { background: var(--tile); }
@@ -522,3 +532,13 @@ button.ditem:hover, a.ditem:hover { background: var(--tile); }
 .card-thumb { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; display: block; background: var(--tile); }
 /* "Sign in again" shows above everything, the composer included (a 401 while posting). */
 .sheet-wrap.reauth { z-index: 40; }
+
+/* Focus. A ring for keyboard focus everywhere (text fields count on any focus). The borderless
+   fields that sit inside a pill or box show it on the box instead, and the bordered ones turn
+   their own border on, where `outline: none` above used to leave no sign at all. */
+:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.field:focus-visible, .claim-input:focus-visible { outline: none; border-color: var(--text); }
+.uline:focus-visible { outline: none; }
+.amount input:focus-visible, .search-box input:focus-visible, .compose-bar textarea:focus-visible, .xadd-row input:focus-visible, .ask-bar input:focus-visible, .buyin input:focus-visible { outline: none; }
+.search-box:focus-within, .xadd-row:focus-within { box-shadow: inset 0 0 0 1px var(--text); }
+.compose-bar:focus-within, .ask-bar:focus-within, .buyin:focus-within { border-color: var(--text); }

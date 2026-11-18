@@ -79,7 +79,7 @@ export default function XCopyPage() {
 
   return (
     <main className="page xcopy">
-      <button className="back" onClick={() => router.back()}>‹ Back</button>
+      <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
       <h1 className="title">Copy from X</h1>
       <p className="muted small">Their market calls become takes. Tap one to build the basket; buying in is up to you.</p>
 

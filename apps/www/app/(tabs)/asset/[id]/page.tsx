@@ -56,7 +56,7 @@ export default function AssetPage() {
   if (failed && !page) {
     return (
       <main className="page">
-        <button className="back" onClick={() => router.back()}>‹ Back</button>
+        <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
         <div className="empty"><h2>Couldn&apos;t load this</h2><p className="muted">Check your connection and try again.</p></div>
       </main>
     );
@@ -78,7 +78,7 @@ export default function AssetPage() {
 
   return (
     <main className="page asset">
-      <button className="back" onClick={() => router.back()}>‹ Back</button>
+      <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
       <AssetLogo assetKey={a.key} name={a.name} kind={a.kind} size={52} />
       <h1 className="asset-name">{a.name}</h1>
       <div className="muted small">{a.symbol} · {a.kindLabel} · {a.venue}</div>
