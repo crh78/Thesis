@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { ApiError } from "../api/common.ts";
 import { BuildGate, Guard, parseServiceKeys, verifyPrivyToken, type GuardOptions } from "../api/guard.ts";
-import { forkApiServer } from "../api/server.ts";
+import { CORS, corsHeaders, forkApiServer, parseCorsOrigins } from "../api/server.ts";
 import type { ForkService } from "../api/service.ts";
 
 const APP = "privy-app";
@@ -235,4 +235,121 @@ test("server: a money route checks the wallet is an address before the guard; 50
   assert.equal(body.error, "internal");
   assert.ok(!body.message.includes("ECONNREFUSED"), "the message is generic");
   assert.ok(logs.some((l) => l.includes("ECONNREFUSED")), "the details are logged");
+});
+
+test("reads: counted per Privy user with a valid token, per IP without one", () => {
+  const { g, tick } = guard();
+  const shared = (headers: Record<string, string> = {}) => req({ "x-forwarded-for": "192.0.2.50", ...headers }, "127.0.0.1");
+  const me = { authorization: `Bearer ${token("did:privy:me")}` };
+  const other = { authorization: `Bearer ${token("did:privy:other")}` };
+  assert.equal(g.readKey(shared(me)), "user:did:privy:me");
+  assert.equal(g.readKey(shared({ authorization: "Bearer not-a-token" })), "192.0.2.50", "an invalid token counts per IP");
+  for (let i = 0; i < 120; i++) g.checkRead(shared(me));
+  assert.throws(() => g.checkRead(shared(me)), (e: unknown) => e instanceof ApiError && e.status === 429);
+  // Someone else behind the same IP, signed in or not, has their own allowance.
+  g.checkRead(shared(other));
+  g.checkRead(shared());
+  tick(60_001);
+  g.checkRead(shared(me));
+});
+
+test("verified tokens are cached for a minute, never past their expiry, and swept", async () => {
+  const { g, tick, lookups } = guard();
+  const short = token("did:privy:me", { exp: NOW / 1000 + 30 });
+  const r = () => req({ authorization: `Bearer ${short}` });
+  g.checkRead(r());
+  g.checkRead(r());
+  assert.equal(g.cachedTokens, 1, "verified once");
+  // The money route uses the same cache (and its wallet lookup).
+  await g.checkMoney(r(), WALLET, "trades");
+  assert.equal(g.cachedTokens, 1);
+  assert.equal(lookups(), 1);
+  tick(31_000);
+  assert.equal(g.readKey(r()), "203.0.113.9", "expired: no longer trusted, from the cache or otherwise");
+  g.sweep();
+  assert.equal(g.cachedTokens, 0);
+});
+
+test("CORS: allowed origins get the headers and a 204 preflight; others and unset get none", async (t) => {
+  assert.deepEqual([...parseCorsOrigins(" https://yourthesis.xyz, https://www.yourthesis.xyz/ ")], ["https://yourthesis.xyz", "https://www.yourthesis.xyz"]);
+  assert.equal(parseCorsOrigins(undefined).size, 0);
+  assert.throws(() => parseCorsOrigins("https://yourthesis.xyz/app"), /just an origin/);
+  assert.throws(() => parseCorsOrigins("*"), /isn't an origin/);
+  assert.deepEqual(corsHeaders(new Set(), "https://yourthesis.xyz"), {});
+
+  const service = { wallet: async () => ({ usdc: 0 }), publicConfig: async () => ({}) } as unknown as ForkService;
+  const { g } = guard({ limits: { readsPerMinute: 1 } });
+  const start = async (cors?: Set<string>) => {
+    const server = forkApiServer(service, () => {}, { guard: g, cors });
+    server.listen(0, "127.0.0.1");
+    t.after(() => server.close());
+    await once(server, "listening");
+    return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  };
+  const url = await start(parseCorsOrigins("https://yourthesis.xyz"));
+  const preflight = await fetch(`${url}/wallets/${WALLET}`, {
+    method: "OPTIONS",
+    headers: { origin: "https://yourthesis.xyz", "access-control-request-method": "GET", "access-control-request-headers": "authorization" },
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), "https://yourthesis.xyz");
+  assert.equal(preflight.headers.get("access-control-allow-methods"), CORS.methods);
+  assert.equal(preflight.headers.get("access-control-allow-headers"), "authorization, content-type, x-thesis-wallet-auth");
+  assert.equal(preflight.headers.get("access-control-max-age"), "600");
+  assert.equal(preflight.headers.get("access-control-allow-credentials"), null, "no credentials mode");
+  assert.equal(preflight.headers.get("vary"), "Origin");
+  // Preflights aren't reads: the one read allowed is still there.
+  const read = await fetch(`${url}/wallets/${WALLET}`, { headers: { origin: "https://yourthesis.xyz" } });
+  assert.equal(read.status, 200);
+  assert.equal(read.headers.get("access-control-allow-origin"), "https://yourthesis.xyz");
+  assert.equal(read.headers.get("access-control-expose-headers"), "retry-after");
+  // Errors carry the headers too, so the browser can read a 429's Retry-After.
+  const limited = await fetch(`${url}/wallets/${WALLET}`, { headers: { origin: "https://yourthesis.xyz" } });
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get("access-control-allow-origin"), "https://yourthesis.xyz");
+  assert.ok(Number(limited.headers.get("retry-after")) > 0);
+
+  const stranger = await fetch(`${url}/health`, { headers: { origin: "https://evil.example" } });
+  assert.equal(stranger.headers.get("access-control-allow-origin"), null);
+  assert.equal(stranger.headers.get("vary"), "Origin");
+  assert.equal((await fetch(`${url}/health`, { method: "OPTIONS", headers: { origin: "https://evil.example" } })).status, 404);
+
+  const off = await start();
+  const plain = await fetch(`${off}/health`, { headers: { origin: "https://yourthesis.xyz" } });
+  assert.equal(plain.headers.get("access-control-allow-origin"), null);
+  assert.equal(plain.headers.get("vary"), null, "unset: today's behaviour");
+  assert.equal((await fetch(`${off}/health`, { method: "OPTIONS", headers: { origin: "https://yourthesis.xyz" } })).status, 404);
+});
+
+test("server: an incomplete split trade answers 422 with its sweep hint; retry and sweep are money routes", async (t) => {
+  const calls: unknown[][] = [];
+  const incomplete = { position: "P", next: "retry" };
+  const service = {
+    submit: async () => {
+      const e = new ApiError(422, "trade_incomplete", "Part of this trade went through.");
+      e.body = { retry: true, sweep: true, incomplete };
+      throw e;
+    },
+    buildSweep: async (...args: unknown[]) => (calls.push(["sweep", ...args]), { done: true }),
+    buildRetry: async (...args: unknown[]) => (calls.push(["retry", ...args]), { buildId: "b", transactions: [] }),
+    incompleteTrades: () => ({ trades: [incomplete] }),
+  } as unknown as ForkService;
+  const { g } = guard();
+  const server = forkApiServer(service, () => {}, { guard: g });
+  server.listen(0, "127.0.0.1");
+  t.after(() => server.close());
+  await once(server, "listening");
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+  const r = await post("/submit", { buildId: "x", transactions: [] });
+  assert.equal(r.status, 422);
+  assert.deepEqual(await r.json(), { retry: true, sweep: true, incomplete, error: "trade_incomplete", message: "Part of this trade went through." });
+  assert.equal((await post(`/wallets/${WALLET}/sweep`, {})).status, 401, "needs the wallet's token");
+  const auth = { authorization: `Bearer ${token()}` };
+  assert.deepEqual(await (await post(`/wallets/${WALLET}/sweep`, {}, auth)).json(), { done: true });
+  assert.equal((await post(`/wallets/${WALLET}/retry`, { position: "P" }, auth)).status, 200);
+  assert.deepEqual(calls, [["sweep", WALLET, undefined], ["retry", WALLET, "P"]]);
+  assert.deepEqual(await (await fetch(`${url}/wallets/${WALLET}/incomplete`)).json(), { trades: [incomplete] });
 });

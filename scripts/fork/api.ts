@@ -23,7 +23,7 @@ import { quicknodeHeaders, relayTransactions, webhookConfigured } from "../../in
 import { blinkServer } from "../../apps/web/blink.ts";
 import { LiveContracts } from "./api/gemini-live.ts";
 import { Guard, parseMode, parseServiceKeys } from "./api/guard.ts";
-import { forkApiServer } from "./api/server.ts";
+import { forkApiServer, parseCorsOrigins } from "./api/server.ts";
 import { DEFAULT_STATE_PATH, ForkService, type AppTake, type TakeSource } from "./api/service.ts";
 import { DATA_DIR, FORK_DEXES, HOST, PATHS, addUsdc, connection, deployedElf, loadKeypair, main, refreshMarkets, requireSurfpool, setUsdc, thesisLookupTable, topUpSol } from "./lib.ts";
 import { fetchConfig, thesisProgram } from "@thesis/chain";
@@ -209,7 +209,10 @@ async function serve(): Promise<void> {
   const port = Number(process.env.FORK_API_PORT ?? 18901);
   const digest = () => sendDigests(service, log);
   const guard = forkGuard(log);
-  forkApiServer(service, log, { digest, guard }).listen(port, HOST, () => log(`fork API on http://${HOST}:${port} (run \`pnpm fork:settler\` too, for prices)`));
+  // Origins whose browsers call the API directly instead of through the web app's proxy.
+  const cors = parseCorsOrigins(envVar("FORK_API_CORS_ORIGINS"));
+  log(cors.size ? `CORS for ${[...cors].join(", ")}` : "CORS off (FORK_API_CORS_ORIGINS unset)");
+  forkApiServer(service, log, { digest, guard, cors }).listen(port, HOST, () => log(`fork API on http://${HOST}:${port} (run \`pnpm fork:settler\` too, for prices)`));
   const blinkPort = envVar("FORK_BLINK_PORT");
   if (blinkPort) {
     const port = Number(blinkPort);

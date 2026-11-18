@@ -6,9 +6,13 @@
 //   X agent; e2e suites). `FORK_API_AUTH`: `report` (default) logs a missing or wrong token and
 //   serves anyway; `enforce` refuses (401 / 403); `off` skips the check.
 // - Each wallet gets 10 money actions a minute and 100 a day (rolling), whatever the auth mode.
-// - Reads: 120 a minute per IP. Behind the web app's proxy (Vercel) every visitor shares a few IPs,
-//   so the proxy sends `x-thesis-proxy-key` and `x-thesis-client-ip`, and only then is that IP
-//   used. `FORK_API_READ_LIMIT`: `report` (default) logs who'd be limited; `enforce` refuses (429).
+// - Reads: 120 a minute per signed-in Privy user (a valid token on the read), otherwise per IP.
+//   Behind the web app's proxy (Vercel) every visitor shares a few IPs, so the proxy sends
+//   `x-thesis-proxy-key` and `x-thesis-client-ip`, and only then is that IP used; a browser calling
+//   directly through Tailscale Funnel is counted by Funnel's last X-Forwarded-For entry.
+//   `FORK_API_READ_LIMIT`: `report` (default) logs who'd be limited; `enforce` refuses (429).
+//   Verified tokens are cached for a minute (at most until they expire), so a read or a money
+//   route checks a token's signature once, not on every request.
 // - Builds that call Jupiter wait their turn: a few at once, a short queue, then 503 `busy` with
 //   Retry-After instead of hanging (the free Jupiter key is shared by everything on the fork).
 //
@@ -48,6 +52,10 @@ const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 const WALLET_CACHE_MS = 10 * MINUTE;
 const NO_WALLET_CACHE_MS = MINUTE;
+/** How long a verified token is trusted without checking its signature again (never past its expiry). */
+const TOKEN_CACHE_MS = MINUTE;
+/** Verified tokens kept at most (the oldest go first). */
+const TOKEN_CACHE_MAX = 10_000;
 
 const header = (req: IncomingMessage, name: string) => {
   const v = req.headers[name];
@@ -83,6 +91,11 @@ export function parseMode<T extends Mode>(raw: string | null, allowed: readonly 
  * supabase/functions/_shared/privy.ts: issuer privy.io, audience the app ID, not expired.
  */
 export function verifyPrivyToken(token: string, key: KeyObject, appId: string, nowMs: number): string | null {
+  return verifyPrivyClaims(token, key, appId, nowMs)?.sub ?? null;
+}
+
+/** As verifyPrivyToken, with the token's expiry (unix s). */
+function verifyPrivyClaims(token: string, key: KeyObject, appId: string, nowMs: number): { sub: string; exp: number } | null {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   try {
@@ -96,7 +109,7 @@ export function verifyPrivyToken(token: string, key: KeyObject, appId: string, n
     if (p.iss !== "privy.io" || !aud.includes(appId)) return null;
     if (typeof p.exp !== "number" || p.exp <= now) return null;
     if (typeof p.nbf === "number" && p.nbf > now + 60) return null;
-    return typeof p.sub === "string" && p.sub ? p.sub : null;
+    return typeof p.sub === "string" && p.sub ? { sub: p.sub, exp: p.exp } : null;
   } catch {
     return null;
   }
@@ -145,6 +158,8 @@ export class Guard {
   #o: GuardOptions;
   #key: KeyObject | null;
   #wallets = new Map<string, { at: number; wallet: string | null }>();
+  /** Verified tokens → their user, until when (ms) it's trusted without a fresh check. */
+  #tokens = new Map<string, { did: string; until: number }>();
   #moneyMinute: Window;
   #moneyDay: Window;
   #reads: Window;
@@ -167,6 +182,34 @@ export class Guard {
     const now = this.#now();
     for (const w of [this.#moneyMinute, this.#moneyDay, this.#reads]) w.sweep(now);
     for (const [k, at] of this.#reported) if (at <= now - MINUTE) this.#reported.delete(k);
+    for (const [k, t] of this.#tokens) if (t.until <= now) this.#tokens.delete(k);
+  }
+
+  /** How many verified tokens are cached (for tests). */
+  get cachedTokens(): number {
+    return this.#tokens.size;
+  }
+
+  /** The Privy token a request carries (Authorization: Bearer, or privy-token), if any. */
+  #tokenOf(req: IncomingMessage): string | undefined {
+    return header(req, "authorization")?.replace(/^Bearer\s+/i, "") ?? header(req, "privy-token");
+  }
+
+  /**
+   * The Privy user a token belongs to, or null if it isn't valid (or no Privy values are set).
+   * A valid token is cached for TOKEN_CACHE_MS, never past its expiry; invalid ones aren't cached.
+   */
+  #did(token: string): string | null {
+    const now = this.#now();
+    const hit = this.#tokens.get(token);
+    if (hit && hit.until > now) return hit.did;
+    if (hit) this.#tokens.delete(token);
+    if (!this.#key || !this.#o.privy) return null;
+    const claims = verifyPrivyClaims(token, this.#key, this.#o.privy.appId, now);
+    if (!claims) return null;
+    if (this.#tokens.size >= TOKEN_CACHE_MAX) this.#tokens.delete(this.#tokens.keys().next().value!);
+    this.#tokens.set(token, { did: claims.sub, until: Math.min(now + TOKEN_CACHE_MS, claims.exp * 1000) });
+    return claims.sub;
   }
 
   /** How many report marks are kept (for tests). */
@@ -207,14 +250,24 @@ export class Guard {
     return loopback && forwarded ? forwarded : peer;
   }
 
-  /** A read (GET, or a harmless POST): counted per IP. */
+  /**
+   * Who a read counts against: the Privy user when the request carries a valid token (so people
+   * behind one IP don't share a limit), otherwise the caller's IP.
+   */
+  readKey(req: IncomingMessage): string {
+    const token = this.#tokenOf(req);
+    const did = token ? this.#did(token) : null;
+    return did ? `user:${did}` : this.clientIp(req);
+  }
+
+  /** A read (GET, or a harmless POST): counted per Privy user with a valid token, else per IP. */
   checkRead(req: IncomingMessage) {
     if (this.service(req)) return;
-    const ip = this.clientIp(req);
-    const wait = this.#reads.take(ip, this.#now());
+    const key = this.readKey(req);
+    const wait = this.#reads.take(key, this.#now());
     if (!wait) return;
     if (this.#o.readLimit === "enforce") throw rateLimited(wait, "requests");
-    this.#report(`read:${ip}`, `read limit (report only): ${ip} is over ${this.limits.readsPerMinute} requests a minute`);
+    this.#report(`read:${key}`, `read limit (report only): ${key} is over ${this.limits.readsPerMinute} requests a minute`);
   }
 
   /** A route only servers may call (POST /digests): refused without a service key, in every auth mode. */
@@ -247,8 +300,8 @@ export class Guard {
     const name = this.service(req);
     if (name) return { wallet, via: "service", name };
     if (this.#o.auth === "off") return { wallet, via: "unverified" };
-    const token = header(req, "authorization")?.replace(/^Bearer\s+/i, "") ?? header(req, "privy-token");
-    const did = token && this.#key && this.#o.privy ? verifyPrivyToken(token, this.#key, this.#o.privy.appId, this.#now()) : null;
+    const token = this.#tokenOf(req);
+    const did = token ? this.#did(token) : null;
     const owned = did ? await this.#walletOf(did) : null;
     if (owned === wallet) return { wallet, via: "token" };
     const problem = !token ? "no token" : !did ? "an invalid token" : !owned ? "a token whose user has no wallet" : "a token for another wallet";

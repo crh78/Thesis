@@ -17,6 +17,14 @@
 //                                                   x-thesis-wallet-auth: <unix s>.<base64 signature of
 //                                                   "Thesis creator fees <address> <unix s>"> from that wallet
 //   POST /wallets/:address/creator-fees/claim  { takes? }  → { buildId, transactions[], steps, amountUsd }
+//   GET  /wallets/:address/incomplete               split trades that stopped partway → { trades[] }
+//   POST /wallets/:address/retry  { position? }     build the rest of one once more → a trade build
+//   POST /wallets/:address/sweep  { position? }     sell what it bought back to USDC → a build, or { done: true }
+//
+// A split trade whose later transaction fails after an earlier one landed answers /submit with
+// 422 trade_incomplete (api/split.ts and the README's "Split trades").
+//
+// Browsers on the web app's origins (FORK_API_CORS_ORIGINS) may call this directly: see corsHeaders.
 //
 // The shared fork is public, so money routes (trades, publish, sales, cash in, Phoenix cash-out,
 // claims) go through the Guard when one is passed: a Privy token or a service key, per-wallet rate
@@ -32,6 +40,46 @@ const header = (req: IncomingMessage, name: string) => {
   const v = req.headers[name];
   return Array.isArray(v) ? v[0] : v;
 };
+
+/** What a browser may send and read across origins (the README's "Direct browser calls"). */
+export const CORS = {
+  methods: "GET, POST, DELETE, OPTIONS",
+  headers: "authorization, content-type, x-thesis-wallet-auth",
+  expose: "retry-after",
+  /** Seconds a browser may reuse a preflight (Chrome caps it at 7,200). */
+  maxAge: "600",
+};
+
+/**
+ * FORK_API_CORS_ORIGINS: comma-separated origins (scheme, host and port only, no path), e.g.
+ * `https://yourthesis.xyz,https://www.yourthesis.xyz`. Unset or empty: no CORS headers at all.
+ * Wildcards aren't allowed: money routes carry a Privy token.
+ */
+export function parseCorsOrigins(raw: string | null | undefined): Set<string> {
+  const out = new Set<string>();
+  for (const part of (raw ?? "").split(",").map((p) => p.trim()).filter(Boolean)) {
+    let origin: string;
+    try {
+      origin = new URL(part).origin;
+    } catch {
+      throw new Error(`FORK_API_CORS_ORIGINS: "${part}" isn't an origin (e.g. https://yourthesis.xyz)`);
+    }
+    if (origin === "null" || origin !== part.replace(/\/$/, "")) throw new Error(`FORK_API_CORS_ORIGINS: "${part}" must be just an origin (scheme://host[:port]), no path or wildcard`);
+    out.add(origin);
+  }
+  return out;
+}
+
+/**
+ * CORS headers for a request from `origin`: none when CORS is off (no origins configured);
+ * `Vary: Origin` whenever it's on; the echoed origin and the exposed headers when it's allowed.
+ * No credentials mode: auth is a bearer token, never a cookie.
+ */
+export function corsHeaders(allowed: Set<string>, origin: string | undefined): Record<string, string> {
+  if (!allowed.size) return {};
+  if (!origin || !allowed.has(origin)) return { vary: "Origin" };
+  return { vary: "Origin", "access-control-allow-origin": origin, "access-control-expose-headers": CORS.expose };
+}
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -57,6 +105,10 @@ const str = (v: unknown, name: string) => {
   if (typeof v !== "string" || !v) throw new ApiError(400, `missing_${name}`);
   return v;
 };
+const optionalStr = (v: unknown, name: string) => {
+  if (v === undefined || v === null) return undefined;
+  return str(v, name);
+};
 const num = (v: unknown, name: string) => {
   const n = typeof v === "number" ? v : Number(v);
   if (!Number.isFinite(n)) throw new ApiError(400, `missing_${name}`);
@@ -66,13 +118,15 @@ const num = (v: unknown, name: string) => {
 /**
  * `digest`: runs today's position digests now (POST /digests), when the caller wires it.
  * `guard`: abuse limits (api/guard.ts); without one every route is open, as on a private fork.
+ * `cors`: origins whose browsers may call directly (parseCorsOrigins); empty or none: no CORS.
  */
 export function forkApiServer(
   service: ForkService,
   log: (m: string) => void = () => {},
-  hooks: { digest?: () => Promise<unknown>; guard?: Guard } = {},
+  hooks: { digest?: () => Promise<unknown>; guard?: Guard; cors?: Set<string> } = {},
 ): Server {
   const guard = hooks.guard;
+  const cors = hooks.cors ?? new Set<string>();
   /**
    * A money action for `wallet`: who's asking, and the wallet's rate limits. The wallet must be an
    * address first, so the guard's per-wallet limits never key on arbitrary text from a request.
@@ -87,13 +141,26 @@ export function forkApiServer(
     const started = Date.now();
     const url = new URL(req.url ?? "/", "http://localhost");
     const parts = url.pathname.split("/").filter(Boolean);
+    const allow = corsHeaders(cors, header(req, "origin"));
     const send = (status: number, payload: unknown, headers: Record<string, string> = {}) => {
-      res.writeHead(status, { "content-type": "application/json", ...headers });
+      res.writeHead(status, { "content-type": "application/json", ...allow, ...headers });
       res.end(JSON.stringify(payload));
       log(`${req.method} ${url.pathname} ${status} ${Date.now() - started}ms`);
     };
     try {
       const m = req.method;
+      // A preflight from an allowed origin: answered before the guard (it isn't a read).
+      if (m === "OPTIONS" && allow["access-control-allow-origin"]) {
+        res.writeHead(204, {
+          ...allow,
+          "access-control-allow-methods": CORS.methods,
+          "access-control-allow-headers": CORS.headers,
+          "access-control-max-age": CORS.maxAge,
+        });
+        res.end();
+        log(`OPTIONS ${url.pathname} 204 ${Date.now() - started}ms`);
+        return;
+      }
       if (m === "GET" && url.pathname === "/health") return send(200, { ok: true });
       if (m === "GET") guard?.checkRead(req);
       if (m === "GET" && url.pathname === "/config") return send(200, await service.publicConfig());
@@ -157,6 +224,15 @@ export function forkApiServer(
           return send(200, await service.buildPhoenixCashOut(parts[1]));
         }
       }
+      if (parts[0] === "wallets" && parts[1] && parts.length === 3 && ["incomplete", "retry", "sweep"].includes(parts[2])) {
+        // Split trades that stopped partway (api/split.ts).
+        if (m === "GET" && parts[2] === "incomplete") return send(200, service.incompleteTrades(parts[1]));
+        if (m === "POST" && parts[2] !== "incomplete") {
+          const position = optionalStr((await body(req)).position, "position");
+          await money(req, parts[1], parts[2]);
+          return send(200, await queued<unknown>(() => (parts[2] === "retry" ? service.buildRetry(parts[1], position) : service.buildSweep(parts[1], position))));
+        }
+      }
       if (parts[0] === "wallets" && parts[1]) {
         if (m === "GET" && parts.length === 2) return send(200, await service.wallet(parts[1]));
         if (m === "GET" && parts[2] === "portfolio") return send(200, await service.portfolio(parts[1]));
@@ -171,7 +247,7 @@ export function forkApiServer(
       }
       throw new ApiError(404, "no_such_route");
     } catch (e) {
-      if (e instanceof ApiError) return send(e.status, { error: e.code, message: e.message }, e.headers);
+      if (e instanceof ApiError) return send(e.status, { ...e.body, error: e.code, message: e.message }, e.headers);
       // The details go to the log only: they can name internal hosts, keys' owners or RPC errors.
       log(`error: ${e instanceof Error ? e.stack : e}`);
       return send(500, { error: "internal", message: "Something went wrong. Try again in a moment." });
