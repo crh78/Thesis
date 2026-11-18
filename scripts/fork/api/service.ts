@@ -1827,9 +1827,7 @@ export class ForkService {
           }));
         }),
       ),
-      withBadges
-        ? this.#o.connection.getMultipleAccountsInfo(BADGES.map((b) => badgeMintAddress(owner, BADGE_KIND_INDEX[b.kind], this.#program.programId)))
-        : BADGES.map(() => null),
+      withBadges ? this.#badgeAccounts(owner, strict) : BADGES.map(() => null),
     ]);
     const positions = perTake.flat().sort((a, b) => b.openedAt - a.openedAt);
     const held = BADGES.filter((_, i) => badgeInfos[i]);
@@ -1842,6 +1840,23 @@ export class ForkService {
       image: base ? `${base}${BADGE_META[b.kind].slug}.png` : null,
     }));
     return { wallet: addr, positions, badges };
+  }
+
+  /**
+   * The wallet's badge mints, one read. The RPC sometimes answers "Internal error" under load: try
+   * once more, then show the positions without badges for now rather than failing the whole
+   * portfolio with a 500. Strict callers (the history chart) still get the error.
+   */
+  async #badgeAccounts(owner: PublicKey, strict: boolean) {
+    const mints = BADGES.map((b) => badgeMintAddress(owner, BADGE_KIND_INDEX[b.kind], this.#program.programId));
+    const read = () => this.#o.connection.getMultipleAccountsInfo(mints);
+    try {
+      return await read().catch(read);
+    } catch (error) {
+      if (strict) throw error;
+      this.#log(`portfolio: badge read failed (${error instanceof Error ? error.message.slice(0, 80) : error}); shown without badges`);
+      return BADGES.map(() => null);
+    }
   }
 
   // --- Portfolio history, digests and cash ------------------------------------------------
