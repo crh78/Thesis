@@ -78,6 +78,7 @@ import {
   type AppTake,
   type ExitReceipt,
   type IncompleteTrade,
+  type SavedSubmission,
   type ServiceOpts,
 } from "./common.ts";
 import { CreatorFees } from "./creator-fees.ts";
@@ -86,6 +87,7 @@ import { PortfolioHistory } from "./history.ts";
 import { contractResolver, escrowedKind, mapLegs, nameResolver, onChainLegs, perpResolver, sameLegs, type AppLeg, type ContractResolver, type MappedLeg, type NameResolver, type PerpResolver } from "./legs.ts";
 import { PhoenixDesk } from "./phoenix.ts";
 import { Router, escrowShare, type TradeKind, type TradeLeg } from "./routing.ts";
+import { SendFailed, fates, refusedByPreflight, sendBackToBack, type Fate } from "./send.ts";
 import { SplitTrades, afterFailure, deserializeIx, incompleteView, serializeIx, sweepLegs } from "./split.ts";
 import { StateStore } from "./store.ts";
 import { Valuation } from "./valuation.ts";
@@ -105,30 +107,73 @@ type TradeContext = {
   receiptCu: number;
 };
 
-/**
- * A send that failed partway: the error of the transaction that failed, with the signatures of
- * the ones before it that landed.
- */
-class SendFailed extends ApiError {
-  readonly landed: string[];
-  /** The failed transaction's fate is unknown (it may still land): never counted as not landed. */
-  readonly unknown: boolean;
-  constructor(e: ApiError, landed: string[], unknown = false) {
-    super(e.status, e.code, e.message);
-    this.headers = e.headers;
-    this.body = e.body;
-    this.landed = landed;
-    this.unknown = unknown;
-  }
+/** How long a submit's status is kept (memory and state file) for repeats and GET /submissions. */
+const SUBMISSION_KEEP_MS = 10 * 60_000;
+/** GET /submissions/:id?wait= waits at most this long. */
+export const SUBMISSION_WAIT_MAX_MS = 10_000;
+/** A sale or cash-out build waits at most this long for the owner's submits still confirming. */
+const AFTER_PENDING_MS = 10_000;
+
+type SubmissionStatus = SavedSubmission["status"];
+
+/** A submit in this process (see ForkService#submit). */
+type Submission = {
+  owner: string;
+  kind: string;
+  /** Of the signed transactions as submitted: a repeat with the same bytes is the same submit. */
+  digest: string;
+  /** The trade's transactions (a retry's earlier ones first), without the trailing cleanup. */
+  signatures: string[];
+  status: SubmissionStatus;
+  error?: ApiError;
+  at: number;
+  /** Settles once every transaction was accepted, or the submit ended before that. */
+  accepted: Promise<void>;
+  /** Settles once the status is final. */
+  done: Promise<void>;
+  accept: () => void;
+  finish: (status: Exclude<SubmissionStatus, "pending">, signatures?: string[], error?: unknown) => void;
+};
+/** A submit from before a restart, read back from the state file. */
+type SavedSubmissionView = Pick<Submission, "owner" | "kind" | "digest" | "signatures" | "status" | "error" | "at" | "done">;
+
+/** What a submit answers: by default `{ signatures }`; with until=accepted (or a repeat), its status too. */
+type SubmitAnswer = { signatures: string[]; status?: SubmissionStatus; buildId?: string };
+
+/** GET /submissions/:buildId. */
+export type SubmissionView = {
+  buildId: string;
+  status: SubmissionStatus;
+  signatures: string[];
+  error?: { code: string; message: string };
+  /** A split trade that stopped partway: what `trade_incomplete` carries (retry or sweep it). */
+  incomplete?: unknown;
+};
+
+function submissionView(buildId: string, s: Pick<Submission, "status" | "signatures" | "error">): SubmissionView {
+  const incomplete = s.status === "incomplete" ? s.error?.body?.incomplete : undefined;
+  return {
+    buildId,
+    status: s.status,
+    signatures: s.signatures,
+    ...(s.error && s.status !== "pending" && s.status !== "landed" ? { error: { code: s.error.code, message: s.error.message } } : {}),
+    ...(incomplete ? { incomplete } : {}),
+  };
 }
 
-/** How often, and at most how long, an unconfirmed transaction's status is polled. */
-const SETTLE_POLL_MS = 2_000;
-const SETTLE_MAX_MS = 90_000;
+/** The signed transactions' bytes, hashed: what tells a repeat of a submit from a different one. */
+function signedDigest(signed: string[]): string {
+  const h = createHash("sha256");
+  for (const b64 of signed) h.update(Buffer.from(b64, "base64")).update("|");
+  return h.digest("hex");
+}
 
-/** A send refused before it reached the chain: the preflight simulation failed. */
-const refusedByPreflight = (e: unknown) =>
-  Array.isArray((e as { logs?: unknown })?.logs) || /simulation failed|preflight/i.test(e instanceof Error ? e.message : String(e));
+const savedError = (e: ApiError): NonNullable<SavedSubmission["error"]> => ({ status: e.status, code: e.code, message: e.message, ...(e.body ? { body: e.body } : {}) });
+function apiErrorOf(e: NonNullable<SavedSubmission["error"]>): ApiError {
+  const out = new ApiError(e.status, e.code, e.message);
+  if (e.body) out.body = e.body;
+  return out;
+}
 
 /** The answer to a split trade that stopped partway: 422 `trade_incomplete` (see the README). */
 function incompleteError(position: string, t: IncompleteTrade, status = 422, code = "trade_incomplete", message?: string): ApiError {
@@ -166,8 +211,11 @@ type Build = {
 
 /** What every build route takes besides its own fields. `timings`: the request's (server.ts sends them as Server-Timing). */
 export type BuildOpts = { timings?: Timings };
-/** `clientTimings`: the submit body's `timings` (the client's marks), logged with the build id. */
-export type SubmitOpts = { timings?: Timings; clientTimings?: unknown };
+/**
+ * `clientTimings`: the submit body's `timings` (the client's marks), logged with the build id.
+ * `until: "accepted"`: answer once the fork accepted every transaction (see ForkService#submit).
+ */
+export type SubmitOpts = { timings?: Timings; clientTimings?: unknown; until?: "accepted" };
 
 /** What's known about one take's positions (see ForkService#positionsOf). */
 type PositionEntry = {
@@ -246,8 +294,12 @@ export class ForkService {
   /** Phoenix legs, when Phoenix is configured. */
   #phoenix: PhoenixDesk | null;
   #builds = new Map<string, Build>();
-  /** Positions whose transactions are being sent right now: their tickets aren't abandoned. */
+  /** Positions whose transactions are being sent or confirmed right now: their tickets aren't abandoned. */
   #inFlight = new Set<string>();
+  /** Submits by build id (kept SUBMISSION_KEEP_MS after they end): repeats and GET /submissions. */
+  #submissions = new Map<string, Submission>();
+  /** Positions with a sale submitted and not yet ended → its build id: a second sale is refused. */
+  #pendingExits = new Map<string, string>();
   #blinkCheckouts = new Map<string, BlinkCheckout>();
   #log: (m: string) => void;
   /** Blockhash → its last valid block height, from every blockhash this service fetched. */
@@ -719,6 +771,9 @@ export class ForkService {
     const position = parseKey(address);
     const mirror = this.#state.takes[takeId];
     if (!mirror) throw new ApiError(404, "take_missing");
+    if (this.#pendingExits.has(position.toBase58())) throw new ApiError(409, "already_exited", "This position is being sold.");
+    // A sale right after the back: the back may still be confirming (until=accepted).
+    await t.time("pending", () => this.#afterPending(owner.toBase58()));
     const takeKey = new PublicKey(mirror.address);
     const [take, holding] = await t.time("position", () => Promise.all([
       this.#program.account.take.fetchNullable(takeKey),
@@ -1085,6 +1140,8 @@ export class ForkService {
   async buildPhoenixCashOut(wallet: string) {
     const owner = parseKey(wallet);
     if (!this.#phoenix) throw new ApiError(409, "no_phoenix", "Phoenix isn't connected on this fork.");
+    // Right after a sale (until=accepted): its Phoenix closes must have landed to be seen.
+    await this.#afterPending(owner.toBase58());
     const closes = await this.#phoenix.strayCloseLegs(owner);
     const legs = closes.length ? closes : await this.#phoenix.sweepLegs(owner);
     if (!legs.length) return { done: true as const };
@@ -1202,6 +1259,8 @@ export class ForkService {
    */
   async buildRetry(wallet: string, address?: string) {
     const owner = parseKey(wallet);
+    // A trade that stopped is recorded once its accepted transactions settle.
+    await this.#afterPending(owner.toBase58());
     const [position, rec] = this.#incomplete(owner, address, "retry");
     const key = position.toBase58();
     if (rec.next !== "retry" || rec.swept?.length) throw incompleteError(key, rec, 409, "retry_used", "This trade was retried or swept already. Sell what it bought back to cash.");
@@ -1246,6 +1305,7 @@ export class ForkService {
    */
   async buildSweep(wallet: string, address?: string) {
     const owner = parseKey(wallet);
+    await this.#afterPending(owner.toBase58());
     // Nothing left: no stopped trade at all, or none at `address` (already swept, retried or finished).
     const list = this.#split.list(owner.toBase58());
     if (!address ? !list.length : !list.some(([p]) => p === parseKey(address).toBase58())) return { done: true as const, phoenixCashOut: false };
@@ -1332,7 +1392,7 @@ export class ForkService {
   }
 
   /** Sends a sweep. When it lands the trade is over; a partly landed one notes what it sold. */
-  async #submitSweep(build: Build, txs: VersionedTransaction[], t?: Timings) {
+  async #submitSweep(build: Build, txs: VersionedTransaction[], t?: Timings, accept?: () => void) {
     const position = build.position.address.toBase58();
     const signatures = await this.#store.withWallet(build.owner, async () => {
       // Re-checked here, after any earlier submit for this wallet: the trade must still be stopped.
@@ -1341,7 +1401,7 @@ export class ForkService {
       }
       this.#dropBuildsFor(build.position.address);
       try {
-        return await this.#send(txs, build.market, t);
+        return await this.#send(txs, build.market, t, accept);
       } catch (e) {
         const landed = e instanceof SendFailed ? e.landed.length : 0;
         const rec = this.#split.get(build.owner, position);
@@ -1446,20 +1506,34 @@ export class ForkService {
   /**
    * Sends transactions this service built, after the user signed them. Each must match a built
    * message byte for byte, so the app fee payer only ever signs what it built.
+   *
+   * By default it answers once every transaction confirmed and the bookkeeping is done:
+   * `{ signatures }`. With `until: "accepted"` it answers as soon as the fork accepted every
+   * transaction (each preflighted at "processed", sent back to back): `{ status: "pending",
+   * buildId, signatures }`; confirmation and bookkeeping finish in the background, and
+   * `submission(buildId)` tells how it ended. The same build with the same signed bytes again is
+   * the same submit: it gets its status (by default, once it ended), and other bytes 409 `build_used`.
    */
   async submit(buildId: string, signed: string[], o: SubmitOpts = {}) {
     const t = o.timings ?? new Timings();
-    const kind = this.#builds.get(buildId)?.kind ?? "unknown";
+    const kind = this.#builds.get(buildId)?.kind ?? this.#submissions.get(buildId)?.kind ?? "unknown";
     const marks = clientMarks(o.clientTimings);
     if (marks) this.#log(`client timings ${buildId.slice(0, 8)} (${kind}): ${marks}`);
-    return this.#timed(`${kind} submit`, t, () => this.#submit(buildId, signed, t), () => buildId);
+    return this.#timed(`${kind} submit`, t, () => this.#submit(buildId, signed, t, o), () => buildId);
   }
 
-  async #submit(buildId: string, signed: string[], t: Timings) {
+  async #submit(buildId: string, signed: string[], t: Timings, o: SubmitOpts): Promise<SubmitAnswer> {
+    const digest = signedDigest(signed);
+    const known = this.#submissions.get(buildId) ?? (await this.#resolveSaved(buildId));
+    if (known) {
+      if (known.digest !== digest) throw new ApiError(409, "build_used", "This build was already submitted with other transactions. Build again.");
+      if (o.until !== "accepted") await known.done;
+      return this.#answer(buildId, known);
+    }
     const build = this.#builds.get(buildId);
     if (!build || build.expires < Date.now()) throw new ApiError(410, "build_expired", "Build again: transactions expire after about a minute");
     if (signed.length !== build.messages.length) throw new ApiError(400, "wrong_transaction_count");
-    const txs = signed.map((b64, i) => {
+    const txs = await t.time("verify", async () => signed.map((b64, i) => {
       let tx: VersionedTransaction;
       try {
         tx = VersionedTransaction.deserialize(Buffer.from(b64, "base64"));
@@ -1481,18 +1555,153 @@ export class ForkService {
       }
       tx.sign([this.#o.appPayer]);
       return tx;
-    });
+    }));
+    // A sale of this position already on its way: the second one would fail on-chain anyway.
+    const position = build.position.address.toBase58();
+    if (build.kind === "exit" && this.#pendingExits.has(position)) throw new ApiError(409, "already_exited", "This position is being sold.");
+    // From here on the build is used: a repeat of it finds this submission instead.
     this.#builds.delete(buildId);
-    if (build.kind === "claim") return this.#submitClaim(build, txs, t);
-    if (build.kind === "phoenix") {
-      const signatures = await this.#store.withWallet(build.owner, () => this.#send(txs, build.market, t));
-      this.#wallets.forgetActivity(build.owner);
-      void this.#history.snapshot(build.owner).catch(() => {});
-      return { signatures };
+    const early = o.until === "accepted";
+    const sub = this.#register(buildId, build, txs, digest);
+    // Claims send one transaction at a time, each confirmed first: they answer when they're done.
+    const accept = early && build.kind !== "claim" ? sub.accept : undefined;
+    let work: Promise<{ signatures: string[] }>;
+    if (build.kind === "claim") work = this.#submitClaim(build, txs, t);
+    else if (build.kind === "phoenix") {
+      work = this.#store.withWallet(build.owner, () => this.#send(txs, build.market, t, accept)).then((signatures) => {
+        this.#wallets.forgetActivity(build.owner);
+        void this.#history.snapshot(build.owner).catch(() => {});
+        return { signatures };
+      });
+    } else if (build.kind === "sweep") work = this.#submitSweep(build, txs, t, accept);
+    else work = this.#submitTrade(build, txs, t, accept);
+    void work.then(
+      ({ signatures }) => sub.finish("landed", signatures),
+      (e: unknown) => sub.finish(e instanceof ApiError && e.code === "trade_incomplete" ? "incomplete" : "failed", undefined, e),
+    ).finally(() => {
+      if (early) this.#log(`timing ${build.kind} ${sub.status} ${buildId.slice(0, 8)} ${t.line()}`);
+    });
+    if (!early) return { signatures: (await work).signatures };
+    // Answer once every transaction is accepted, or with the error that stopped it before that.
+    await Promise.race([sub.accepted, work]).catch(() => {});
+    return this.#answer(buildId, sub);
+  }
+
+  /** A submit's answer: by default `{ signatures }` once landed; with `until: "accepted"`, its status. */
+  #answer(buildId: string, sub: Submission | SavedSubmissionView): SubmitAnswer {
+    if (sub.status === "failed" || sub.status === "incomplete") throw sub.error ?? new ApiError(502, "transaction_failed", "That trade didn't go through.");
+    return { status: sub.status, buildId, signatures: sub.signatures };
+  }
+
+  /**
+   * A submit's status (GET /submissions/:buildId): waits up to `waitMs` (at most 10 s) while it's
+   * pending. A submission from before a restart is answered from its transactions' statuses on-chain.
+   */
+  async submission(buildId: string, waitMs = 0): Promise<SubmissionView> {
+    const sub = this.#submissions.get(buildId) ?? (await this.#resolveSaved(buildId));
+    if (!sub) throw new ApiError(404, "no_such_submission", "No submit with that build id here.");
+    if (sub.status === "pending" && waitMs > 0 && "done" in sub) {
+      await Promise.race([sub.done, new Promise((r) => setTimeout(r, Math.min(waitMs, SUBMISSION_WAIT_MAX_MS)).unref())]);
     }
-    if (build.kind === "sweep") return this.#submitSweep(build, txs, t);
+    return submissionView(buildId, sub);
+  }
+
+  /** Waits (up to `ms`) for the owner's submits still confirming: a sale right after a back sees the back. */
+  async #afterPending(owner: string, ms = AFTER_PENDING_MS) {
+    const pending = [...this.#submissions.values()].filter((s) => s.owner === owner && s.status === "pending").map((s) => s.done);
+    if (pending.length) await Promise.race([Promise.all(pending), new Promise((r) => setTimeout(r, ms).unref())]);
+  }
+
+  /** Waits (up to `ms`) for every submit still confirming (a graceful shutdown), then writes the state file. */
+  async drain(ms = 10_000) {
+    const pending = [...this.#submissions.values()].filter((s) => s.status === "pending").map((s) => s.done);
+    if (pending.length) {
+      this.#log(`waiting for ${pending.length} submit(s) to confirm before stopping`);
+      await Promise.race([Promise.all(pending), new Promise((r) => setTimeout(r, ms).unref())]);
+    }
+    this.flush();
+  }
+
+  /** Records a submit under its build id, in memory and in the state file (kept SUBMISSION_KEEP_MS). */
+  #register(buildId: string, build: Build, txs: VersionedTransaction[], digest: string): Submission {
+    const now = Date.now();
+    for (const [id, s] of this.#submissions) if (s.status !== "pending" && s.at < now - SUBMISSION_KEEP_MS) this.#submissions.delete(id);
+    const saved = (this.#state.submissions ??= {});
+    for (const [id, s] of Object.entries(saved)) if (s.at < now - SUBMISSION_KEEP_MS) delete saved[id];
+    const trade = txs.slice(0, txs.length - (build.kind === "back" || build.kind === "publish" ? build.cleanup ?? 0 : 0));
+    const signatures = [...(build.retry?.signatures ?? []), ...trade.map((tx) => base58(tx.signatures[0]))];
+    const lastValid = Math.max(0, ...trade.map((tx) => this.#blockhashes.get(tx.message.recentBlockhash) ?? 0));
+    const position = build.position.address.toBase58();
+    let accept!: () => void;
+    let settle!: () => void;
+    const sub: Submission = {
+      owner: build.owner,
+      kind: build.kind,
+      digest,
+      signatures,
+      status: "pending",
+      at: now,
+      accepted: new Promise<void>((r) => (accept = r)),
+      done: new Promise<void>((r) => (settle = r)),
+      accept: () => accept(),
+      finish: (status, sigs, error) => {
+        sub.status = status;
+        if (sigs) sub.signatures = sigs;
+        if (error) sub.error = error instanceof ApiError ? error : new ApiError(502, "send_failed", errorText(error));
+        if (build.kind === "exit") this.#pendingExits.delete(position);
+        const s = this.#state.submissions?.[buildId];
+        if (s) Object.assign(s, { status, signatures: sub.signatures, error: sub.error ? savedError(sub.error) : undefined });
+        this.#save();
+        accept();
+        settle();
+      },
+    };
+    this.#submissions.set(buildId, sub);
+    if (build.kind === "exit") this.#pendingExits.set(position, buildId);
+    saved[buildId] = {
+      owner: build.owner, kind: build.kind, digest, signatures, status: "pending", at: now, lastValid,
+      ...(build.kind === "back" || build.kind === "publish" ? { position, take: build.position.take.toBase58(), publishTakeId: build.position.publishTakeId } : {}),
+    };
+    this.#save();
+    return sub;
+  }
+
+  /**
+   * A submit from before a restart: still pending when the API stopped, its status now comes from
+   * its transactions on-chain. All landed: "landed" (its opening transactions are recorded, so the
+   * position can be sold); one failed or expired: "failed", or "incomplete" when earlier ones
+   * landed (the trade's record went with the restart: the app's incomplete list won't show it,
+   * and the abandoned-ticket cleanup cancels its ticket later). Otherwise still "pending".
+   */
+  async #resolveSaved(buildId: string): Promise<SavedSubmissionView | null> {
+    const saved = this.#state.submissions?.[buildId];
+    if (!saved) return null;
+    if (saved.status === "pending" && saved.signatures.length) {
+      const fates = await this.#fates(saved.signatures, saved.lastValid, { once: true });
+      const landed = fates.findIndex((f) => f !== "landed");
+      if (landed === -1) {
+        saved.status = "landed";
+        if (saved.position && !this.#state.openingTransactions?.[saved.position]) this.#valuation.recordOpening(new PublicKey(saved.position), saved.signatures);
+        if (saved.publishTakeId && saved.take) this.#state.takes[saved.publishTakeId] ??= { address: saved.take, author: saved.owner, mirroredAt: new Date().toISOString(), signatures: saved.signatures };
+      } else if (fates[landed] === "failed") {
+        saved.status = landed > 0 && saved.position ? "incomplete" : "failed";
+        saved.error = saved.status === "incomplete"
+          ? { status: 422, code: "trade_incomplete", message: "Part of this trade went through, then it stopped. Check your wallet." }
+          : { status: 502, code: "transaction_failed", message: "That trade didn't go through." };
+      }
+      this.#save();
+    }
+    return { ...saved, error: saved.error ? apiErrorOf(saved.error) : undefined, done: Promise.resolve() };
+  }
+
+  /**
+   * A back, fade, publish, retry or sale: sent in the wallet's queue, then the bookkeeping and the
+   * abandoned-ticket cleanup. With `accept` (until=accepted) all of it runs after the answer.
+   */
+  async #submitTrade(build: Build, txs: VersionedTransaction[], t: Timings, accept?: () => void): Promise<{ signatures: string[] }> {
     const cleanup = txs.splice(txs.length - (build.cleanup ?? 0));
     const positionKey = build.position.address.toBase58();
+    // Its ticket isn't abandoned until the send is over, confirmation included.
     this.#inFlight.add(positionKey);
     const queued = Date.now();
     const signatures = await this.#store.withWallet(build.owner, async () => {
@@ -1506,7 +1715,7 @@ export class ForkService {
       this.#wallets.forgetActivity(build.owner);
       let sent: string[];
       try {
-        sent = await this.#send(txs, build.market, t);
+        sent = await this.#send(txs, build.market, t, accept);
       } catch (e) {
         // The cleanup rides after the trade, so it wasn't sent: look again on the next build.
         if (cleanup.length) this.#split.suspect(build.owner);
@@ -1679,7 +1888,15 @@ export class ForkService {
     };
   }
 
-  async #send(txs: VersionedTransaction[], market: PublicKey[], t = new Timings()): Promise<string[]> {
+  /**
+   * Sends `txs` in order, after refreshing `market` from mainnet. By default each is preflighted
+   * at "confirmed" and confirmed before the next goes out. With `accept` (until=accepted) they go
+   * out back to back, each preflighted at "processed" (it sees the one before it), `accept` is
+   * called once all were accepted, and then they're confirmed together. Either way it returns
+   * once every one landed, or throws SendFailed with the ones that landed before the failure.
+   */
+  async #send(txs: VersionedTransaction[], market: PublicKey[], t = new Timings(), accept?: () => void): Promise<string[]> {
+    if (accept) return this.#sendAccepted(txs, market, t, accept);
     const conn = this.#o.connection;
     await t.time("refresh", () => this.#o.fork.refreshMarkets(market));
     const out: string[] = [];
@@ -1689,9 +1906,7 @@ export class ForkService {
         const sent = Date.now();
         // Confirm against the transaction's own blockhash: once its last valid block passes, it can't
         // land any more. (A fresh blockhash would keep waiting ~60 s past that.)
-        const own = tx.message.recentBlockhash;
-        const lastValid = this.#blockhashes.get(own);
-        const { blockhash, lastValidBlockHeight } = lastValid !== undefined ? { blockhash: own, lastValidBlockHeight: lastValid } : await conn.getLatestBlockhash("confirmed");
+        const { blockhash, lastValidBlockHeight } = await this.#lifetime(tx);
         // The fee payer's signature is the transaction's id, known before it's sent.
         const sig = base58(tx.signatures[0]);
         let fate: "landed" | "failed" | "unknown" | null = null;
@@ -1728,25 +1943,32 @@ export class ForkService {
     return out;
   }
 
+  /** A transaction's blockhash and its last valid block height (a fresh one's, if this service didn't hand it out). */
+  async #lifetime(tx: VersionedTransaction): Promise<{ blockhash: string; lastValidBlockHeight: number }> {
+    const own = tx.message.recentBlockhash;
+    const lastValid = this.#blockhashes.get(own);
+    return lastValid !== undefined ? { blockhash: own, lastValidBlockHeight: lastValid } : this.#o.connection.getLatestBlockhash("confirmed");
+  }
+
+  /** #send for until=accepted (api/send.ts): back to back, `accept` once all were accepted, then confirmed. */
+  async #sendAccepted(txs: VersionedTransaction[], market: PublicKey[], t: Timings, accept: () => void): Promise<string[]> {
+    await t.time("refresh", () => this.#o.fork.refreshMarkets(market));
+    const lifetimes = await Promise.all(txs.map((tx) => this.#lifetime(tx)));
+    return sendBackToBack(this.#o.connection, txs, Math.max(0, ...lifetimes.map((l) => l.lastValidBlockHeight)), { accept, timings: t, log: this.#log });
+  }
+
   /**
    * Polls a transaction's status until it's known: "landed" (confirmed without an error), "failed"
    * (landed with an error, or its blockhash expired unseen), or "unknown" after SETTLE_MAX_MS
    * without an answer.
    */
   async #settle(sig: string, lastValidBlockHeight: number): Promise<"landed" | "failed" | "unknown"> {
-    const conn = this.#o.connection;
-    const until = Date.now() + SETTLE_MAX_MS;
-    for (;;) {
-      const status = (await conn.getSignatureStatuses([sig], { searchTransactionHistory: true }).catch(() => null))?.value?.[0];
-      if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) return status.err ? "failed" : "landed";
-      if (!status) {
-        const height = await conn.getBlockHeight("confirmed").catch(() => null);
-        // Its blockhash is past: it can't land any more.
-        if (height !== null && height > lastValidBlockHeight) return "failed";
-      }
-      if (Date.now() >= until) return "unknown";
-      await new Promise((r) => setTimeout(r, SETTLE_POLL_MS));
-    }
+    return (await this.#fates([sig], lastValidBlockHeight))[0];
+  }
+
+  /** api/send.ts `fates`, on this service's connection. */
+  #fates(sigs: string[], lastValidBlockHeight: number, o: { once?: boolean } = {}): Promise<Fate[]> {
+    return fates(this.#o.connection, sigs, lastValidBlockHeight, o);
   }
 
   // --- Demo mirrors -----------------------------------------------------------------------

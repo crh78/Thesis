@@ -71,6 +71,29 @@ export type State = {
   phoenix?: PhoenixPositions;
   /** Split trades that stopped partway, by position (api/split.ts). */
   incomplete?: Record<string, IncompleteTrade>;
+  /** Recent submits by build id, so GET /submissions and repeats still answer after a restart. */
+  submissions?: Record<string, SavedSubmission>;
+};
+
+/**
+ * A submit as the state file keeps it (ten minutes): enough to tell its status after a restart
+ * from its transactions on-chain, and, for a back or publish that landed, to record its opening
+ * transactions.
+ */
+export type SavedSubmission = {
+  owner: string;
+  kind: string;
+  digest: string;
+  signatures: string[];
+  status: "pending" | "landed" | "failed" | "incomplete";
+  at: number;
+  /** The last block height its transactions can land at. */
+  lastValid: number;
+  error?: { status: number; code: string; message: string; body?: Record<string, unknown> };
+  /** A back or publish: the position it opens, its take, and the app take a publish posts. */
+  position?: string;
+  take?: string;
+  publishTakeId?: string;
 };
 
 /**
