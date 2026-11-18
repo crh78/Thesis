@@ -127,3 +127,27 @@ test("proof of trade: a split trade brackets every transaction", async () => {
   assert.equal(txs[0].computeFrom, "simulated");
   assert.ok(txs.slice(1).every((t) => t.computeFrom === "estimated"));
 });
+
+test("each transaction lists its legs", async () => {
+  const legs = ["a", "b", "c", "d"].map((l) => leg(l, 2, 8));
+  const txs = await composeTransactions({ payer, legs, receipt, receiptCu: 45_000, connection: fakeConnection(null) });
+  assert.ok(txs.length > 1);
+  assert.deepEqual(txs.flatMap((t) => t.legs), [0, 1, 2, 3]);
+  txs.forEach((t) => assert.deepEqual(t.labels.filter((l) => l !== "thesis receipt"), t.legs.map((i) => legs[i].label)));
+});
+
+test("proof of trade: a continued trade (a retry) opens every transaction with trade_step", async () => {
+  const legs = [withOutput("b", 1, 1)];
+  const txs = await composeTransactions({ payer, legs, receipt: thesisReceipt, receiptCu: 46_000, connection: fakeConnection(100_000), proof: { program: thesis, owner, position, continued: true } });
+  assert.equal(txs.length, 1);
+  const [open, back] = thesisIxs(txs[0].tx);
+  assert.deepEqual([...open.subarray(0, 9)], [...disc("trade_step"), 1]);
+  assert.equal(open.readUInt16LE(9), 0b10, "names leg 1");
+  assert.deepEqual(back.subarray(0, 8), disc("back"));
+  assert.equal(txs[0].computeFrom, "simulated", "the ticket exists, so it simulates");
+  // A retry of a receipt that sat alone: trade_step over no outputs, then the receipt.
+  const [alone] = await composeTransactions({ payer, legs: [], receipt: thesisReceipt, receiptCu: 46_000, connection: fakeConnection(30_000), proof: { program: thesis, owner, position, continued: true } });
+  const [step, receiptIx] = thesisIxs(alone.tx);
+  assert.deepEqual([...step.subarray(0, 11)], [...disc("trade_step"), 1, 0, 0]);
+  assert.deepEqual(receiptIx.subarray(0, 8), disc("back"));
+});

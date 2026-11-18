@@ -8,6 +8,10 @@
 // `begin_trade` (the first) or `trade_step` opening (later ones) right after the compute budget,
 // then the legs, then `trade_step` closing or, in the last, the receipt. Each bracket names the
 // output accounts of the legs in its own transaction.
+//
+// With `proof.continued` (a split trade's retry: an earlier transaction landed and left its
+// ticket open), every transaction opens with `trade_step`, the first included, so the brackets
+// that already landed still count towards the receipt.
 import {
   AddressLookupTableAccount,
   type AccountMeta,
@@ -47,11 +51,15 @@ export type ProofOfTrade = {
   /** Pays the ticket's rent and gets it back: must be the receipt's payer. Defaults to `payer`. */
   ticketPayer?: PublicKey;
   usdcMint?: PublicKey;
+  /** The ticket exists already (an earlier part of this trade landed): no `begin_trade`. */
+  continued?: boolean;
 };
 
 export type ComposedTx = {
   tx: VersionedTransaction;
   labels: string[];
+  /** The legs in this transaction, as indices into `legs`. */
+  legs: number[];
   bytes: number;
   computeUnits: number;
   /** "simulated" when the limit came from a simulation, "estimated" otherwise. */
@@ -140,7 +148,7 @@ export async function composeTransactions(o: ComposeOpts): Promise<ComposedTx[]>
         const receipt = withReceipt ? [withOutputs(o.receipt, outs.outputs)] : [];
         if (!proof) return { open: [], close: receipt };
         const p = { owner: proof.owner, position: proof.position, usdcMint: proof.usdcMint, ...outs };
-        const open = first
+        const open = first && !proof.continued
           ? await beginTradeIx(proof.program, { ...p, payer: proof.ticketPayer ?? o.payer })
           : await tradeStepIx(proof.program, { ...p, open: true });
         const close = withReceipt ? receipt : [await tradeStepIx(proof.program, { ...p, open: false })];
@@ -150,7 +158,7 @@ export async function composeTransactions(o: ComposeOpts): Promise<ComposedTx[]>
     return bracketCache.get(key)!;
   };
   const bracketCu = (first: boolean, withReceipt: boolean) =>
-    proof ? (first ? THESIS_COMPUTE_UNITS.beginTrade : THESIS_COMPUTE_UNITS.tradeStep) + (withReceipt ? 0 : THESIS_COMPUTE_UNITS.tradeStep) : 0;
+    proof ? (first && !proof.continued ? THESIS_COMPUTE_UNITS.beginTrade : THESIS_COMPUTE_UNITS.tradeStep) + (withReceipt ? 0 : THESIS_COMPUTE_UNITS.tradeStep) : 0;
   const estimateCu = (legs: ComposeLeg[], first: boolean, withReceipt: boolean) =>
     Math.min(MAX_TX_CU, legs.length * legCu + (withReceipt ? o.receiptCu : 0) + bracketCu(first, withReceipt));
 
@@ -201,7 +209,9 @@ export async function composeTransactions(o: ComposeOpts): Promise<ComposedTx[]>
   // Simulations run all at once against current state. Without proof of trade every transaction
   // stands alone (legs spend separate USDC and the receipt only moves the fee). With it, a later
   // transaction needs the ticket an earlier one creates, so its simulation fails and its limit
-  // falls back to the estimate.
+  // falls back to the estimate. A continued trade's first transaction simulates fine: the
+  // ticket it steps on is there.
+  const indexOf = new Map(o.legs.map((l, i) => [l, i]));
   return Promise.all(groups.map(async (legs, i): Promise<ComposedTx> => {
     const first = i === 0;
     const withReceipt = i === groups.length - 1;
@@ -224,6 +234,7 @@ export async function composeTransactions(o: ComposeOpts): Promise<ComposedTx[]>
     return {
       tx: new VersionedTransaction(msg),
       labels: [...legs.map((l) => l.label), ...(withReceipt ? ["thesis receipt"] : [])],
+      legs: legs.map((l) => indexOf.get(l)!),
       bytes: v0Size(msg),
       computeUnits: units,
       computeFrom,
