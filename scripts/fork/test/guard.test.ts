@@ -126,6 +126,39 @@ test("report mode: unverified callers can't use up someone else's allowance", as
   await g.checkMoney(req({ authorization: `Bearer ${token()}` }), WALLET, "trades");
 });
 
+test("prebuilds: checkAuth checks who's asking without counting; countMoney counts at submit", async () => {
+  const { g, tick } = guard();
+  const me = req({ authorization: `Bearer ${token()}` });
+  // The same authentication as a money route, in enforce mode.
+  await rejects(g.checkAuth(req(), WALLET, "trades"), 401, "unauthorized");
+  await rejects(g.checkAuth(req({ authorization: `Bearer ${token("did:privy:other")}` }), WALLET, "trades"), 403, "wrong_wallet");
+  assert.deepEqual(await g.checkAuth(req({ "x-thesis-service-key": SERVICE }), OTHER, "trades"), { wallet: OTHER, via: "service", name: "agent" });
+  // Any number of checks leave the wallet's 10 a minute untouched.
+  for (let i = 0; i < 30; i++) assert.deepEqual(await g.checkAuth(me, WALLET, "trades"), { wallet: WALLET, via: "token" });
+  for (let i = 0; i < 9; i++) g.countMoney(WALLET);
+  // countMoney and checkMoney share the wallet's windows.
+  await g.checkMoney(me, WALLET, "trades");
+  assert.throws(() => g.countMoney(WALLET), (e: unknown) =>
+    e instanceof ApiError && e.status === 429 && e.code === "rate_limited" && Number(e.headers?.["retry-after"]) === 60);
+  await rejects(g.checkMoney(me, WALLET, "trades"), 429, "rate_limited");
+  // A refused count counts nothing: a minute later there's room for a full 10 again.
+  tick(61_000);
+  for (let i = 0; i < 10; i++) g.countMoney(WALLET);
+  assert.throws(() => g.countMoney(WALLET), (e: unknown) => e instanceof ApiError && e.status === 429);
+  g.countMoney(OTHER);
+});
+
+test("prebuilds: countMoney keeps the day limit; checkAuth in report mode serves unverified callers", async () => {
+  const { g, tick, logs } = guard({ auth: "report", limits: { moneyPerDay: 3 } });
+  assert.equal((await g.checkAuth(req(), WALLET, "trades")).via, "unverified");
+  assert.equal(logs.filter((l) => l.includes("auth (report only)")).length, 1);
+  for (let i = 0; i < 3; i++) {
+    g.countMoney(WALLET);
+    tick(61_000);
+  }
+  assert.throws(() => g.countMoney(WALLET), (e: unknown) => e instanceof ApiError && e.status === 429 && /today/.test(e.message));
+});
+
 test("reads: 120 a minute per IP; the web proxy's visitor IP counts only with its key", () => {
   const { g, tick } = guard();
   const viaFunnel = (ip: string, extra: Record<string, string> = {}) => req({ "x-forwarded-for": `1.1.1.1, ${ip}`, ...extra }, "127.0.0.1");

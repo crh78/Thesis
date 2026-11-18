@@ -6,6 +6,8 @@
 //   X agent; e2e suites). `FORK_API_AUTH`: `report` (default) logs a missing or wrong token and
 //   serves anyway; `enforce` refuses (401 / 403); `off` skips the check.
 // - Each wallet gets 10 money actions a minute and 100 a day (rolling), whatever the auth mode.
+//   A prebuild (built ahead of the tap) checks who's asking without counting (`checkAuth`); its
+//   money action counts at submit (`countMoney`), once the wallet's signature checked out.
 // - Reads: 120 a minute per signed-in Privy user (a valid token on the read), otherwise per IP.
 //   Behind the web app's proxy (Vercel) every visitor shares a few IPs, so the proxy sends
 //   `x-thesis-proxy-key` and `x-thesis-client-ip`, and only then is that IP used; a browser calling
@@ -301,14 +303,37 @@ export class Guard {
     const actor = await this.#actor(req, wallet, route);
     // Unverified callers (report mode) count per IP and wallet, so nobody can use up someone
     // else's allowance by naming their wallet.
-    const key = actor.via === "unverified" ? `${this.clientIp(req)}|${wallet}` : wallet;
+    this.#count(actor.via === "unverified" ? `${this.clientIp(req)}|${wallet}` : wallet);
+    return actor;
+  }
+
+  /**
+   * A prebuild for `wallet` (built ahead of the tap): checks who's asking, as checkMoney does
+   * (401 / 403 in enforce mode), without counting a money action. Its money action counts at
+   * submit, with countMoney. Its own window of prebuilds a minute is the server's (server.ts).
+   */
+  async checkAuth(req: IncomingMessage, wallet: string, route: string): Promise<Actor> {
+    return this.#actor(req, wallet, route);
+  }
+
+  /**
+   * Counts one money action for `wallet`: a prebuilt trade, at its submit. The API calls it once
+   * the wallet's signature on the build checked out, so only the owner can use up the allowance,
+   * and it counts per wallet in every auth mode. Past the limits it throws the same 429 (with
+   * Retry-After) as checkMoney and counts nothing, so the build can be submitted again later.
+   */
+  countMoney(wallet: string): void {
+    this.#count(wallet);
+  }
+
+  /** Counts a money action against `key`'s minute and day windows, or throws 429 without counting. */
+  #count(key: string) {
     const now = this.#now();
     const day = this.#moneyDay.take(key, now, false);
     if (day) throw rateLimited(day, "trades today");
     const minute = this.#moneyMinute.take(key, now);
     if (minute) throw rateLimited(minute, "trades in a minute");
     this.#moneyDay.take(key, now);
-    return actor;
   }
 
   async #actor(req: IncomingMessage, wallet: string, route: string): Promise<Actor> {
