@@ -117,8 +117,8 @@ export async function startForkService(log: (m: string) => void, o: { takes?: Ta
     bases: new AuditBases(envVar("SETTLER_AUDIT_FILE") ?? join(DATA_DIR, "..", "settler", "audit.jsonl")),
     gemini: liveGemini(log),
     catalog: takeBuilderCatalog(),
-    // Trades may use a key of their own (JUPITER_TRADE_API_KEY); the asset bank, settler and
-    // marker keep JUPITER_API_KEY.
+    // Trades may use a key of their own (JUPITER_TRADE_API_KEY, unset on the VM since the owner's
+    // Developer plan); otherwise they share JUPITER_API_KEY with the asset bank, settler and marker.
     jupiterApiKey: envVar("JUPITER_TRADE_API_KEY") ?? envVar("JUPITER_API_KEY"),
     dexes: FORK_DEXES,
     statePath: o.statePath ?? join(mkdtempSync(join(tmpdir(), "thesis-fork-api-")), "api-state.json"),

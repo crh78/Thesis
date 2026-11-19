@@ -116,7 +116,7 @@ Anyone signs up on the web app, replies "@yourthesisxyz back $20" under a post o
 - **Legs:** spot and yield (Jupiter, Jupiter Lend), Gemini prediction legs and Collector Crypt card legs (paper), Phoenix perps and shorts with liquidation warnings. Fade shows only when a leg can be faded, and nobody can fade their own take.
 - **The X bot** ([`apps/x`](apps/x/README.md)) turns a mention into a draft take for the asker: no link in replies (they point to the bio), 10 replies per person a day, "stop" opts out.
 - **A clean feed:** e2e suites trade only made-up takes from hidden accounts.
-- **Limits checked (2026-11-18):** Privy's free tier (500 monthly users) is enough; Supabase is far under its free limits; Vercel stays on Hobby; the VM serves 200 concurrent readers through Caddy with no failures. Jupiter's free key (60 requests a minute per organisation) is the tightest limit and stays free: the fork API has its own key (`JUPITER_TRADE_API_KEY`) and budget, and everything else cuts its use.
+- **Limits checked (2026-11-18):** Privy's free tier (500 monthly users) is enough; Supabase is far under its free limits; Vercel stays on Hobby; the VM serves 200 concurrent readers through Caddy with no failures. Jupiter was the tightest limit: since 2026-11-19 `JUPITER_API_KEY` is on the owner's Developer plan ($25 a month, 10 requests a second per organisation), and the fork API uses it at 420 a minute (the friend's `JUPITER_TRADE_API_KEY` is retired).
 
 **Left before opening it up**
 - **Privy session signers** and the spending-limit consent screen (`apps/www/app/limits`): per-trade and daily limits the user approves once and can revoke. The X agent, auto-copy and iMessage trading all use them. (Project owner.)

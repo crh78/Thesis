@@ -16,10 +16,11 @@
 //   `FORK_API_READ_LIMIT`: `report` (default) logs who'd be limited; `enforce` refuses (429).
 //   Verified tokens are cached for a minute (at most until they expire), so a read or a money
 //   route checks a token's signature once, not on every request.
-// - Jupiter calls, not whole builds, wait their turn (JupiterBudget): a free key allows about 60
-//   requests a minute for its whole organisation, so the API keeps to 30 a minute (bursts of 10)
-//   by default, or FORK_API_JUPITER_RPM / FORK_API_JUPITER_BURST (the fork: its own trade key,
-//   JUPITER_TRADE_API_KEY, at 50 a minute in bursts of 3), in three lanes: (1) builds at tap time
+// - Jupiter calls, not whole builds, wait their turn (JupiterBudget): Jupiter limits each
+//   organisation (a free key about 60 a minute; the Developer plan 10 a second, enforced as 100
+//   per 10 s), so the API keeps to 30 a minute (bursts of 10) by default, or FORK_API_JUPITER_RPM /
+//   FORK_API_JUPITER_BURST (the fork, on the owner's Developer plan since 2026-11-19: 420 a minute
+//   in bursts of 10, leaving the rest to the settler, marker and asset bank), in three lanes: (1) builds at tap time
 //   wait for a request, up to 20 s, then get 503 `busy`; (2) prebuilds and (3) route
 //   checks are refused instead whenever the bucket would drop below its reserve (6 by default,
 //   burst − 2 when the burst is set) or Jupiter just answered 429, and never wait out a 429 (a
@@ -753,8 +754,8 @@ export class JupiterBudget {
 /** The process's Jupiter budget: routing and the guard share it, as every request shares the key. */
 /**
  * The fork API's requests a minute: FORK_API_JUPITER_RPM, else JUPITER_BUDGET's 30 (sized for a
- * key shared with the asset bank and the settler). With its own key (JUPITER_TRADE_API_KEY) the
- * fork API can take most of Jupiter's 60 a minute.
+ * free key shared with the asset bank and the settler). On a paid plan it takes most of the
+ * organisation's limit (the VM: 420 of the Developer plan's 600).
  */
 export function budgetFromEnv(env: Record<string, string | undefined> = process.env): Partial<BudgetLimits> {
   const out: Partial<BudgetLimits> = {};
