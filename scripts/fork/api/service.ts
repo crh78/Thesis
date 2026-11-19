@@ -73,6 +73,7 @@ import {
   legAssets,
   parseKey,
   randomPositionId,
+  refusedError,
   staleDemo,
   takeClosedError,
   takeOpen,
@@ -95,7 +96,7 @@ import { PhoenixDesk, type PhoenixClose } from "./phoenix.ts";
 import { withPhoenixLock } from "./phoenix-lock.ts";
 import { LANE, newUse, type JupiterUse, type Lane } from "./guard.ts";
 import { Router, TEMPLATE_TTL_MS, escrowShare, type TradeLeg } from "./routing.ts";
-import { SendFailed, fates, refusedByPreflight, resendOnce, sendBackToBack, slippageRefusal, type Fate } from "./send.ts";
+import { SendFailed, fates, refusedByPreflight, resendOnce, routeRefusal, sendBackToBack, slippageRefusal, type Fate } from "./send.ts";
 import { SplitTrades, afterFailure, deserializeIx, incompleteView, serializeIx, sweepLegs } from "./split.ts";
 import { StateStore } from "./store.ts";
 import {
@@ -1679,11 +1680,12 @@ export class ForkService {
    * A trade's send failed. When part of a split trade had landed (or this was its retry), records
    * it as incomplete and answers 422 `trade_incomplete`, so the client retries or sweeps.
    * Otherwise the error stands. One that sent nothing because its swaps were refused for slippage
-   * (the same bytes twice, the markets reset in between) says `requote: true`: nothing left the
-   * wallet, and a build with fresh quotes, signed again, is expected to go through.
+   * (the same bytes twice, the markets reset in between), or failed inside a pool its kept route
+   * no longer fits, says `requote: true`: nothing left the wallet, its routes were dropped, and a
+   * build with fresh quotes, signed again, is expected to go through.
    */
   #stopped(build: Build, e: unknown, txs: VersionedTransaction[] = []): unknown {
-    if (e instanceof SendFailed && e.nothingSent && slippageRefusal(e)) e.body = { ...e.body, requote: true };
+    if (e instanceof SendFailed && e.nothingSent && routeRefusal(e)) e.body = { ...e.body, requote: true };
     if (build.kind === "exit") return this.#saleStopped(build, e, txs);
     const trade = build.trade;
     if (!trade || (build.kind !== "back" && build.kind !== "publish")) return e;
@@ -2269,10 +2271,12 @@ export class ForkService {
           const mints = build.sale.txSteps.flat().flatMap((step) => (step.kind === "sell" ? [step.mint] : []));
           this.#router.dropSells(mints, `a sale of ${build.owner.slice(0, 6)}… failed to send (${e instanceof ApiError ? e.code : "error"})`);
         }
-        // A swap refused for slippage, even after the markets were reset: the routes its unsent
-        // transactions reused go, so the client's rebuild (or the retry) quotes those afresh.
-        if (build.txKeys && e instanceof SendFailed && e.refused && slippageRefusal(e)) {
-          this.#router.dropBuys(build.txKeys.slice(e.landed.length).flat(), `a trade of ${build.owner.slice(0, 6)}… was refused for slippage`);
+        // A swap refused for slippage (even after the markets were reset), or failing inside its
+        // pool: the routes its unsent transactions reused go, so the client's rebuild (or the
+        // retry) quotes those afresh.
+        if (build.txKeys && e instanceof SendFailed && e.refused && routeRefusal(e)) {
+          const why = slippageRefusal(e) ? "was refused for slippage" : `failed in a swap (${e.message.slice(0, 120)})`;
+          this.#router.dropBuys(build.txKeys.slice(e.landed.length).flat(), `a trade of ${build.owner.slice(0, 6)}… ${why}`);
         }
         throw this.#stopped(build, e, txs);
       }
@@ -2597,7 +2601,7 @@ export class ForkService {
             nothingSent = i === 0;
             // Each one before it was confirmed first: it alone stopped the trade, unsent.
             refused = true;
-            throw new ApiError(502, "send_failed", errorText(e));
+            throw refusedError(e);
           }
           // The RPC failed: the transaction may have gone out all the same.
           this.#log(`sending ${sig} failed (${errorText(e)}); waiting to see if it landed`);

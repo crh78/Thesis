@@ -55,3 +55,35 @@ test("refused for slippage again after the reset: 502 send_failed with requote (
   await assert.rejects(g.service.submit(c.buildId, g.sign(c)), (e: unknown) => e instanceof ApiError && e.code === "send_failed" && e.body?.requote === undefined);
   assert.equal(g.sent.length, 1, "not slippage, and no market left stale: not sent again");
 });
+
+/** A Meteora DLMM pool the kept route no longer fits (its bins moved), as the fork's preflight reported it (phoenix-makers-e2e). */
+const METEORA = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo";
+const binsMoved = () => Object.assign(new Error("Transaction simulation failed: Error processing Instruction 5: custom program error: 0x1795"), {
+  logs: [
+    `Program ${JUPITER} invoke [1]`, "Program log: Instruction: Route", `Program ${METEORA} invoke [2]`,
+    "Program log: AnchorError occurred. Error Code: CannotFindNonZeroLiquidityBinArrayId. Error Number: 6037. Error Message: Cannot find non-zero liquidity binArrayId.",
+    `Program ${METEORA} failed: custom program error: 0x1795`, `Program ${JUPITER} failed: custom program error: 0x1795`,
+  ],
+});
+
+test("a swap that fails inside its pool (not slippage): requote, and the routes it reused are dropped so the rebuild quotes afresh", async (t) => {
+  const f = await tradeFixture(t, { status: () => confirmed, send: async () => Promise.reject(binsMoved()) });
+  const built = await f.service.buildTrade(TAKE_ID, f.wallet, "back", 20);
+  await assert.rejects(f.service.submit(built.buildId, f.sign(built)), (e: unknown) =>
+    e instanceof ApiError && e.code === "send_failed" && e.body?.requote === true && /CannotFindNonZeroLiquidityBinArrayId/.test(e.message));
+  assert.equal(f.sent.length, 1, "the same bytes aren't sent again: only a fresh quote gets past it");
+  // What makes ForkService drop the trade's kept buy routes (dropBuys, covered in scaled-routing.test.ts).
+  const { SendFailed, routeRefusal } = await import("../api/send.ts");
+  const { refusedError } = await import("../api/common.ts");
+  assert.equal(routeRefusal(new SendFailed(refusedError(binsMoved()), [], false, true)), true);
+  assert.equal(routeRefusal(new SendFailed(refusedError(other()), [], false, true)), false);
+});
+
+test("failedInSwap: only a failure under a top-level Jupiter instruction", async () => {
+  const { failedInSwap } = await import("../api/common.ts");
+  assert.equal(failedInSwap(binsMoved()), true);
+  assert.equal(failedInSwap(slipped()), true);
+  assert.equal(failedInSwap(other()), false, "no program failed in the logs");
+  const thesis = Object.assign(new Error("x"), { logs: [`Program ${JUPITER} invoke [1]`, `Program ${JUPITER} success`, "Program Thes1s invoke [1]", "Program Thes1s failed: custom program error: 0x1770"] });
+  assert.equal(failedInSwap(thesis), false, "the receipt failed after the swap went through");
+});
