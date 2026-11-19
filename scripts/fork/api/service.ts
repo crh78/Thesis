@@ -54,7 +54,7 @@ import {
 import { cardLeg, underlyingIdHex, type BankState } from "@thesis/venues/bank";
 import { cardIdHex } from "@thesis/venues/collector-crypt";
 import { jupiterBuy, jupiterLendRedeem, type JupiterBuy, type VenueLeg } from "@thesis/venues/jupiter";
-import { PHOENIX_LEG_CU, PHOENIX_PROGRAM_ID } from "@thesis/venues/phoenix";
+import { PERP_ASSET_MAP, PHOENIX_LEG_CU, PHOENIX_PROGRAM_ID } from "@thesis/venues/phoenix";
 import {
   ApiError,
   base58,
@@ -143,7 +143,12 @@ const AFTER_PENDING_MS = 10_000;
 export const QUOTE_REFRESH_MS = 45_000;
 /** Builds refresh their market accounts from mainnet unless this process did in the last MARKET_FRESH_MS. */
 const MARKET_FRESH_MS = 30_000;
-/** A submit refreshes them again only past SUBMIT_MARKET_FRESH_MS (Phoenix's always: it refuses a stale mark). */
+/**
+ * A submit refreshes them again only past SUBMIT_MARKET_FRESH_MS, except a Phoenix leg's own
+ * accounts (market, spline, PerpAssetMap: `phoenixMarket`), which it always refreshes: Phoenix
+ * refuses a stale mark. (It used to refresh every account of a build with a Phoenix leg, its swap
+ * pools too, which the first send then fetched from mainnet again: 200–340 ms against ~40.)
+ */
 const SUBMIT_MARKET_FRESH_MS = 60_000;
 /** How often the fork's clock is brought up to wall time, when the service is given `fork.syncClock`. */
 const CLOCK_SYNC_MS = 5_000;
@@ -275,6 +280,8 @@ type Build = {
    * before). Builds refresh them at quote time; Phoenix legs are always refreshed before the send.
    */
   marketFreshMs?: number;
+  /** A Phoenix leg's own accounts (market, spline, PerpAssetMap): refreshed at every submit, however fresh. */
+  phoenixMarket?: PublicKey[];
   /** What the build answered (the build route's whole response), for a refresh to answer the same. */
   response?: Record<string, unknown>;
   /** A sale: what each transaction carries, so one that stops partway can be finished. */
@@ -1933,7 +1940,7 @@ export class ForkService {
       }
       this.#dropBuildsFor(build.position.address);
       try {
-        return await this.#send(txs, build.market, t, accept, build.marketFreshMs);
+        return await this.#send(txs, build.market, t, accept, build.marketFreshMs, build.phoenixMarket);
       } catch (e) {
         const landed = e instanceof SendFailed ? e.landed.length : 0;
         const rec = this.#split.get(build.owner, position);
@@ -2261,7 +2268,7 @@ export class ForkService {
       this.#wallets.forgetActivity(build.owner);
       let sent: string[];
       try {
-        sent = await this.#send(txs, build.market, t, accept, build.marketFreshMs);
+        sent = await this.#send(txs, build.market, t, accept, build.marketFreshMs, build.phoenixMarket);
       } catch (e) {
         // The cleanup rides after the trade, so it wasn't sent: look again on the next build.
         if (cleanup.length) this.#split.suspect(build.owner);
@@ -2453,7 +2460,8 @@ export class ForkService {
       retry: extra.retry,
       quotedAt: extra.quotedAt,
       prebuilt: Boolean(extra.prebuilt),
-      marketFreshMs: phoenix ? 0 : SUBMIT_MARKET_FRESH_MS,
+      marketFreshMs: SUBMIT_MARKET_FRESH_MS,
+      phoenixMarket: phoenix ? venue.flatMap((v) => (v.marketAccounts.some((k) => k.equals(PERP_ASSET_MAP)) ? v.marketAccounts : [])) : undefined,
       seeds: venue.flatMap((v) => ((v as Partial<TradeLeg>).how === "swap" ? [{ mint: (v as JupiterBuy).mint, amount: (v as JupiterBuy).minOutAmount }] : [])),
       sale: extra.sale && {
         takeId: extra.sale.takeId,
@@ -2547,21 +2555,21 @@ export class ForkService {
    * signed transactions are sent once more; so is a transaction refused for slippage, the first or
    * a later one, with the ones after it (api/send.ts `resendOnce`).
    */
-  async #send(txs: VersionedTransaction[], market: PublicKey[], t = new Timings(), accept?: () => void, freshMs = 0): Promise<string[]> {
+  async #send(txs: VersionedTransaction[], market: PublicKey[], t = new Timings(), accept?: () => void, freshMs = 0, always: PublicKey[] = []): Promise<string[]> {
     // A transaction that names Phoenix's program (program ids are always static keys) waits for the
     // Phoenix lock, and its refresh puts Phoenix's mainnet traders back first (lib.ts syncPhoenixMakers).
     const phoenix = txs.some((tx) => tx.message.staticAccountKeys.some((k) => k.equals(PHOENIX_PROGRAM_ID)));
-    if (!phoenix) return this.#sendNow(txs, market, t, accept, freshMs, false);
+    if (!phoenix) return this.#sendNow(txs, market, t, accept, freshMs, false, always);
     const queued = Date.now();
     return withPhoenixLock(() => {
       const waited = Date.now() - queued;
       if (waited > 5) t.add("phoenix lock", waited);
-      return this.#sendNow(txs, market, t, accept, freshMs, true);
+      return this.#sendNow(txs, market, t, accept, freshMs, true, always);
     });
   }
 
-  async #sendNow(txs: VersionedTransaction[], market: PublicKey[], t: Timings, accept: (() => void) | undefined, freshMs: number, phoenixMakers: boolean): Promise<string[]> {
-    const refreshed = await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs, phoenixMakers }));
+  async #sendNow(txs: VersionedTransaction[], market: PublicKey[], t: Timings, accept: (() => void) | undefined, freshMs: number, phoenixMakers: boolean, always: PublicKey[]): Promise<string[]> {
+    const refreshed = await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs, phoenixMakers, always }));
     // lib.ts says how many it left (`fresh`); a fork that doesn't say may have left any of them.
     const left = (refreshed as { fresh?: unknown } | undefined)?.fresh;
     try {

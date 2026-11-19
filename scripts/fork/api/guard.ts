@@ -16,11 +16,12 @@
 //   `FORK_API_READ_LIMIT`: `report` (default) logs who'd be limited; `enforce` refuses (429).
 //   Verified tokens are cached for a minute (at most until they expire), so a read or a money
 //   route checks a token's signature once, not on every request.
-// - Jupiter calls, not whole builds, wait their turn (JupiterBudget): a free key allows about 60
-//   requests a minute for its whole organisation, so the API keeps to 30 a minute (bursts of 10)
-//   by default, or FORK_API_JUPITER_RPM / FORK_API_JUPITER_BURST (the fork: its own trade key,
-//   JUPITER_TRADE_API_KEY, at 50 a minute in bursts of 3), in three lanes: (1) builds at tap time
-//   wait for a request, up to a few seconds, then get 503 `busy`; (2) prebuilds and (3) route
+// - Jupiter calls, not whole builds, wait their turn (JupiterBudget): Jupiter limits each
+//   organisation (a free key about 60 a minute; the Developer plan 10 a second, enforced as 100
+//   per 10 s), so the API keeps to 30 a minute (bursts of 10) by default, or FORK_API_JUPITER_RPM /
+//   FORK_API_JUPITER_BURST (the fork, on the owner's Developer plan since 2026-11-19: 420 a minute
+//   in bursts of 10, leaving the rest to the settler, marker and asset bank), in three lanes: (1) builds at tap time
+//   wait for a request, up to 20 s, then get 503 `busy`; (2) prebuilds and (3) route
 //   checks are refused instead whenever the bucket would drop below its reserve (6 by default,
 //   burst − 2 when the burst is set) or Jupiter just answered 429, and never wait out a 429 (a
 //   prebuild may wait a few seconds for the reserve; a sell seed waits its retry-after and goes
@@ -482,14 +483,19 @@ export type BudgetLimits = {
   reserve: number;
   /** How long a prebuild waits for the bucket to climb above `reserve` (no 429, no tap waiting) before it's refused. */
   prebuildWaitMs: number;
-  /** A tap-time call that would wait longer than this for its turn gets 503 busy instead. */
+  /**
+   * A tap-time call that would wait longer than this for its turn gets 503 busy instead. 20 s: a
+   * take's first build costs about two calls per swap leg, so a 5-leg take built cold at the tap
+   * (its prebuild refused while the sheet's earlier prebuilds spent the budget) waits ~10 s on the
+   * fork's key (50 a minute, 3 at a time). At 8 s that tap failed with "Lots of trades right now".
+   */
   maxWaitMs: number;
   /** Jupiter calls of builds in flight at once, and how many taps may queue for a slot. */
   atOnce: number;
   queue: number;
 };
 
-export const JUPITER_BUDGET: BudgetLimits = { perMinute: 30, burst: 10, reserve: 6, maxWaitMs: 8_000, prebuildWaitMs: 4_000, atOnce: 8, queue: 24 };
+export const JUPITER_BUDGET: BudgetLimits = { perMinute: 30, burst: 10, reserve: 6, maxWaitMs: 20_000, prebuildWaitMs: 4_000, atOnce: 8, queue: 24 };
 /** How long a 429 without `x-ratelimit-reset` stops every lane. */
 const PAUSE_ON_429_MS = 2_000;
 /** The longest a 429's `x-ratelimit-reset` stops every lane. */
@@ -748,8 +754,8 @@ export class JupiterBudget {
 /** The process's Jupiter budget: routing and the guard share it, as every request shares the key. */
 /**
  * The fork API's requests a minute: FORK_API_JUPITER_RPM, else JUPITER_BUDGET's 30 (sized for a
- * key shared with the asset bank and the settler). With its own key (JUPITER_TRADE_API_KEY) the
- * fork API can take most of Jupiter's 60 a minute.
+ * free key shared with the asset bank and the settler). On a paid plan it takes most of the
+ * organisation's limit (the VM: 420 of the Developer plan's 600).
  */
 export function budgetFromEnv(env: Record<string, string | undefined> = process.env): Partial<BudgetLimits> {
   const out: Partial<BudgetLimits> = {};

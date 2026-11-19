@@ -39,7 +39,7 @@
 //
 // Cards (cards.ts): at medium and high risk the model also gets a `cards`
 // tool, a live Collector Crypt search. A take about cards (isCardTake) may be
-// all cards; any other take may add one card at up to 20% when a card fits it.
+// all cards; any other take may add up to three cards, each at up to 20%, when cards fit it.
 // A picked card gets a securities row (card:<cardId>) before the reply, so the take can link to it.
 //
 // Warm-up: GET builds the index, so the real request skips that. The app sends it when the
@@ -61,7 +61,7 @@ import { capCards, CARD_PREFIX, cardAbout, isCardTake, searchCards } from "./car
 /** What the model is told about cards for this take (the `cards` field of its input). */
 const cardRule = (cardTake: boolean) => cardTake
   ? "This take is about cards: the basket can be all cards (up to 5), or cards with stocks that move with them."
-  : "At most one card, at most 20% of the basket, never the only pick.";
+  : "At most three cards, each at most 20% of the basket, never only cards.";
 import { applyHouseRules, MAX_LEVERAGE, MAX_PERP_WEIGHT, RULES_LEVERAGE } from "./rules.ts";
 
 /** Every yield pick is traded as a Jupiter Lend jlUSDC deposit (scripts/fork/api/legs.ts), so it's the one yield row offered: another vault's APY would be a rate the pick never earns. */
@@ -101,7 +101,7 @@ const leverageFor = (s: Security, wanted: number) => (s.kind === "perp" ? Math.m
 const ruleLeverage = (s: Security) => leverageFor(s, RULES_LEVERAGE);
 /**
  * The house rules on the final basket (rules.ts): one pick per name, the 30% perp cap, the 5x
- * leverage ceiling; then the card rules (cards.ts): one card, at most 20%, never alone,
+ * leverage ceiling; then the card rules (cards.ts): up to three cards, each at most 20%, never only cards,
  * unless the take is about cards (`cardTake`).
  * The perp cap hands its excess to the other picks, which can lift a card past 20%, and cutting
  * the card can lift a perp, so the two run again until both hold (a few rounds at most). If they
@@ -127,7 +127,8 @@ function sameSecret(a: string, b: string) {
 }
 
 const key = (s: Security) => assetKey(s);
-const MAX_LEGS = 10;
+/** Legs per take. Each swap leg costs Jupiter calls on a trade's first build (the fork's key: 50 a minute), so 5 keeps a cold build within a few seconds. The program allows 10. */
+const MAX_LEGS = 5;
 const descriptionOrName = (s: Security) => firstSentence(s.description) ?? s.name;
 
 // --- 1. The search index --------------------------------------------------------------------
@@ -790,7 +791,7 @@ async function adjustRisk(current: Pick[], risk: string, usPerson: boolean, card
     const stock = ((data ?? []) as Security[]).filter((s) => available(s, usPerson))[0];
     return stock ? { ...p, s: stock, role: roleFor(stock, false), why: firstSentence(stock.description) ?? p.why, leverage: 1 } : null;
   }));
-  // Cards stay out of low-risk baskets; at most one card, at most 20%, unless
+  // Cards stay out of low-risk baskets; at most three cards, each at most 20%, unless
   // the take is about cards.
   let kept = capCards([...current.filter((p) => p.s.kind !== "yield" && p.s.kind !== "perp" && (risk !== "low" || p.s.kind !== "card")), ...back.filter((p): p is Pick => !!p)], cardTake);
   let extra: Pick | null = null;
@@ -1004,7 +1005,7 @@ Deno.serve(async (req) => {
   const source: Source | null = sourceText.length >= 3
     ? { text: sourceText, label: typeof body.source?.label === "string" ? body.source.label.trim().slice(0, 60) || null : null, kind: sourceKind }
     : null;
-  // A take about cards may be all cards; others keep one card at most 20%.
+  // A take about cards may be all cards; others keep up to three cards, each at most 20%.
   const cardTake = isCardTake(source ? `${claim} ${source.text.slice(0, 400)}` : claim);
 
   const country = did && US_RESTRICTIONS ? db.from("accounts").select("country").eq("privy_did", did).maybeSingle() : Promise.resolve({ data: null });

@@ -1,6 +1,6 @@
 // DENO_NO_PACKAGE_JSON=1 deno test --node-modules-dir=none supabase/functions/take-builder/cards_test.ts
 import { assertEquals } from "jsr:@std/assert@1";
-import { capCards, cardAbout, cardSecurity, isCardTake, MAX_CARD_WEIGHT, searchCards, searchWords } from "./cards.ts";
+import { capCards, cardAbout, cardSecurity, isCardTake, MAX_CARD_WEIGHT, MAX_CARDS, searchCards, searchWords } from "./cards.ts";
 
 // A browse row recorded from api.collectorcrypt.com/marketplace?search=charizard, trimmed.
 const row = {
@@ -63,28 +63,42 @@ Deno.test("search: a failure or an empty query gives no cards, never an error", 
 
 const p = (kind: string, weight: number, name = kind) => ({ s: { kind }, weight, name });
 
-Deno.test("one card at most, kept at or under 20%, never alone", () => {
+Deno.test("up to three cards, each kept at or under 20%, never only cards", () => {
   // Under the cap: untouched shares, whole percents adding up to 100.
   assertEquals(capCards([p("stock", 50), p("stock", 35), p("card", 15)]).map((x) => x.weight), [50, 35, 15]);
   // Over the cap: the card is cut to 20 and the others share 80 in proportion.
   const over = capCards([p("stock", 30), p("card", 40), p("etf", 30)]);
   assertEquals(over.map((x) => x.weight), [40, MAX_CARD_WEIGHT, 40]);
-  // A second card is dropped (the first one stays).
-  assertEquals(capCards([p("card", 10, "a"), p("stock", 80), p("card", 10, "b")]).map((x) => x.name), ["a", "stock"]);
-  // A card alone isn't a basket.
+  // A second and a third card stay; a fourth is dropped (the first three stay).
+  assertEquals(MAX_CARDS, 3);
+  assertEquals(capCards([p("card", 10, "a"), p("stock", 80), p("card", 10, "b")]).map((x) => [x.name, x.weight]), [["a", 10], ["stock", 80], ["b", 10]]);
+  const four = capCards([p("card", 10, "a"), p("card", 10, "b"), p("stock", 50), p("card", 10, "c"), p("card", 20, "d")]);
+  assertEquals(four.map((x) => x.name), ["a", "b", "stock", "c"]);
+  // Three cards all over the cap: each cut to 20, the rest to the others.
+  const heavy = capCards([p("card", 30, "a"), p("card", 30, "b"), p("card", 30, "c"), p("stock", 10)]);
+  assertEquals(heavy.map((x) => x.weight), [20, 20, 20, 40]);
+  // Cards alone aren't a basket.
   assertEquals(capCards([p("card", 100)]), []);
+  assertEquals(capCards([p("card", 50, "a"), p("card", 50, "b")]), []);
   // No card: nothing changes.
   const plain = [p("stock", 60), p("etf", 40)];
   assertEquals(capCards(plain), plain);
 });
 
-Deno.test("rounding can't lift the card past 20%", () => {
+Deno.test("rounding can't lift a card past 20%", () => {
   // 19.9% exact: plain rounding of the others (26.36, 26.36, 27.38 → 26, 26, 27) would leave the card 21.
   for (const ws of [[26.36, 26.36, 27.38, 19.9], [1, 1, 1, 0.8], [33.3, 33.3, 13.4, 20]]) {
     const out = capCards(ws.map((w, i) => p(i === ws.length - 1 ? "card" : "stock", w)));
     const card = out.find((x) => x.s.kind === "card")!;
     assertEquals(out.reduce((a, x) => a + x.weight, 0), 100);
     assertEquals(card.weight <= MAX_CARD_WEIGHT, true, JSON.stringify(out.map((x) => x.weight)));
+    assertEquals(out.every((x) => Number.isInteger(x.weight)), true);
+  }
+  // Three cards near the cap.
+  for (const ws of [[19.9, 19.9, 19.9, 13.43, 13.43, 13.44], [1, 1, 1, 0.8, 0.8, 0.8]]) {
+    const out = capCards(ws.map((w, i) => p(i < 3 ? "stock" : "card", w)));
+    assertEquals(out.reduce((a, x) => a + x.weight, 0), 100);
+    assertEquals(out.filter((x) => x.s.kind === "card").every((x) => x.weight <= MAX_CARD_WEIGHT), true, JSON.stringify(out.map((x) => x.weight)));
     assertEquals(out.every((x) => Number.isInteger(x.weight)), true);
   }
 });

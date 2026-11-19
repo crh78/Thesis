@@ -436,7 +436,8 @@ export async function assetKeys(ids: string[]): Promise<Record<string, string>> 
 }
 
 /** A card leg's kind, however it's labelled ("Cards" from the app, "card" from the take builder). */
-export const isCardKind = (kind: string | null | undefined) => /^cards?$/i.test(kind ?? "");
+/** A Collector Crypt card leg's kind: "card", "Cards", or a label such as "Card · $1,240 value". */
+export const isCardKind = (kind: string | null | undefined) => /^cards?\b/i.test(kind ?? "");
 
 /** "$1,240 value": a card's insured value (Collector Crypt's estimate, what the settler prices it at). */
 export const cardValue = (usdValue: number | null | undefined) => (usdValue == null ? "Card" : `Card · ${"$" + Math.round(usdValue).toLocaleString("en-US")} value`);

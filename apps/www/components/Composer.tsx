@@ -146,10 +146,10 @@ function Write({ draft, setDraft, onClose, onNext }: { draft: Draft; setDraft: (
 
 const PHASES = [
   { title: "Reading your take", sub: "Working out what has to be true for you to be right." },
-  { title: "Searching for matches", sub: "Stocks, predictions and other picks tied to your idea." },
+  { title: "Searching for matches", sub: "Assets tied to your idea." },
   { title: "Checking the fit", sub: "How closely each pick tracks your take, and how easy it is to buy." },
 ];
-const LABELS = ["Reading your take", "Finding stocks and predictions that match", "Checking how closely each one fits"];
+const LABELS = ["Reading your take", "Finding assets that match", "Checking how closely each one fits"];
 
 async function callBuilder(token: string, body: Record<string, unknown>): Promise<Built> {
   const r = await fetch("/api/take-builder", { method: "POST", headers: { "privy-token": token, "content-type": "application/json" }, body: JSON.stringify(body) });

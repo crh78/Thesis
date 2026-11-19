@@ -7,7 +7,7 @@
 // search_assets (kind 'card'), so those rows never show up in other searches.
 //
 // Rules: medium and high risk only. A take about cards (isCardTake) may be all cards; any
-// other take gets at most one card, at most 20% of the basket, never alone.
+// other take gets at most three cards (MAX_CARDS), each at most 20% of the basket, never only cards.
 // CC's `search` parameter isn't in its docs (it works for now); if it stops working the
 // search returns nothing and baskets are built without cards.
 import type { Security } from "../_shared/catalog.ts";
@@ -15,6 +15,8 @@ import type { Security } from "../_shared/catalog.ts";
 export const CC_API = "https://api.collectorcrypt.com";
 export const CARD_PREFIX = "card:";
 export const MAX_CARD_WEIGHT = 20;
+/** Cards in a take that isn't about cards (each at most MAX_CARD_WEIGHT). */
+export const MAX_CARDS = 3;
 const SEARCH_TIMEOUT_MS = 2500;
 
 const positive = (v: unknown): number | null => {
@@ -142,33 +144,34 @@ export function isCardTake(text: string): boolean {
 }
 
 /**
- * At most one card, at most 20%, never alone, unless the take is about cards
- * (`cardTake`): then cards are like any other pick, as many and as much as the
- * basket's other rules allow, alone included. Extra cards are dropped and a
- * basket that would be only a card loses it (empty, so the caller falls back). With a card, the
- * weights come back as whole percents adding up to 100, the card's at most 20 (cut to 20 and the
- * rest scaled up when it was more), so `normalize`'s rounding can't push it past the cap.
+ * At most MAX_CARDS cards, each at most 20%, never only cards, unless the take is about cards
+ * (`cardTake`): then cards are like any other pick, as many and as much as the basket's other
+ * rules allow, alone included. Cards past the first MAX_CARDS are dropped and a basket that would
+ * be only cards loses them (empty, so the caller falls back). With cards, the weights come back as
+ * whole percents adding up to 100, each card's at most 20 (cut to 20 and the rest scaled up when it
+ * was more), so `normalize`'s rounding can't push one past the cap.
  */
 export function capCards<T extends Weighted>(picks: T[], cardTake = false): T[] {
   if (cardTake) return picks;
-  let seen = false;
-  const kept = picks.filter((p) => p.s.kind !== "card" || (!seen && (seen = true)));
-  const card = kept.find((p) => p.s.kind === "card");
-  if (!card) return kept;
-  const others = kept.filter((p) => p !== card);
+  let cards = 0;
+  const kept = picks.filter((p) => p.s.kind !== "card" || ++cards <= MAX_CARDS);
+  const held = kept.filter((p) => p.s.kind === "card");
+  if (!held.length) return kept;
+  const others = kept.filter((p) => p.s.kind !== "card");
   if (!others.length) return [];
   const w = (p: T) => Math.max(p.weight, 0);
   const total = kept.reduce((a, p) => a + w(p), 0) || 1;
-  const cardWeight = Math.max(1, Math.min(MAX_CARD_WEIGHT, Math.round((w(card) / total) * 100)));
+  const cardWeight = new Map(held.map((c) => [c, Math.max(1, Math.min(MAX_CARD_WEIGHT, Math.round((w(c) / total) * 100)))]));
+  const cardsTotal = [...cardWeight.values()].reduce((a, b) => a + b, 0);
   // The others share the rest in whole percents (largest remainder).
   const rest = others.reduce((a, p) => a + w(p), 0) || 1;
-  const exact = others.map((p) => (w(p) / rest) * (100 - cardWeight));
+  const exact = others.map((p) => (w(p) / rest) * (100 - cardsTotal));
   const whole = exact.map(Math.floor);
-  let left = 100 - cardWeight - whole.reduce((a, b) => a + b, 0);
+  let left = 100 - cardsTotal - whole.reduce((a, b) => a + b, 0);
   for (const i of exact.map((x, i) => [x - Math.floor(x), i]).sort((a, b) => b[0] - a[0]).map(([, i]) => i)) {
     if (left <= 0) break;
     whole[i]++;
     left--;
   }
-  return kept.map((p) => ({ ...p, weight: p === card ? cardWeight : whole[others.indexOf(p)] }));
+  return kept.map((p) => ({ ...p, weight: cardWeight.get(p) ?? whole[others.indexOf(p)] }));
 }
