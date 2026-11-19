@@ -1,5 +1,6 @@
-// pnpm fork:latency-bench [-- --runs N --usd N] — how long a back and a sale take, step by step,
-// against the one fork.
+// pnpm fork:latency-bench [-- --runs N --usd N --gap S] — how long a back and a sale take, step by
+// step, against the one fork. `--gap S`: wait S seconds between the back landing and the sale, as
+// a user would (a back's sell routes are seeded in that time, so the sale should make no quote).
 //
 // Starts the fork API in-process on a spare port with the abuse limits in front (a service key it
 // makes up for the run, as the X agent would use), then per run: a throwaway wallet (a local
@@ -56,6 +57,7 @@ async function bench(): Promise<void> {
   const { flags } = parseArgs();
   const runs = numberFlag(flags, "runs", 5);
   const usd = numberFlag(flags, "usd", 20);
+  const gapS = numberFlag(flags, "gap", 0);
   const lead = await syncClock();
   if (lead > 120) throw new Error(`The fork's clock is ${lead}s ahead of real time: restart the fork.`);
 
@@ -149,6 +151,8 @@ async function bench(): Promise<void> {
       const receipt = ok("receipt", await call("GET", `/takes/${TAKE.id}?viewer=${me}`));
       const mine = receipt.json.viewerPositions?.find((p: any) => !p.exited);
       if (!mine) throw new Error("the back isn't on the receipt");
+      // A user's pause before selling: the back's sell routes are seeded meanwhile (routing.ts seedSells).
+      if (gapS > 0) await new Promise((resolve) => setTimeout(resolve, gapS * 1_000));
       // The Sell sheet builds ahead too: prebuilt, refreshed, submitted; then a second sale is refused.
       const sale = ok("sale build", await call("POST", `/takes/${TAKE.id}/positions/${mine.address}/exit`, { owner: me, prebuild: true }, "sale build"));
       const saleFresh = ok("sale refresh", await call("POST", `/builds/${sale.json.buildId}/refresh`, undefined, "sale refresh"));
@@ -156,7 +160,8 @@ async function bench(): Promise<void> {
       const twice = await call("POST", `/takes/${TAKE.id}/positions/${mine.address}/exit`, { owner: me });
       if (twice.status !== 409 || twice.json.error !== "already_exited") throw new Error(`a second sale: ${twice.status} ${JSON.stringify(twice.json)}`);
       const last = (k: string) => client[k].at(-1)!.toFixed(0);
-      console.log(`run ${run}/${runs}: back build ${last("back build")} ms, accepted ${last("back accepted")} ms, landed +${last("back confirm")} ms; sale build ${last("sale build")} ms, accepted ${last("sale accepted")} ms, landed +${last("sale confirm")} ms`);
+      const quotes = serverSteps["sale build"]?.quotes?.at(-1);
+      console.log(`run ${run}/${runs}${gapS ? ` (sale ${gapS} s after the back)` : ""}: back build ${last("back build")} ms, accepted ${last("back accepted")} ms, landed +${last("back confirm")} ms; sale build ${last("sale build")} ms, accepted ${last("sale accepted")} ms, landed +${last("sale confirm")} ms${quotes !== undefined ? ` (its quotes step ${quotes.toFixed(0)} ms)` : ""}`);
     }
   } finally {
     server.close();
