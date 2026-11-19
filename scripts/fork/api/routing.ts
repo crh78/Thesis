@@ -13,6 +13,16 @@
 // template.ts) that is retargeted to the next wallet. A second wallet's build of it makes no
 // Jupiter call for its swap legs. Every leg still spends exactly its part of the stake, fills the
 // wallet's own token account, and proof of trade checks it as before.
+//
+// The same trade at another stake scales a fresh routing instead of quoting again (template
+// "scaled"): within TEMPLATE_TTL_MS of the quotes, when each swap leg's quote moved the price
+// under 0.1% and its new part is within 0.4x-2.5x of the quoted one (packages/venues/jupiter
+// scale.ts, SCALE_LIMITS), each swap instruction is rewritten to spend exactly the new part and
+// expect a proportional output, with the same slippage limit. So a trade sheet's builds at every
+// chip or typed amount after the first cost no Jupiter call. A scaled leg that would fill worse
+// than its slippage limit fails at preflight, not silently: the client builds again (Try again),
+// and a wallet's repeat build of the same trade and stake after a scaled answer always quotes
+// afresh, dropping the routings it scaled from, so it never gets the same failing answer twice.
 import type { PublicKey } from "@solana/web3.js";
 import { PRICEABLE_MIN_POOLED_USD, bestIssuer, issuerPool, type BestIssuerResult, type ReadMints } from "@thesis/venues/bank";
 import { ineligible, otherSide, type GeminiContract } from "@thesis/venues/gemini";
@@ -24,8 +34,11 @@ import {
   jupiterQuote,
   jupiterSwapInstructions,
   quoteFn,
+  scaleTemplate,
   splitStake,
   swapTemplate,
+  SCALE_LIMITS,
+  TEMPLATE_OWNER,
   type JupSwapInstructions,
   type JupiterAccess,
   type SwapTemplate,
@@ -57,6 +70,8 @@ export const TRANSIENT_QUOTE = /429|rate.?limit|timeout|timed out|abort|ECONN|EN
 const NO_ROUTE_TTL_MS = 10 * 60_000;
 /** How long a trade's routing (winners, stake split, swap templates) is shared with other wallets. */
 export const TEMPLATE_TTL_MS = 20_000;
+/** How many fresh routings of one trade (at different stakes) are kept to scale from. */
+const MAX_ROOTS = 4;
 
 export type Route = typeof ROUTE & { dexes?: string[] };
 /**
@@ -86,6 +101,10 @@ type Plan = {
   /** False when a leg was left out because its quote failed: that's this build's bad luck, not to share. */
   shareable: boolean;
 };
+/** A trade's routing as #plans holds it: in flight or done, and when it was quoted. */
+type PlanEntry = { at: number; done: boolean; plan: Promise<Plan> };
+/** A fresh routing that builds at other stakes may scale from: its stake and when it was quoted. */
+type Root = { at: number; stake: bigint; entry: PlanEntry };
 /**
  * Which side a trade takes (a fade holds the other side of a prediction leg), and whether paper
  * legs can be in it. `lane`: the Jupiter lane its calls use (default 1, a build at tap time; 2 for
@@ -171,9 +190,19 @@ export class Router {
   }
 
   /** Trade key → its routing (in flight or done) and when it started (see Plan). */
-  #plans = new Map<string, { at: number; done: boolean; plan: Promise<Plan> }>();
-  /** Builds that reused a plan (`hits`), waited for one in flight (`waits`), routed their own (`misses`); swap legs built from templates. */
-  #templateStats = { hits: 0, waits: 0, misses: 0, templatedLegs: 0 };
+  #plans = new Map<string, PlanEntry>();
+  /**
+   * Trade key without the stake → the fresh routings of that trade (newest first, at most
+   * MAX_ROOTS, each at its own stake) that builds at other stakes scale from (#scaled).
+   */
+  #roots = new Map<string, Root[]>();
+  /** Wallet and trade key → when that wallet was last answered from a scaled routing (a repeat quotes afresh). */
+  #scaledFor = new Map<string, number>();
+  /**
+   * Builds that reused a plan (`hits`), waited for one in flight (`waits`), scaled one made at
+   * another stake (`scaled`), routed their own (`misses`); swap legs built from templates.
+   */
+  #templateStats = { hits: 0, waits: 0, scaled: 0, misses: 0, templatedLegs: 0 };
 
   /** A contract as currently known: the latest live read, else the asset bank's sweep, else the mapping's copy. */
   contract(c: GeminiContract): GeminiContract {
@@ -313,7 +342,8 @@ export class Router {
     // The same legs, side and stake route the same way: reuse another wallet's routing while
     // it's fresh (or wait for it if it's in flight), as long as every quote spends exactly its
     // part of the stake; otherwise route now.
-    const key = JSON.stringify([side, String(stake), usable.map((l) => [l.index, l.how, l.key, l.spec.weightBps, l.spec.leverage, onPhoenix(l)])]);
+    const shape = JSON.stringify([side, usable.map((l) => [l.index, l.how, l.key, l.spec.weightBps, l.spec.leverage, onPhoenix(l)])]);
+    const key = JSON.stringify([String(stake), shape]);
     const apply = (plan: Plan) => {
       const legsNow = usable.filter((l) => isPaper(l.how) || plan.kept.has(l.index));
       const swapLegs = legsNow.filter((l) => !isPaper(l.how));
@@ -326,33 +356,68 @@ export class Router {
     };
     let plan: Plan | null = null;
     let sized: ReturnType<typeof apply> = null;
-    const cached = this.#plans.get(key);
-    if (cached && cached.at > now - TEMPLATE_TTL_MS) {
+    /** This trade's routing at this stake, if another build made it moments ago (or is making it). */
+    const cachedPlan = () => {
+      const cached = this.#plans.get(key);
+      return cached && cached.at > now - TEMPLATE_TTL_MS ? cached : null;
+    };
+    const reuse = async (cached: PlanEntry) => {
       use.template = cached.done ? "hit" : "wait";
       plan = await cached.plan.catch(() => null);
       sized = plan?.shareable ? apply(plan) : null;
       if (!sized) plan = null;
+    };
+    // Checked without awaiting first, so builds started together find each other's routing.
+    const cached = cachedPlan();
+    if (cached) await reuse(cached);
+    // Another stake of the same trade, quoted moments ago: scale its routing (see the header). A
+    // wallet asking again for a trade and stake it was just answered from a scaled routing (a
+    // retry after a refused submit) quotes afresh instead, and the routings it scaled from go.
+    const mine = `${user.toBase58()} ${key}`;
+    const roots = plan ? [] : this.#nearRoots(shape, stake, now);
+    if (!plan && (this.#scaledFor.get(mine) ?? 0) > now - TEMPLATE_TTL_MS) {
+      this.#scaledFor.delete(mine);
+      this.#roots.delete(shape);
+    } else if (roots.length) {
+      plan = await this.#scaled(roots, usable, stake);
+      sized = plan ? apply(plan) : null;
+      if (sized) {
+        use.template = "scaled";
+        this.#sweep(now);
+        this.#scaledFor.set(mine, now);
+      } else {
+        plan = null;
+        // While this build waited, another may have started routing this stake: wait for that one.
+        const meanwhile = cachedPlan();
+        if (meanwhile) await reuse(meanwhile);
+      }
     }
     if (!plan) {
       use.template = "miss";
       const routing = this.#plan(usable, stake, side, lane, use, now, user);
-      const entry = { at: now, done: false, plan: routing };
-      this.#sweepPlans(now);
+      const entry: PlanEntry = { at: now, done: false, plan: routing };
+      this.#sweep(now);
       this.#plans.set(key, entry);
+      const root: Root = { at: now, stake, entry };
+      this.#roots.set(shape, [root, ...(this.#roots.get(shape) ?? []).filter((r) => r.at > now - TEMPLATE_TTL_MS)].slice(0, MAX_ROOTS));
+      const forget = () => {
+        if (this.#plans.get(key) === entry) this.#plans.delete(key);
+        const roots = this.#roots.get(shape)?.filter((r) => r !== root);
+        if (roots?.length) this.#roots.set(shape, roots);
+        else if (roots) this.#roots.delete(shape);
+      };
       routing.then(
         (p) => {
           entry.done = true;
-          if (!p.shareable && this.#plans.get(key) === entry) this.#plans.delete(key);
+          if (!p.shareable) forget();
         },
-        () => {
-          if (this.#plans.get(key) === entry) this.#plans.delete(key);
-        },
+        forget,
       );
       plan = await routing;
       sized = apply(plan);
     }
     if (!sized) throw new ApiError(502, "routing_failed", "A route disappeared while sizing the trade. Try again.");
-    this.#templateStats[use.template === "hit" ? "hits" : use.template === "wait" ? "waits" : "misses"]++;
+    this.#templateStats[({ hit: "hits", wait: "waits", scaled: "scaled", miss: "misses" } as const)[use.template ?? "miss"]]++;
     usable = sized.legsNow;
     excluded.push(...plan.excluded);
     const { swapLegs, parts } = sized;
@@ -371,10 +436,69 @@ export class Router {
     return done(venue);
   }
 
-  /** Drops plans past their time now and then, so the map holds only trades in progress. */
-  #sweepPlans(now: number) {
-    if (this.#plans.size < 100) return;
-    for (const [k, v] of this.#plans) if (v.done && v.at <= now - TEMPLATE_TTL_MS) this.#plans.delete(k);
+  /** Drops plans (and routings to scale from) past their time now and then, so the maps hold only trades in progress. */
+  #sweep(now: number) {
+    const old = now - TEMPLATE_TTL_MS;
+    if (this.#plans.size >= 100) for (const [k, v] of this.#plans) if (v.done && v.at <= old) this.#plans.delete(k);
+    if (this.#roots.size >= 100) {
+      for (const [k, v] of this.#roots) {
+        const fresh = v.filter((r) => !r.entry.done || r.at > old);
+        if (fresh.length) this.#roots.set(k, fresh);
+        else this.#roots.delete(k);
+      }
+    }
+    if (this.#scaledFor.size >= 1_000) for (const [k, at] of this.#scaledFor) if (at <= old) this.#scaledFor.delete(k);
+  }
+
+  /**
+   * The fresh routings of a trade (`shape`) that a build at `stake` might scale from: quoted
+   * within TEMPLATE_TTL_MS at a stake within SCALE_LIMITS' ratio, done ones first, newest first.
+   */
+  #nearRoots(shape: string, stake: bigint, now: number): Root[] {
+    const near = (r: { stake: bigint }) => {
+      const ratio = Number(stake) / Number(r.stake);
+      return ratio >= SCALE_LIMITS.minRatio && ratio <= SCALE_LIMITS.maxRatio;
+    };
+    const roots = (this.#roots.get(shape) ?? []).filter((r) => r.at > now - TEMPLATE_TTL_MS && near(r));
+    return roots.sort((x, y) => Number(y.entry.done) - Number(x.entry.done) || y.at - x.at);
+  }
+
+  /**
+   * A routing for `stake` scaled from one of `roots` (#nearRoots; see the header), or null when
+   * none can be: a swap leg's quote or answer that can't be scaled (too much price impact, too
+   * far from the quoted amount, a layout scale.ts doesn't read, an answer that's no template).
+   * Waits for a routing in flight. The scaled routing is no wallet's own, so every wallet builds
+   * its swap legs from the templates: no Jupiter call.
+   */
+  async #scaled(roots: Root[], usable: MappedLeg[], stake: bigint): Promise<Plan | null> {
+    for (const r of roots) {
+      const p = await r.entry.plan.catch(() => null);
+      if (!p?.shareable) continue;
+      const legsNow = usable.filter((l) => isPaper(l.how) || p.kept.has(l.index));
+      const swapLegs = legsNow.filter((l) => !isPaper(l.how));
+      if (!swapLegs.length) continue;
+      const parts = splitStake(stake - escrowShare(legsNow, stake), swapLegs.map((l) => l.spec.weightBps));
+      const ways = new Map<number, Way>();
+      const swaps: Plan["swaps"] = new Map();
+      for (const [j, l] of swapLegs.entries()) {
+        const w = p.ways.get(l.index);
+        if (w === undefined) break;
+        if (!isQuote(w)) {
+          ways.set(l.index, w);
+          continue;
+        }
+        const template = await p.swaps.get(l.index)?.template;
+        const scaled = template ? scaleTemplate(template, parts[j]) : null;
+        if (!scaled) break;
+        // The template's quote is the winner's own (a JupQuote), scaled.
+        const quote = scaled.quote as unknown as Winner["quote"];
+        ways.set(l.index, { ...w, quote, outAmountRaw: quote.outAmount, units: (w.units * Number(parts[j])) / Number(w.quote.inAmount) });
+        swaps.set(l.index, { res: Promise.resolve(scaled.res), template: Promise.resolve(scaled) });
+      }
+      if (ways.size !== swapLegs.length) continue;
+      return { kept: p.kept, excluded: p.excluded, ways, owner: TEMPLATE_OWNER.toBase58(), swaps, shareable: true };
+    }
+    return null;
   }
 
   /**

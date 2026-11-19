@@ -1,0 +1,138 @@
+// Scaled swap templates: one quote's swap reused at a nearby amount, so a trade sheet's builds at
+// other amounts (chips, typed amounts) need no Jupiter call. Jupiter's exact-in route instruction
+// carries the amounts as its last arguments (in_amount, quoted_out_amount); the route itself is a
+// percentage split over pools, the same at any size. Rewriting those two numbers gives the same
+// route at another size: the new input exactly (proof of trade wants the leg's exact part of the
+// stake), the expected output scaled in proportion, and Jupiter's slippage limit applied on-chain
+// to that. Pure, so it's unit-tested on recorded answers.
+//
+// Only safe when the price barely depends on the size: the quote moved the price less than
+// SCALE_LIMITS.maxPriceImpactPct, and the new amount is within SCALE_LIMITS' ratio of the quoted
+// one. At the limits (0.1% impact, 2.5x) the proportional estimate is off by about 0.15%, inside
+// the 1% slippage. A fill worse than the slippage limit, or a pool that needs accounts the quote
+// didn't name, fails the transaction's preflight: nothing is mistraded.
+//
+// Only layouts read with certainty are rewritten: Jupiter v6 `route` and `shared_accounts_route`,
+// whose Borsh arguments end in in_amount u64, quoted_out_amount u64, slippage_bps u16,
+// platform_fee_bps u8, and only when those read back exactly the quote's own numbers. Anything
+// else (exact-out, route_v2, token ledgers, setup that isn't an idempotent account create, a
+// cleanup) isn't scaled; the caller quotes afresh.
+import type { JupSwapInstructions } from "./index.ts";
+import { ASSOCIATED_TOKEN_PROGRAM } from "./index.ts";
+import type { SwapLeg, SwapTemplate } from "./template.ts";
+
+type JupIx = JupSwapInstructions["swapInstruction"];
+
+/** Jupiter's v6 aggregator program (a public mainnet address). */
+export const JUPITER_V6_PROGRAM = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"; // ggignore
+
+/** Anchor discriminators (sha256("global:<name>")[..8]) of the exact-in routes read here. */
+export const EXACT_IN_ROUTES: Record<string, string> = {
+  e517cb977ae3ad2a: "route",
+  c1209b3341d69c81: "shared_accounts_route",
+};
+
+/** in_amount u64 + quoted_out_amount u64 + slippage_bps u16 + platform_fee_bps u8. */
+const TAIL = 19;
+
+/**
+ * When a quote may be scaled: its price impact (percent, as the bank reads Jupiter's fraction)
+ * at most `maxPriceImpactPct`, and the new input between `minRatio` and `maxRatio` times the
+ * quoted one. 2.5x each way reaches the next web amount chip ($10, $20, $50, $100) from any one.
+ */
+export const SCALE_LIMITS = { maxPriceImpactPct: 0.1, minRatio: 0.4, maxRatio: 2.5 };
+export type ScaleLimits = typeof SCALE_LIMITS;
+
+/** The amounts an exact-in route instruction carries, or null if it isn't one read here. */
+export function routeAmounts(ix: JupIx): { name: string; inAmount: bigint; quotedOutAmount: bigint; slippageBps: number; platformFeeBps: number } | null {
+  if (ix.programId !== JUPITER_V6_PROGRAM) return null;
+  const data = Buffer.from(ix.data, "base64");
+  // Discriminator, the route plan's length (u32) and at least the tail.
+  if (data.length < 8 + 4 + TAIL) return null;
+  const name = EXACT_IN_ROUTES[data.subarray(0, 8).toString("hex")];
+  if (!name) return null;
+  const at = data.length - TAIL;
+  return {
+    name,
+    inAmount: data.readBigUInt64LE(at),
+    quotedOutAmount: data.readBigUInt64LE(at + 8),
+    slippageBps: data.readUInt16LE(at + 16),
+    platformFeeBps: data.readUInt8(at + 18),
+  };
+}
+
+/** Jupiter's minimum output for an exact-in quote: the output less its slippage, rounded in the output's favour (as its quotes do). */
+export const minOut = (out: bigint, slippageBps: number) => out - (out * BigInt(slippageBps)) / 10_000n;
+
+/** Why `leg` can't be scaled to `inAmount`, or null if it can (see the header). */
+export function unscalable(leg: SwapLeg, inAmount: bigint, limits: ScaleLimits = SCALE_LIMITS): string | null {
+  const { res, quote } = leg;
+  const q = quote;
+  if (res.error) return `Jupiter answered an error: ${res.error}`;
+  if (q.swapMode !== undefined && q.swapMode !== "ExactIn") return `the quote is ${q.swapMode}`;
+  if (res.tokenLedgerInstruction) return "it uses a token ledger";
+  if (res.cleanupInstruction) return "it has a cleanup instruction";
+  if (res.setupInstructions.some((ix) => ix.programId !== ASSOCIATED_TOKEN_PROGRAM || ix.data !== "AQ==")) return "its setup does more than create token accounts";
+  const r = routeAmounts(res.swapInstruction);
+  if (!r) return "the swap isn't a route instruction read here";
+  const quotedIn = BigInt(q.inAmount);
+  const out = BigInt(q.outAmount);
+  // The instruction's numbers must be the quote's, so the bytes rewritten are the amounts.
+  if (r.inAmount !== quotedIn || r.quotedOutAmount !== out) return "the route's amounts aren't the quote's";
+  if (q.slippageBps === undefined || r.slippageBps !== q.slippageBps) return "the route's slippage isn't the quote's";
+  if (r.platformFeeBps !== (q.platformFee?.feeBps ?? 0)) return "the route's platform fee isn't the quote's";
+  if (BigInt(q.otherAmountThreshold) !== minOut(out, r.slippageBps)) return "the quote's minimum isn't its output less slippage";
+  const impact = q.priceImpactPct === undefined || q.priceImpactPct === "" ? NaN : Number(q.priceImpactPct) * 100;
+  if (!Number.isFinite(impact)) return "the quote says no price impact";
+  if (Math.abs(impact) > limits.maxPriceImpactPct) return `price impact ${impact.toFixed(3)}% is over ${limits.maxPriceImpactPct}%`;
+  if (quotedIn <= 0n || out <= 0n || inAmount <= 0n) return "nothing to scale";
+  const ratio = Number(inAmount) / Number(quotedIn);
+  if (ratio < limits.minRatio || ratio > limits.maxRatio) return `${ratio.toFixed(2)}x the quoted amount is outside ${limits.minRatio}x-${limits.maxRatio}x`;
+  return null;
+}
+
+/**
+ * `leg` (a template or one wallet's answer) at `inAmount` instead of its quoted input: the route
+ * instruction's in_amount set to `inAmount`, its quoted_out_amount and the quote's output, minimum
+ * and per-hop amounts scaled in proportion. Accounts, programs, the route, slippage and every
+ * other instruction stay as they are. Throws when unscalable says it can't be.
+ */
+export function scaleSwap<T extends SwapLeg>(leg: T, inAmount: bigint, limits: ScaleLimits = SCALE_LIMITS): T {
+  const why = unscalable(leg, inAmount, limits);
+  if (why) throw new Error(`can't scale this swap: ${why}`);
+  const quotedIn = BigInt(leg.quote.inAmount);
+  const scale = (n: bigint) => (n * inAmount) / quotedIn;
+  const out = scale(BigInt(leg.quote.outAmount));
+  const slippageBps = leg.quote.slippageBps!;
+  const data = Buffer.from(leg.res.swapInstruction.data, "base64");
+  data.writeBigUInt64LE(inAmount, data.length - TAIL);
+  data.writeBigUInt64LE(out, data.length - TAIL + 8);
+  const routePlan = leg.quote.routePlan?.map((hop) => {
+    const info = hop.swapInfo as (typeof hop.swapInfo & { inAmount?: string; outAmount?: string }) | undefined;
+    if (!info) return hop;
+    return {
+      ...hop,
+      swapInfo: {
+        ...info,
+        ...(info.inAmount !== undefined ? { inAmount: String(scale(BigInt(info.inAmount))) } : {}),
+        ...(info.outAmount !== undefined ? { outAmount: String(scale(BigInt(info.outAmount))) } : {}),
+      },
+    };
+  });
+  return {
+    ...leg,
+    res: { ...leg.res, swapInstruction: { ...leg.res.swapInstruction, data: data.toString("base64") } },
+    quote: {
+      ...leg.quote,
+      inAmount: String(inAmount),
+      outAmount: String(out),
+      otherAmountThreshold: String(minOut(out, slippageBps)),
+      ...(routePlan ? { routePlan } : {}),
+    },
+  } as T;
+}
+
+/** A template at `inAmount` (scaleSwap), or null when it can't be scaled there. */
+export function scaleTemplate(t: SwapTemplate, inAmount: bigint, limits: ScaleLimits = SCALE_LIMITS): SwapTemplate | null {
+  return unscalable(t, inAmount, limits) ? null : scaleSwap(t, inAmount, limits);
+}

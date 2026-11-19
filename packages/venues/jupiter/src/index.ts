@@ -232,3 +232,4 @@ export function splitStake(stake: bigint, weightsBps: number[]): bigint[] {
 
 export * from "./lend.ts";
 export * from "./template.ts";
+export * from "./scale.ts";
