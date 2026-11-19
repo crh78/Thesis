@@ -70,6 +70,8 @@ export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
     named: 0, phoenix: 0, openIx: 65_535, openMask: 0, usdcStart: new BN(0), outputsStart: Array.from({ length: 10 }, () => new BN(0)), bump: 255,
   });
   const tickets = await Promise.all((o.tickets ?? []).map(async (p) => ({ pubkey: ticketAddress(owner.publicKey, p), account: { data: await ticket(p), owner: program.programId, lamports: 1, executable: false } })));
+  // Position accounts a take's scan finds (`position.all` filters on the take at offset 40).
+  const scanned: PublicKey[] = [];
   const info = (key: PublicKey) => {
     const data = accounts.get(key.toBase58());
     return data ? { data, owner: program.programId, lamports: 1, executable: false, rentEpoch: 0 } : null;
@@ -80,9 +82,14 @@ export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
     getAccountInfo: async (key: PublicKey) => info(key),
     getAccountInfoAndContext: async (key: PublicKey) => ({ context: { slot: 1 }, value: info(key) }),
     getMultipleAccountsInfo: async (keys: PublicKey[]) => keys.map(info),
+    getMultipleAccountsInfoAndContext: async (keys: PublicKey[]) => ({ context: { slot: 1 }, value: keys.map(info) }),
     // Only the abandoned-ticket scan (it filters on the rent payer at offset 72) finds anything.
     getProgramAccounts: async (_: PublicKey, c?: { filters?: { memcmp?: { offset: number } }[] }) =>
-      (c?.filters ?? []).some((f) => f.memcmp?.offset === 72) ? tickets : [],
+      (c?.filters ?? []).some((f) => f.memcmp?.offset === 72)
+        ? tickets
+        : (c?.filters ?? []).some((f) => f.memcmp?.offset === 40)
+          ? scanned.map((pubkey) => ({ pubkey, account: info(pubkey)! })).filter((a) => a.account)
+          : [],
     getTokenAccountBalance: async () => ({ value: { amount: "100000000" } }),
     getParsedTokenAccountsByOwner: async () => ({ value: [] }),
     getSignaturesForAddress: async () => [],
@@ -117,7 +124,7 @@ export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
       return Buffer.from(tx.serialize()).toString("base64");
     });
   const sigs = () => sent.map((tx) => base58(tx.signatures[0]));
-  return { service, options, wallet, owner, appPayer, take, sent, sigs, sign, logs, refreshed, statePath };
+  return { service, options, wallet, owner, author, appPayer, take, sent, sigs, sign, logs, refreshed, statePath, accounts, scanned, program };
 }
 
 /** Resolves on the next turns of the event loop (lets background work move on). */

@@ -143,6 +143,18 @@ async function e2e(): Promise<void> {
     checks.push(["fade: a short of each leg, each in its own child", fadeKids.length === 2 && fadeKids.every((k) => !k.long && k.size > 0n)]);
     checks.push(["fade: children apart from the back's", !fadeKids.some((k) => k.account === backKids[0].account)]);
 
+    console.log("\n2b. Sell 40% of the back");
+    const partQuote = await call("POST", `/takes/${take.id}/positions/${backPos.address}/exit`, { owner: me, bps: 4_000 });
+    console.log(`  part: expect $${partQuote.json.expectedUsd?.toFixed(2)}, at least $${partQuote.json.minimumUsd?.toFixed(2)}`);
+    await send("sell 40% of the back", partQuote);
+    checks.push(["partial sale: $12 of $30, no cash-out (the freed margin stays with the rest)", partQuote.json.full === false && partQuote.json.sale?.stakeUsd === 12 && partQuote.json.phoenixCashOut === false]);
+    const partKids = await children(backPos.address);
+    const kept = Number(partKids[0]?.size ?? 0n) / Number(backKids[0].size);
+    console.log(`  the long kept ${(kept * 100).toFixed(1)}% of its lots`);
+    checks.push(["partial sale: the long is cut to about 60% of its lots, still open", partKids.length === 1 && partKids[0].long && kept > 0.55 && kept < 0.65]);
+    const partChain = await thesis.account.position.fetch(new PublicKey(backPos.address), "confirmed");
+    checks.push(["partial sale: $18 left on-chain, not sold", partChain.remaining.toNumber() === 18_000_000 && !partChain.exited]);
+
     console.log("\n3. Sell both, then cash out");
     for (const pos of [backPos, fadePos]) {
       const quote = await call("POST", `/takes/${take.id}/positions/${pos.address}/exit`, { owner: me });

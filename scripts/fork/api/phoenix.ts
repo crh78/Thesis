@@ -21,6 +21,7 @@ import {
   type TraderView,
 } from "@thesis/venues/phoenix";
 import { ApiError, type ServiceOpts } from "./common.ts";
+import { partLots } from "./sales.ts";
 import type { StateStore } from "./store.ts";
 
 /** One Phoenix leg of one position: the take leg, its child subaccount and market. */
@@ -301,17 +302,24 @@ export class PhoenixDesk {
     return out;
   }
 
-  /** Market orders closing every open Phoenix position of a position's legs (a sale). */
-  async closeLegs(position: PublicKey, owner: PublicKey, names: Map<number, string>): Promise<VenueLeg[]> {
+  /**
+   * Market orders closing every open Phoenix position of a position's legs (a sale), or with `bps`
+   * (a partial sale) that share of each one's lots, rounded toward zero: 422 `part_too_small` when
+   * that rounds a leg's order to nothing. A partial close leaves the child's collateral in place:
+   * the rest of the leg keeps it (lower leverage) until it's sold too, then the cash-out sweeps it.
+   */
+  async closeLegs(position: PublicKey, owner: PublicKey, names: Map<number, string>, bps?: number): Promise<VenueLeg[]> {
     const legs = this.legsOf(position);
     const traders = await this.#traders(owner, legs.map((l) => l.sub));
     const out: VenueLeg[] = [];
     for (const [i, l] of legs.entries()) {
       const p = traders[i]?.positions[0];
       if (!p) continue; // already closed (an earlier sale attempt, or liquidated)
+      const baseLots = bps === undefined ? p.baseLots : partLots(p.baseLots, bps);
+      if (baseLots === 0n) throw new ApiError(422, "part_too_small", `That's too small a part of ${names.get(l.leg) ?? l.symbol} to sell on Phoenix. Sell more.`);
       const mid = await this.venue.mid(l.symbol);
       if (!mid) throw new ApiError(422, "no_exit_route", `Phoenix has no price for ${l.symbol} right now.`);
-      out.push(await this.venue.closeLeg({ owner, sub: l.sub, symbol: l.symbol, baseLots: p.baseLots, price: mid, label: names.get(l.leg) ?? l.symbol }));
+      out.push(await this.venue.closeLeg({ owner, sub: l.sub, symbol: l.symbol, baseLots, price: mid, label: names.get(l.leg) ?? l.symbol }));
     }
     return out;
   }
