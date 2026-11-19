@@ -156,7 +156,9 @@ select.field { appearance: none; color: var(--text); }
 .err { color: var(--down); font-size: 14px; margin: 8px 0; }
 .card { display: block; padding: 18px 0; border-bottom: 1px solid var(--hairline); }
 .card .claim { font-size: 24px; margin: 8px 0 6px; }
-.check { width: 64px; height: 64px; border-radius: 50%; background: var(--back-fill); color: var(--back-ink); display: grid; place-items: center; font-size: 32px; margin: 20px auto 12px; }
+/* `clear`: a sheet's close button (.x) floats right above it, and a grid box sits beside floats, so it
+   centered in the space left of the button (18 px off). */
+.check { clear: both; width: 64px; height: 64px; border-radius: 50%; background: var(--back-fill); color: var(--back-ink); display: grid; place-items: center; font-size: 32px; margin: 20px auto 12px; }
 
 /* Tags: "Called it" wherever a take is up since it was posted. */
 .tag { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.4px; text-transform: uppercase; background: var(--tile); color: var(--muted); white-space: nowrap; }
