@@ -4,7 +4,7 @@ export { ratioFor, usPersonsFor, effectiveMultiplier, underlyingUnits, readScale
 export { getAssetBank, viewAssetBank, loadBankState, type AssetBank, type UnderlyingView, type IssuerView, type GetAssetBankOpts } from "./read.ts";
 export { bestIssuer, cachedMintReads, issuerPool, MINT_READ_TTL_MS, PRICEABLE_MIN_POOLED_USD, type BestIssuerOpts, type BestIssuerResult, type Candidate, type ReadMints } from "./route.ts";
 export { AssetBankPoller, RequestCounter, TIERS, type TierName } from "./poller.ts";
-export { loadBankConfig, CONFIG_ENV, FRESHNESS_ENV, type BankConfig } from "./config.ts";
+export { loadBankConfig, parseDexes, CONFIG_ENV, DEXES_ENV, FRESHNESS_ENV, type BankConfig } from "./config.ts";
 export { FileSink, SupabaseSink, defaultSink, type BankSink, type Dirty } from "./sinks.ts";
 export { BUILDS_BUSY_HOLD_MS, bankPrices, buildsBusy, buildsBusyFileFor, markBuildsBusy, pricesFileFor, readBankPrices, type BankPrices } from "./side-files.ts";
 export { Scheduler, type Job, type Clock } from "./scheduler.ts";

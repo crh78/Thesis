@@ -32,6 +32,8 @@ Reads `JUPITER_API_KEY` and `QUICKNODE_RPC_URL` from the repo-root `.env`. Write
 
 Probes go stalest first, and each batch is sized to whatever the Jupiter budget leaves after prices. A tier that fails retries after 30 s, and a run that overruns is never started twice.
 
+**Probe venues (`ASSET_BANK_DEXES`).** Comma-separated Jupiter DEX labels, sent as the quote's `dexes` parameter, so a token counts as tradeable only if it routes through those venues. Unset (mainnet): every venue. On the fork it must be the fork router's list, `FORK_DEXES` in `scripts/fork/lib.ts` (the value is in `infra/executor/executor.env.example`): otherwise a token whose only route runs through a venue the fork can't use (URA via ZeroFi, for example) is offered by the take builder and the receipt can't buy it. Each probe records the list it used (`probe.dexes`); a probe taken with a different list is re-probed first, so a changed setting takes effect within a few probe runs of a restart, and the catalog's flags follow at the next liquidity sync (every 15 minutes).
+
 Next to the file sink's `asset-bank.json` (`src/side-files.ts`):
 
 - `asset-bank.prices.json`: the token prices and pooled liquidity alone, rewritten on every flush. The fork API's live display values read it before asking Jupiter (the main file is ~25 MB).

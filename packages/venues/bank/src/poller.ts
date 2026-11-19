@@ -5,7 +5,8 @@
 //                         pause, fees), Pyth feed ids
 //   prices     ~90 s      Jupiter Price v3, 50 mints per call, probe candidates only
 //   probes     every 60 s $100 and $1,000 USDC quotes at maxAccounts=30 for the stalest tokens,
-//                         sized to the Jupiter budget so each routed token refreshes every ~7.5 min
+//                         sized to the Jupiter budget so each routed token refreshes every ~7.5 min,
+//                         through ASSET_BANK_DEXES only when it is set (the fork's FORK_DEXES)
 //   phoenix    10 min     every perp market and its order-book depth
 //   gemini     10 min     active prediction-market events by category
 //   cards      15 min     Collector Crypt listings, and the cards baskets picked (card legs)
@@ -298,7 +299,8 @@ export class AssetBankPoller {
   async probes(): Promise<void> {
     const nowMs = this.clock.now();
     const limit = Math.min(this.probeBudget(), this.maxProbesPerRun);
-    const stale = selectStale(this.candidates(), nowMs, { ttlMs: this.config.probeTtlMs, unroutedTtlMs: this.config.unroutedTtlMs, limit });
+    const dexes = this.config.dexes ?? undefined;
+    const stale = selectStale(this.candidates(), nowMs, { ttlMs: this.config.probeTtlMs, unroutedTtlMs: this.config.unroutedTtlMs, limit, dexes });
     if (!stale.length) return;
     const [small, large] = this.config.probeSizesUsd;
     let quotes = 0;
@@ -310,12 +312,13 @@ export class AssetBankPoller {
         break;
       }
       probed++;
-      const q1 = toProbeQuote(small, await this.jup.quote(t.mint, small, { maxAccounts: this.config.maxAccounts }));
+      // Through the venues the router uses (ASSET_BANK_DEXES on the fork), so "tradeable" means it can buy it.
+      const q1 = toProbeQuote(small, await this.jup.quote(t.mint, small, { maxAccounts: this.config.maxAccounts, dexes }));
       quotes++;
       // If $100 does not route, $1,000 will not either: save the request.
-      const q2 = q1.routed ? toProbeQuote(large, await this.jup.quote(t.mint, large, { maxAccounts: this.config.maxAccounts })) : { ...q1, usd: large, error: `not quoted: $${small} did not route` };
+      const q2 = q1.routed ? toProbeQuote(large, await this.jup.quote(t.mint, large, { maxAccounts: this.config.maxAccounts, dexes })) : { ...q1, usd: large, error: `not quoted: $${small} did not route` };
       if (q1.routed) quotes++;
-      t.probe = { at: this.nowIso(), maxAccounts: this.config.maxAccounts, quotes: [q1, q2] };
+      t.probe = { at: this.nowIso(), maxAccounts: this.config.maxAccounts, ...(dexes ? { dexes } : {}), quotes: [q1, q2] };
       this.dirty.tokens.add(t.mint);
     }
     this.#reclassify();

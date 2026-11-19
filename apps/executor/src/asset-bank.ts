@@ -4,7 +4,8 @@
 //   pnpm --filter @thesis/executor asset-bank -- --once       every tier once, then exit
 //   ... --once --tiers=discovery,prices,probes --max-probes=20
 //
-// Cadences and limits come from ASSET_BANK_* env vars (packages/venues/bank/README.md).
+// Cadences and limits come from ASSET_BANK_* env vars (packages/venues/bank/README.md). On the fork,
+// ASSET_BANK_DEXES limits the liquidity probes to the fork router's venues (FORK_DEXES).
 // ASSET_BANK_SINK=supabase writes to Supabase; the default is <repo>/.data/asset-bank.json.
 // After each Gemini sweep the take builder's catalog gets the new contracts (and loses the
 // expired ones) when SECURITIES_INDEX_SECRET is set (supabase/functions/.env), and every 15 minutes
@@ -59,6 +60,7 @@ const yieldToTrades = busyFile ? () => buildsBusy(busyFile) : undefined;
 const poller = await AssetBankPoller.open({ sink, config, log, afterGemini, pickedCards, yieldToTrades });
 if (args["max-probes"]) poller.maxProbesPerRun = Number(args["max-probes"]);
 console.log(`${stamp()} asset-bank: sink=${sink.name}, jupiter=${poller.jup.label} at ${config.jupiterRpm} req/min, ${Object.keys(poller.state.tokens).length} tokens loaded`);
+log(config.dexes ? `asset-bank: probes route only through ASSET_BANK_DEXES (${config.dexes.length} venues)` : "asset-bank: probes route through every Jupiter venue (ASSET_BANK_DEXES unset)");
 
 // The catalog's tradeable/thin flags, from the bank's live probes (refuses on stale probes).
 const syncLiq = () =>
