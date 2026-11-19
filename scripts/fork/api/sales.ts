@@ -8,8 +8,18 @@
 // Each leg is reduced by the same fraction: spot and yield legs sell a share of the tokens the
 // trade bought (`tokensToSell`), Phoenix legs close that fraction of their lots (`partLots`), paper
 // legs get that fraction of the escrow back (the program pays it).
+//
+// A sale's build: Phoenix closes, then one swap per token (a holding sale sums what each of its
+// positions sells of a mint, `mergeInventory`), then one redeem per vault token, then each
+// position's record (exit_position or sell_part), the last one as the receipt. When that doesn't
+// fit in one transaction it's a sequence like a split trade's: the records ride in the last
+// transaction(s), after every swap, and the transactions go out back to back. Neither record
+// checks the swaps beside it, so that's fine on-chain; it just isn't atomic. A sale that stops
+// after some of its transactions went out is kept (`StoppedSale`, for a week): selling any of its
+// positions again finishes it, building only what didn't land (`saleLeft`) at the same sizes,
+// with the records still needed read from the positions on-chain.
 import { BPS_DENOMINATOR, MAX_OPEN_PARTS, maxPartialBps, partSale } from "@thesis/chain";
-import { ApiError } from "./common.ts";
+import { ApiError, type SaleStep, type StoppedSale } from "./common.ts";
 
 const FULL = Number(BPS_DENOMINATOR);
 
@@ -147,4 +157,65 @@ export function saleError(code: "remainder_below_minimum" | "too_many_open_sales
   if (code === "remainder_below_minimum") return remainderError(maxBps, valueUsd, minStakeUsd);
   if (code === "too_many_open_sales") return new ApiError(409, "too_many_open_sales", `${MAX_OPEN_PARTS} partial sales are still settling. Try again in a little while, or sell all.`);
   return new ApiError(422, "part_too_small", "That's too small a part to sell. Sell more.");
+}
+
+/** How long a stopped sale is kept to finish. */
+export const STOPPED_SALE_TTL_MS = 7 * 24 * 60 * 60_000;
+
+/** What a sale sells of one token: the mint, the base units, and whether they're vault shares (redeemed, not swapped). */
+export type Inventory = { mint: string; amount: bigint; isYield: boolean };
+
+/**
+ * The tokens several positions' sales sell, summed per mint, in first-seen order: one swap (or
+ * redeem) per token however many positions hold it. Each position's record is unchanged. Nothing
+ * is lost to rounding: each amount is the exact sum.
+ */
+export function mergeInventory(lists: Inventory[][]): Inventory[] {
+  const out = new Map<string, Inventory>();
+  for (const l of lists.flat()) {
+    if (l.amount <= 0n) continue;
+    const had = out.get(l.mint);
+    if (had && had.isYield !== l.isYield) throw new ApiError(422, "inventory_unavailable", "A token is both a spot leg and a yield leg in this sale.");
+    out.set(l.mint, { mint: l.mint, amount: (had?.amount ?? 0n) + l.amount, isYield: l.isYield });
+  }
+  return [...out.values()];
+}
+
+/** A transaction's fate, as a stopped sale reads it: landed, didn't (failed or expired), or may still land. */
+export type TxFate = "landed" | "failed" | "pending";
+
+/**
+ * What a stopped sale still has to do, from its transactions' fates: the swaps, redeems, Phoenix
+ * closes and records of the ones that didn't land (swaps and redeems summed per mint). Null while
+ * one may still land (finish it once that's known). Records are only a hint here: the build that
+ * finishes reads each position on-chain.
+ */
+export function saleLeft(txs: Pick<StoppedSale["txs"][number], "steps">[], fates: TxFate[]) {
+  if (fates.includes("pending")) return null;
+  const sells = new Map<string, bigint>();
+  const redeems = new Map<string, bigint>();
+  const phoenix: { position: string; leg: number }[] = [];
+  const records = new Set<string>();
+  txs.forEach((tx, i) => {
+    if (fates[i] === "landed") return;
+    for (const step of tx.steps) {
+      if (step.kind === "sell") sells.set(step.mint, (sells.get(step.mint) ?? 0n) + BigInt(step.amount));
+      else if (step.kind === "redeem") redeems.set(step.mint, (redeems.get(step.mint) ?? 0n) + BigInt(step.amount));
+      else if (step.kind === "phoenix") phoenix.push({ position: step.position, leg: step.leg });
+      else records.add(step.position);
+    }
+  });
+  return { sells, redeems, phoenix, records };
+}
+
+/** Per transaction of a build, the steps of its legs (`steps`, by leg index; null: none), with `receipt`'s step in the last one. */
+export function stepsByTx(txLegs: number[][], steps: (SaleStep | null)[], receipt: SaleStep): SaleStep[][] {
+  return txLegs.map((legs, i) => [...legs.flatMap((j) => steps[j] ?? []), ...(i === txLegs.length - 1 ? [receipt] : [])]);
+}
+
+/** The answer to a sale that stopped partway: 422 `sale_incomplete`. */
+export function saleIncompleteError(position: string, s: StoppedSale): ApiError {
+  const e = new ApiError(422, "sale_incomplete", "Part of this sale went through, then it stopped. Sell again to finish it.");
+  e.body = { stoppedSale: { position, take: s.take, takeId: s.takeId, positions: s.sales.map((x) => x.address), at: new Date(s.at).toISOString() } };
+  return e;
 }
