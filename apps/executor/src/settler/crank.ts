@@ -1,14 +1,17 @@
 // The settler crank. Each tick:
 //   1. signs entry prices for positions that lack them, sale prices for positions their owners
-//      sold, and exit prices for held positions once a take's horizon has passed (pricing.ts
-//      decides which price);
+//      sold and for partial sales (`sell_part`), and exit prices for held positions once a take's
+//      horizon has passed (pricing.ts decides which price);
 //   2. settles takes whose author prices are in (or whose grace period has passed): a closed take
 //      (its author sold) on the author's sale prices, an open one at its horizon;
-//   3. settles each position that's ready, which closes it and refunds its rent: a sold one as
+//   3. settles partial sales that are ready, in seq order per position (the program's FIFO): each
+//      as soon as its prices are in, or at 0% once its grace period has passed;
+//   4. settles each position that's ready, which closes it and refunds its rent: a sold one as
 //      soon as its sale prices are in, the author's buy-in once its take settles, and a held one
-//      once its take has settled and the horizon's prices are in;
-//   4. mints any badge an author has earned but doesn't hold yet.
-// Steps 2-4 need no settler signature; the settler key just pays for them. What each tick loads
+//      once its take has settled and the horizon's prices are in; never while a partial sale of
+//      it waits to settle;
+//   5. mints any badge an author has earned but doesn't hold yet.
+// Steps 2-5 need no settler signature; the settler key just pays for them. What each tick loads
 // comes from open-set.ts: the open positions the database lists, with a full scan every 10 minutes.
 import BN from "bn.js";
 import { PublicKey, SYSVAR_CLOCK_PUBKEY, type Connection, type Keypair } from "@solana/web3.js";
@@ -21,11 +24,14 @@ import {
   profileAddress,
   recordEntryPricesIx,
   recordExitPricesIx,
+  recordPartPricesIx,
   recordSalePricesIx,
+  settlePartIx,
   settlePositionIx,
   settleTakeIx,
   type BadgeKindName,
   type ExitAccount,
+  type PartSaleAccount,
   type PositionAccount,
   type ProfileAccount,
   type TakeAccount,
@@ -64,6 +70,7 @@ export type TickSummary = {
   now: number;
   prices: SendResult;
   takes: SendResult;
+  parts: SendResult;
   positions: SendResult;
   badges: SendResult;
   waiting: string[];
@@ -80,11 +87,12 @@ export function pricedMask(take: TakeAccount, legsMask: number): number {
   return take.legs.reduce((m, _leg, i) => (legsMask & (1 << i) ? m | (1 << i) : m), 0);
 }
 
-/** Entry, the horizon's exit, or the owner's sale (`exit_position`). */
-export type Moment = "entry" | "exit" | "sale";
+/** Entry, the horizon's exit, the owner's sale (`exit_position`), or a partial sale (`sell_part`). */
+export type Moment = "entry" | "exit" | "sale" | "part";
 
-export function missingLegs(take: TakeAccount, p: PositionAccount, moment: Moment, exit?: ExitAccount | null): number[] {
-  const set = moment === "entry" ? p.entrySet : moment === "exit" ? p.exitSet : (exit?.priceSet ?? 0);
+/** Legs still missing a price at `moment`. For a sale or a partial sale, pass its exit or part account. */
+export function missingLegs(take: TakeAccount, p: PositionAccount, moment: Moment, sold?: { priceSet: number } | null): number[] {
+  const set = moment === "entry" ? p.entrySet : moment === "exit" ? p.exitSet : (sold?.priceSet ?? 0);
   const need = pricedMask(take, p.legsMask) & ~set;
   return take.legs.map((_, i) => i).filter((i) => need & (1 << i));
 }
@@ -103,13 +111,25 @@ export function settleReady(
   exit: ExitAccount | null,
   now: number,
   maxDelay: number,
-): "ready" | "running" | "waiting_for_take" | "waiting_for_prices" {
+): "ready" | "running" | "waiting_for_take" | "waiting_for_prices" | "waiting_for_parts" {
   if ((!exit || isAuthorBuyIn(take, p)) && !("settled" in take.status)) return "waiting_for_take";
   if (!exit && now < take.horizonEnd.toNumber()) return "running";
+  // Its partial sales settle first (the program's FIFO): their P&L feeds the position's win.
+  if ((p.parts ?? 0) > (p.partsSettled ?? 0)) return "waiting_for_parts";
   const scoreAt = exit ? "sale" : "exit";
   const from = exit ? exit.exitedAt.toNumber() : take.horizonEnd.toNumber();
   const priced = !missingLegs(take, p, "entry").length && !missingLegs(take, p, scoreAt, exit).length;
   return priced || now > from + maxDelay ? "ready" : "waiting_for_prices";
+}
+
+/**
+ * Whether `settle_part` will accept this partial sale once the ones before it have settled.
+ * Mirrors the program: its prices, entry to the sale, are in, or the grace period after the sale
+ * has passed (then it settles at 0%, unscored). It doesn't wait for the take.
+ */
+export function partSettleReady(take: TakeAccount, p: PositionAccount, part: PartSaleAccount, now: number, maxDelay: number): "ready" | "waiting_for_prices" {
+  const priced = !missingLegs(take, p, "entry").length && !missingLegs(take, p, "part", part).length;
+  return priced || now > part.soldAt.toNumber() + maxDelay ? "ready" : "waiting_for_prices";
 }
 
 /**
@@ -136,13 +156,30 @@ export function takeSettleReady(
   return priced || now > from + maxDelay ? "ready" : "waiting_for_prices";
 }
 
-/** The moments this position still needs prices for, and when each is. */
-function priceMoments(take: TakeAccount, p: PositionAccount, exit: ExitAccount | null, now: number): [Moment, number][] {
-  const out: [Moment, number][] = [["entry", p.openedAt.toNumber()]];
+/** One moment a position needs prices for: when it is, and for a sale or partial sale, its account. */
+export type PriceMomentItem = { moment: Moment; at: number; sold?: { priceSet: number } | null; seq?: number };
+
+/** Gave-up legs are remembered per position, moment (each partial sale its own) and leg. */
+const gaveUpKey = (position: PublicKey, m: PriceMomentItem, leg: number) =>
+  `${position}:${m.moment === "part" ? `part${m.seq}` : m.moment}:${leg}`;
+
+/**
+ * The moments this position still needs prices for, and when each is: its entry, each unsettled
+ * partial sale (at its own sale, on the same basis as the entry), and its sale or the horizon.
+ */
+export function priceMoments(
+  take: TakeAccount,
+  p: PositionAccount,
+  exit: ExitAccount | null,
+  parts: Keyed<PartSaleAccount>[],
+  now: number,
+): PriceMomentItem[] {
+  const out: PriceMomentItem[] = [{ moment: "entry", at: p.openedAt.toNumber() }];
+  for (const { account: part } of parts) out.push({ moment: "part", at: part.soldAt.toNumber(), sold: part, seq: part.seq });
   // A sold position scores on its sale (the author's buy-in too: it sets the take's headline),
   // so only held positions need horizon prices.
-  if (exit) out.push(["sale", exit.exitedAt.toNumber()]);
-  else if (now >= take.horizonEnd.toNumber()) out.push(["exit", take.horizonEnd.toNumber()]);
+  if (exit) out.push({ moment: "sale", at: exit.exitedAt.toNumber(), sold: exit });
+  else if (now >= take.horizonEnd.toNumber()) out.push({ moment: "exit", at: take.horizonEnd.toNumber() });
   return out;
 }
 
@@ -255,18 +292,18 @@ export class Settler {
     const waiting: string[] = [];
 
     // 1. Prices.
-    let { positions, takes, exits } = await this.#load(true);
+    let { positions, takes, exits, parts } = await this.#load(true);
     const scanned = this.#set.fullScan;
-    await this.#prefetchTokens(positions, takes, exits, now, rules);
+    await this.#prefetchTokens(positions, takes, exits, parts, now, rules);
     const priceItems: Item[] = [];
     for (const { publicKey, account: p } of positions) {
       const take = takes.get(p.take.toBase58());
       if (!take) continue;
       const exit = exits.get(publicKey.toBase58()) ?? null;
-      for (const [moment, at] of priceMoments(take, p, exit, now)) {
-        const legs = missingLegs(take, p, moment, exit).filter((i) => !this.#gaveUp.has(`${publicKey}:${moment}:${i}`));
+      for (const m of priceMoments(take, p, exit, parts.get(publicKey.toBase58()) ?? [], now)) {
+        const legs = missingLegs(take, p, m.moment, m.sold).filter((i) => !this.#gaveUp.has(gaveUpKey(publicKey, m, i)));
         if (!legs.length) continue;
-        const item = await this.#priceItem(publicKey, p, take, moment, at, legs, now, rules, waiting);
+        const item = await this.#priceItem(publicKey, p, take, m, legs, now, rules, waiting);
         if (item) priceItems.push(item);
       }
     }
@@ -299,7 +336,32 @@ export class Settler {
     }
     const settledTakes = await sendAll(connection, this.#o.settler, takeItems);
 
-    // 3. Positions: sold ones as soon as they're priced, the rest once their take settles.
+    // 3. Partial sales: each position's in seq order, as far as they're ready. Items go out in
+    // order (sendAll packs and sends them in sequence), so a later part follows the one before it.
+    ({ positions, takes, exits, parts } = await this.#load(false));
+    const partItems: Item[] = [];
+    for (const { publicKey, account: p } of positions) {
+      const take = takes.get(p.take.toBase58());
+      if (!take) continue;
+      let next = p.partsSettled;
+      for (const { account: part } of parts.get(publicKey.toBase58()) ?? []) {
+        if (part.seq !== next) break;
+        if (partSettleReady(take, p, part, now, maxDelay) !== "ready") {
+          waiting.push(`position ${publicKey} part ${part.seq}: waiting for prices`);
+          break;
+        }
+        partItems.push({
+          ix: await settlePartIx(program, { take: p.take, position: publicKey, owner: p.owner, seq: part.seq, rentPayer: part.rentPayer }),
+          cu: THESIS_COMPUTE_UNITS.settlePart,
+          label: `settle_part ${publicKey} part ${part.seq}`,
+        });
+        next++;
+      }
+    }
+    const settledParts = await sendAll(connection, this.#o.settler, partItems);
+
+    // 4. Positions: sold ones as soon as they're priced, the rest once their take settles; each
+    // once its partial sales have settled.
     ({ positions, takes, exits } = await this.#load(false));
     const positionItems: Item[] = [];
     // Whose profile a settlement this tick changes: the badges to check outside a full scan.
@@ -312,6 +374,10 @@ export class Settler {
       if (ready === "waiting_for_take" || ready === "running") continue;
       if (ready === "waiting_for_prices") {
         waiting.push(`position ${publicKey}: waiting for ${exit ? "sale prices" : "prices"}`);
+        continue;
+      }
+      if (ready === "waiting_for_parts") {
+        waiting.push(`position ${publicKey}: waiting for its partial sales to settle`);
         continue;
       }
       positionItems.push({
@@ -329,7 +395,7 @@ export class Settler {
     }
     const settledPositions = await sendAll(connection, this.#o.settler, positionItems);
 
-    // 4. Badges: every profile on a full scan. Otherwise the profiles that can have changed: the
+    // 5. Badges: every profile on a full scan. Otherwise the profiles that can have changed: the
     // owners of new positions (a first take earns its badge at once) and of what settled now.
     const fresh = this.#set.takeNewOwners();
     const settled = [...settledTakes.sent, ...settledPositions.sent]
@@ -338,8 +404,8 @@ export class Settler {
     const changed = scanned ? null : [...new Map([...fresh, ...settled].map((k) => [k.toBase58(), k])).values()];
     const badges = await sendAll(connection, this.#o.settler, await this.#badgeItems(changed));
 
-    const summary = { now, prices, takes: settledTakes, positions: settledPositions, badges, waiting, fullScan: scanned };
-    for (const [name, r] of Object.entries({ prices, takes: settledTakes, positions: settledPositions, badges })) {
+    const summary = { now, prices, takes: settledTakes, parts: settledParts, positions: settledPositions, badges, waiting, fullScan: scanned };
+    for (const [name, r] of Object.entries({ prices, takes: settledTakes, parts: settledParts, positions: settledPositions, badges })) {
       for (const s of r.sent) this.#log(`${name}: ${s.labels.join(", ")} -> ${s.signature}`);
       for (const f of r.failed) this.#log(`${name}: FAILED ${f.label}: ${f.error}`);
     }
@@ -355,23 +421,26 @@ export class Settler {
     position: PublicKey,
     p: PositionAccount,
     take: TakeAccount,
-    moment: Moment,
-    at: number,
+    m: PriceMomentItem,
     legs: number[],
     now: number,
     rules: PriceRules,
     waiting: string[],
   ): Promise<Item | null> {
+    const { moment, at } = m;
+    // A partial sale is priced exactly like a sale, at its own moment.
+    const pricing = moment === "part" ? "sale" : moment;
+    const what = moment === "part" ? `part ${m.seq}` : moment;
     const proof = await this.#proofFor(position);
     if (proof === undefined) {
-      waiting.push(`position ${position} leg ${legs.join(",")} ${moment}: its receipt isn't readable yet`);
+      waiting.push(`position ${position} leg ${legs.join(",")} ${what}: its receipt isn't readable yet`);
       return null;
     }
     const side = "back" in p.side ? "back" : "fade";
     const quotes: LegQuote[] = [];
     const giveUp = (i: number, reason: string) => {
-      this.#gaveUp.add(`${position}:${moment}:${i}`);
-      waiting.push(`position ${position} leg ${i} ${moment}: ${reason} (gave up)`);
+      this.#gaveUp.add(gaveUpKey(position, m, i));
+      waiting.push(`position ${position} leg ${i} ${what}: ${reason} (gave up)`);
     };
     for (const i of legs) {
       const leg = take.legs[i];
@@ -392,7 +461,7 @@ export class Settler {
         const stake = BigInt(p.stake.toString());
         const phx = this.#o.phoenix
           ? await pricePhoenixLeg({
-            index: i, moment, momentSec: at, nowSec: now, rules, side,
+            index: i, moment: pricing, momentSec: at, nowSec: now, rules, side,
             leg: { assetIdHex: idHex, leverage: leg.leverage },
             out: proof?.outputs.get(i), basis, entryPrice: entry,
             legStakeUsd: legStakeUsd(take, p.legsMask, stake, i),
@@ -400,8 +469,8 @@ export class Settler {
           }).catch((e): Awaited<ReturnType<typeof pricePhoenixLeg>> => ({ ok: false, retry: true, reason: `source error: ${e instanceof Error ? e.message : e}` }))
           : ({ ok: false, retry: true, reason: "no Phoenix reader configured" } as const);
         if (!phx.ok) {
-          if (!phx.retry) this.#gaveUp.add(`${position}:${moment}:${i}`);
-          waiting.push(`position ${position} leg ${i} ${moment}: ${phx.reason}${phx.retry ? "" : " (gave up)"}`);
+          if (!phx.retry) this.#gaveUp.add(gaveUpKey(position, m, i));
+          waiting.push(`position ${position} leg ${i} ${what}: ${phx.reason}${phx.retry ? "" : " (gave up)"}`);
           continue;
         }
         quotes.push(phx.quote);
@@ -410,12 +479,12 @@ export class Settler {
       const prediction = kind === "prediction" ? this.#o.bank.prediction(idHex) : null;
       // `moment` too: an exit whose basis is missing (an older entry, a lost audit log) is still an exit.
       const card = kind === "card" ? this.#o.bank.card(idHex) : null;
-      const out = await priceLeg({ index: i, kind, underlying, token, prediction, held: side, card }, at, now, rules, this.#o.sources, basis, moment).catch(
+      const out = await priceLeg({ index: i, kind, underlying, token, prediction, held: side, card }, at, now, rules, this.#o.sources, basis, pricing).catch(
         (e): Awaited<ReturnType<typeof priceLeg>> => ({ ok: false, retry: true, reason: `source error: ${e instanceof Error ? e.message : e}` }),
       );
       if (!out.ok) {
-        if (!out.retry) this.#gaveUp.add(`${position}:${moment}:${i}`);
-        waiting.push(`position ${position} leg ${i} ${moment}: ${out.reason}${out.retry ? "" : " (gave up)"}`);
+        if (!out.retry) this.#gaveUp.add(gaveUpKey(position, m, i));
+        waiting.push(`position ${position} leg ${i} ${what}: ${out.reason}${out.retry ? "" : " (gave up)"}`);
         continue;
       }
       // At entry, the tokens received must be worth (most of) the leg's part of the stake.
@@ -439,23 +508,33 @@ export class Settler {
       position: position.toBase58(),
       moment,
       momentAt: at,
+      // A partial sale's document names which one (price_audit stores it as part_seq).
+      ...(moment === "part" ? { partSeq: m.seq } : {}),
       legs: quotes.map((q) => ({ ...q, priceUnits: toPriceUnits(q.price).toString() })),
     };
     const hash = sourceHash(doc);
     if (moment === "entry") for (const q of quotes) this.#bases.set(basisKey(position.toBase58(), q.leg), q.basis);
     this.#o.audit.append({ hash: hash.toString("hex"), doc });
-    const build = { entry: recordEntryPricesIx, exit: recordExitPricesIx, sale: recordSalePricesIx }[moment];
-    const ix = await build(this.#o.program, {
+    const params = {
       settler: this.#o.settler.publicKey,
       take: p.take,
       position,
       prices: quotes.map((q) => ({ leg: q.leg, price: new BN(toPriceUnits(q.price).toString()), publishedAt: new BN(q.publishedAt) })),
       sourceHash: [...hash],
-    });
+    };
+    const ix =
+      moment === "part"
+        ? await recordPartPricesIx(this.#o.program, { ...params, seq: m.seq! })
+        : await { entry: recordEntryPricesIx, exit: recordExitPricesIx, sale: recordSalePricesIx }[moment](this.#o.program, params);
     return {
       ix,
-      cu: { entry: THESIS_COMPUTE_UNITS.recordEntryPrices, exit: THESIS_COMPUTE_UNITS.recordExitPrices, sale: THESIS_COMPUTE_UNITS.recordSalePrices }[moment],
-      label: `record_${moment}_prices ${position} legs ${quotes.map((q) => q.leg).join(",")}`,
+      cu: {
+        entry: THESIS_COMPUTE_UNITS.recordEntryPrices,
+        exit: THESIS_COMPUTE_UNITS.recordExitPrices,
+        sale: THESIS_COMPUTE_UNITS.recordSalePrices,
+        part: THESIS_COMPUTE_UNITS.recordPartPrices,
+      }[moment],
+      label: `record_${moment}_prices ${position}${moment === "part" ? ` part ${m.seq}` : ""} legs ${quotes.map((q) => q.leg).join(",")}`,
     };
   }
 
@@ -471,6 +550,7 @@ export class Settler {
     positions: { publicKey: PublicKey; account: PositionAccount }[],
     takes: Map<string, TakeAccount>,
     exits: Map<string, ExitAccount>,
+    parts: Map<string, Keyed<PartSaleAccount>[]>,
     now: number,
     rules: PriceRules,
   ): Promise<void> {
@@ -482,9 +562,9 @@ export class Settler {
       if (!take) continue;
       const exit = exits.get(publicKey.toBase58()) ?? null;
       const side = "back" in p.side ? "back" : "fade";
-      for (const [moment, at] of priceMoments(take, p, exit, now)) {
-        if (now < at || now - at > rules.liveWindowSecs) continue;
-        const legs = missingLegs(take, p, moment, exit).filter((i) => !this.#gaveUp.has(`${publicKey}:${moment}:${i}`));
+      for (const m of priceMoments(take, p, exit, parts.get(publicKey.toBase58()) ?? [], now)) {
+        if (now < m.at || now - m.at > rules.liveWindowSecs) continue;
+        const legs = missingLegs(take, p, m.moment, m.sold).filter((i) => !this.#gaveUp.has(gaveUpKey(publicKey, m, i)));
         if (!legs.length) continue;
         const proof = await this.#proofFor(publicKey);
         if (!proof) continue;

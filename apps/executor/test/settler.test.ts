@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Keypair, PublicKey, SystemProgram, type Connection } from "@solana/web3.js";
 import BN from "bn.js";
-import { LEG_KIND, FADE_VIA, type ExitAccount, type PositionAccount, type ProfileAccount, type TakeAccount } from "@thesis/chain";
+import { LEG_KIND, FADE_VIA, type ExitAccount, type PartSaleAccount, type PositionAccount, type ProfileAccount, type TakeAccount } from "@thesis/chain";
 import { underlyingIdHex } from "@thesis/venues/bank";
 import { canonicalJson, sourceHash } from "../src/settler/audit.ts";
 import { staticBankIndex } from "../src/settler/bank.ts";
-import { boughtTokens, earnedBadges, missingLegs, pricedMask, settleReady, takeSettleReady } from "../src/settler/crank.ts";
+import { boughtTokens, earnedBadges, missingLegs, partSettleReady, priceMoments, pricedMask, settleReady, takeSettleReady } from "../src/settler/crank.ts";
 import { AlpacaStocks, JupiterPrices } from "../src/settler/sources.ts";
 import { pack, type Item } from "../src/settler/tx.ts";
 
@@ -180,4 +180,35 @@ test("Jupiter prices carry the mint's ScaledUiAmount config (xStocks), in the sh
   const fake = (async () => new Response(JSON.stringify({ X: { usdPrice: 39.187, liquidity: 113.3, decimals: 8, scaledUiConfig: cfg } }))) as unknown as typeof fetch;
   const p = await new JupiterPrices("k", fake, () => 42).price("X");
   assert.deepEqual(p?.scaledUi, { multiplier: 1.005010474242, newMultiplier: 1.0091704440395326, newMultiplierEffectiveAt: Date.parse("2026-12-20T23:30:00Z") / 1000 });
+});
+
+test("partial sales: priced at their own sale, settled as soon as priced (or after the grace period), before the position", () => {
+  const author = Keypair.generate().publicKey;
+  const open = { ...take, author, horizonEnd: new BN(10_000), status: { open: {} } } as unknown as TakeAccount;
+  const settled = { ...open, status: { settled: {} } } as unknown as TakeAccount;
+  const backer = {
+    id: new BN(1), owner: Keypair.generate().publicKey, legsMask: 0b0011, entrySet: 0b0011, exitSet: 0,
+    openedAt: new BN(1_000), parts: 2, partsSettled: 1,
+  } as unknown as PositionAccount;
+  const part = (seq: number, priceSet: number) => ({ seq, soldAt: new BN(4_000 + seq), priceSet }) as unknown as PartSaleAccount;
+  const delay = 100;
+
+  // Each unsettled part is its own price moment, between the entry and the sale or horizon.
+  const keyed = [{ publicKey: PublicKey.default, account: part(1, 0b0001) }];
+  const moments = priceMoments(open, backer, null, keyed, 5_000);
+  assert.deepEqual(moments.map((m) => [m.moment, m.at, m.seq]), [["entry", 1_000, undefined], ["part", 4_001, 1]]);
+  assert.deepEqual(missingLegs(open, backer, "part", part(1, 0b0001)), [1]);
+
+  // The take doesn't matter: a part settles once priced, or at 0% after its grace period.
+  assert.equal(partSettleReady(open, backer, part(1, 0b0001), 4_050, delay), "waiting_for_prices");
+  assert.equal(partSettleReady(open, backer, part(1, 0b0011), 4_050, delay), "ready");
+  assert.equal(partSettleReady(open, backer, part(1, 0), 4_102, delay), "ready");
+
+  // The position waits for its parts, even when everything else is ready.
+  const exit = { exitedAt: new BN(5_000), priceSet: 0b0011 } as unknown as ExitAccount;
+  assert.equal(settleReady(open, backer, exit, 5_050, delay), "waiting_for_parts");
+  assert.equal(settleReady(settled, backer, null, 10_050, delay), "waiting_for_parts");
+  // Still running before the horizon: nothing to report.
+  assert.equal(settleReady(settled, backer, null, 6_000, delay), "running");
+  assert.equal(settleReady(open, { ...backer, partsSettled: 2 } as PositionAccount, exit, 5_050, delay), "ready");
 });

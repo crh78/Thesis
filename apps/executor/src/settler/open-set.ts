@@ -7,11 +7,45 @@
 // still runs every 10 minutes and on the first tick, as a backstop for
 // anything the Stream missed or hasn't delivered yet; what it finds stays in the set until its
 // account closes (settle_position closes positions) or its take settles.
+//
+// Partial sales (`sell_part`) are read by address too: a position's unsettled ones are seqs
+// `partsSettled` to `parts - 1`, each at its PDA. The full scan reads every part account as well.
 import { PublicKey } from "@solana/web3.js";
-import { exitAddress, type ExitAccount, type PositionAccount, type TakeAccount, type ThesisProgram } from "@thesis/chain";
+import {
+  exitAddress,
+  partSaleAddress,
+  type ExitAccount,
+  type PartSaleAccount,
+  type PositionAccount,
+  type TakeAccount,
+  type ThesisProgram,
+} from "@thesis/chain";
 
 export type Keyed<T> = { publicKey: PublicKey; account: T };
-export type Loaded = { positions: Keyed<PositionAccount>[]; takes: Map<string, TakeAccount>; exits: Map<string, ExitAccount> };
+export type Loaded = {
+  positions: Keyed<PositionAccount>[];
+  takes: Map<string, TakeAccount>;
+  exits: Map<string, ExitAccount>;
+  /** Each position's unsettled partial sales (base58 position → parts in seq order). */
+  parts: Map<string, Keyed<PartSaleAccount>[]>;
+};
+
+/** A position's partial sales still waiting to settle, as seqs (they settle in this order). */
+export function openPartSeqs(p: PositionAccount): number[] {
+  const out: number[] = [];
+  for (let s = p.partsSettled ?? 0; s < (p.parts ?? 0); s++) out.push(s);
+  return out;
+}
+
+function groupParts(parts: Keyed<PartSaleAccount>[]): Map<string, Keyed<PartSaleAccount>[]> {
+  const out = new Map<string, Keyed<PartSaleAccount>[]>();
+  for (const part of parts) {
+    const key = part.account.position.toBase58();
+    out.set(key, [...(out.get(key) ?? []), part]);
+  }
+  for (const list of out.values()) list.sort((a, b) => a.account.seq - b.account.seq);
+  return out;
+}
 
 /** Positions the database says are still open (address and take, base58). */
 export interface OpenPositionsSource {
@@ -57,9 +91,11 @@ export type ChainReader = {
   allPositions(): Promise<Keyed<PositionAccount>[]>;
   allTakes(): Promise<Keyed<TakeAccount>[]>;
   allExits(): Promise<Keyed<ExitAccount>[]>;
+  allPartSales(): Promise<Keyed<PartSaleAccount>[]>;
   positions(keys: PublicKey[]): Promise<(PositionAccount | null)[]>;
   takes(keys: PublicKey[]): Promise<(TakeAccount | null)[]>;
   exits(keys: PublicKey[]): Promise<(ExitAccount | null)[]>;
+  partSales(keys: PublicKey[]): Promise<(PartSaleAccount | null)[]>;
 };
 
 export function programReader(program: ThesisProgram): ChainReader {
@@ -68,9 +104,11 @@ export function programReader(program: ThesisProgram): ChainReader {
     allPositions: () => a.position.all() as Promise<Keyed<PositionAccount>[]>,
     allTakes: () => a.take.all() as Promise<Keyed<TakeAccount>[]>,
     allExits: () => a.exit.all() as Promise<Keyed<ExitAccount>[]>,
+    allPartSales: () => a.partSale.all() as Promise<Keyed<PartSaleAccount>[]>,
     positions: (k) => (k.length ? (a.position.fetchMultiple(k) as Promise<(PositionAccount | null)[]>) : Promise.resolve([])),
     takes: (k) => (k.length ? (a.take.fetchMultiple(k) as Promise<(TakeAccount | null)[]>) : Promise.resolve([])),
     exits: (k) => (k.length ? (a.exit.fetchMultiple(k) as Promise<(ExitAccount | null)[]>) : Promise.resolve([])),
+    partSales: (k) => (k.length ? (a.partSale.fetchMultiple(k) as Promise<(PartSaleAccount | null)[]>) : Promise.resolve([])),
   };
 }
 
@@ -142,7 +180,12 @@ export class OpenSet {
   }
 
   async #scan(): Promise<Loaded> {
-    const [positions, all, sold] = await Promise.all([this.#chain.allPositions(), this.#chain.allTakes(), this.#chain.allExits()]);
+    const [positions, all, sold, parts] = await Promise.all([
+      this.#chain.allPositions(),
+      this.#chain.allTakes(),
+      this.#chain.allExits(),
+      this.#chain.allPartSales(),
+    ]);
     this.#lastFullScan = this.#now();
     this.fullScan = true;
     this.#gone.clear();
@@ -156,6 +199,7 @@ export class OpenSet {
       positions,
       takes: new Map(all.map((t) => [t.publicKey.toBase58(), t.account])),
       exits: new Map(sold.map((e) => [e.account.position.toBase58(), e.account])),
+      parts: groupParts(parts),
     };
   }
 
@@ -183,8 +227,10 @@ export class OpenSet {
       const exit = exitAccounts[i];
       if (exit) exits.set(key, exit);
     }
+    const partKeys = positions.flatMap(({ publicKey, account }) => openPartSeqs(account).map((seq) => partSaleAddress(publicKey, seq, this.#programId)));
     const takeKeys = [...this.#takes].map((k) => new PublicKey(k));
-    const takeAccounts = await this.#chain.takes(takeKeys);
+    const [takeAccounts, partAccounts] = await Promise.all([this.#chain.takes(takeKeys), this.#chain.partSales(partKeys)]);
+    const parts = groupParts(partAccounts.flatMap((account, i) => (account ? [{ publicKey: partKeys[i], account }] : [])));
     const takes = new Map<string, TakeAccount>();
     const referenced = new Set(positions.map((p) => p.account.take.toBase58()));
     for (const [i, account] of takeAccounts.entries()) {
@@ -197,7 +243,7 @@ export class OpenSet {
       // A settled take with no open position has nothing left to do.
       if (!isOpen(account) && !referenced.has(key)) this.#takes.delete(key);
     }
-    return { positions, takes, exits };
+    return { positions, takes, exits, parts };
   }
 
   #exitAddress(position: PublicKey): PublicKey {
