@@ -97,6 +97,31 @@ final class ThesisUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Trade Jake's take"].waitForExistence(timeout: 5), "Try again opens the sheet")
     }
 
+    /// A split trade that stops partway while the sheet is open (`-mockTradeStops`): the sheet offers
+    /// to finish it or swap the leftover back, and Finish the trade sorts it out.
+    func testStoppedTradeFinishesFromTheSheet() {
+        openTradeSheetThatFails("-mockTradeStops")
+        button(startingWith: "Trade for $50").tap()
+        XCTAssertTrue(app.staticTexts["The trade didn't finish"].waitForExistence(timeout: 5), "The sheet says it stopped")
+        XCTAssertTrue(app.buttons["stopped-trade-sweep"].exists, "Offers the sweep")
+        app.buttons["stopped-trade-finish"].tap()
+        XCTAssertTrue(element(containing: "Done: the trade went through.").waitForExistence(timeout: 5))
+    }
+
+    /// Closed without fixing it: Cash lists the stopped trade, and the sweep clears it.
+    func testStoppedTradeSweepsFromCash() {
+        openTradeSheetThatFails("-mockTradeStops")
+        button(startingWith: "Trade for $50").tap()
+        XCTAssertTrue(app.staticTexts["The trade didn't finish"].waitForExistence(timeout: 5))
+        app.buttons["Close"].firstMatch.tap()
+        app.buttons["Open profile menu"].tap()
+        button(startingWith: "Cash activity").tap()
+        XCTAssertTrue(element(containing: "Your $50 trade didn't finish").waitForExistence(timeout: 5), "Cash lists it")
+        app.buttons["stopped-trade-sweep"].tap()
+        XCTAssertTrue(element(containing: "The leftover is back in your balance as cash.").waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["stopped-trade-sweep"].exists, "Its card is gone")
+    }
+
     func testTradeAmountOverBalanceOffersAddCash() {
         onScreen(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Trade"))).tap()
         XCTAssertTrue(app.staticTexts["Trade Jake's take"].waitForExistence(timeout: 5))

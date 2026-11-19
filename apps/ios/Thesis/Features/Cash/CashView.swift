@@ -25,6 +25,8 @@ struct CashView: View {
     @State private var withdrawing = false
     @State private var cashingOut = false
     @State private var cashOutError: String?
+    /// What finishing or sweeping a stopped trade did, once its card is gone.
+    @State private var stoppedNote: String?
 
     var body: some View {
         let parts = Fmt.splitCents(app.balance, signed: false)
@@ -74,6 +76,26 @@ struct CashView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 18)
+
+                // Split trades that stopped partway: finish them, or swap what they bought back to cash.
+                ForEach(app.stoppedTrades) { trade in
+                    StoppedTradeCard(trade: trade, retry: trade.canRetry, card: true) { text in
+                        withAnimation(.snappy) { stoppedNote = text }
+                    }
+                    .id(trade.id + trade.next)
+                    .padding(16)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 18)
+                }
+                if let stoppedNote, app.stoppedTrades.isEmpty {
+                    Text(stoppedNote)
+                        .font(.geist(13))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 14)
+                        .accessibilityIdentifier("stopped-trade-note")
+                }
 
                 if let phoenix = app.phoenixCash, phoenix.cashUsd > 0.005 || phoenix.openPositions > 0 {
                     phoenixCard(phoenix)
