@@ -20,6 +20,19 @@ test("FORK_API_JUPITER_RPM sets the budget's rate; unset keeps 30; a bad value f
   assert.deepEqual(budgetFromEnv({ FORK_API_JUPITER_RPM: " 50 " }), { perMinute: 50 });
   assert.equal(new JupiterBudget(budgetFromEnv({})).limits.perMinute, 30);
   for (const bad of ["0", "-5", "1.5", "lots", "601"]) assert.throws(() => budgetFromEnv({ FORK_API_JUPITER_RPM: bad }), /FORK_API_JUPITER_RPM/);
+  assert.deepEqual(budgetFromEnv({ FORK_API_JUPITER_BURST: "4" }), { burst: 4, reserve: 2 }, "a smaller burst keeps a smaller reserve for taps");
+  assert.throws(() => budgetFromEnv({ FORK_API_JUPITER_BURST: "0" }), /FORK_API_JUPITER_BURST/);
+});
+
+test("a 429 in a prebuild answers busy with when to try again, not the venue's raw error", async () => {
+  const budget = new JupiterBudget({});
+  const use = newUse(2);
+  const limited = (async () => new Response("{}", { status: 429, headers: { "x-ratelimit-reset": String(Math.ceil(Date.now() / 1000) + 3) } })) as typeof fetch;
+  await assert.rejects(budget.fetchFn(2, use, limited)("https://api.jup.ag/swap/v1/swap-instructions"), isBusy);
+  assert.equal(use.rateLimited, 1);
+  assert.ok(use.refused, "the build knows why it was refused");
+  const tap = await budget.fetchFn(1, newUse(1), (async () => new Response("{}", { status: 429 })) as typeof fetch);
+  assert.ok(tap, "a tap's fetch still returns the 429 for the venue to wait out");
 });
 
 test("prebuilds and route checks leave the last 6 requests to taps; taps may use them all", async () => {
@@ -42,6 +55,28 @@ test("a prebuild short only of spare requests waits for the bucket; a route chec
   const started = Date.now();
   assert.equal(await budget.run(2, ok), "ok", "the prebuild waited for the bucket instead");
   assert.ok(Date.now() - started >= 90, "it waited for the refill");
+});
+
+test("a prebuild that has made a call finishes like a tap instead of failing at the reserve", async () => {
+  const t = 1_000_000;
+  const budget = new JupiterBudget({ burst: 7, reserve: 6, prebuildWaitMs: 0 }, () => t);
+  const use = newUse(2);
+  await budget.run(2, ok, use);
+  assert.equal(await budget.run(2, ok, use), "ok", "its second call goes through on the reserve");
+  assert.equal(use.calls, 2);
+  await assert.rejects(budget.run(2, ok, newUse(2)), isBusy, "a new prebuild still leaves the reserve to taps");
+});
+
+test("a prebuild's calls made in parallel follow its first call: through if it was let in, refused with it if not", async () => {
+  const t = 1_000_000;
+  const open = new JupiterBudget({ burst: 7, reserve: 6, prebuildWaitMs: 0 }, () => t);
+  const use = newUse(2);
+  assert.deepEqual(await Promise.all([open.run(2, ok, use), open.run(2, ok, use), open.run(2, ok, use)]), ["ok", "ok", "ok"]);
+  const shut = new JupiterBudget({ burst: 6, reserve: 6, prebuildWaitMs: 0 }, () => t);
+  const refused = newUse(2);
+  const tries = await Promise.allSettled([shut.run(2, ok, refused), shut.run(2, ok, refused)]);
+  assert.ok(tries.every((r) => r.status === "rejected" && isBusy(r.reason)), "the first was refused, so the second is too");
+  assert.equal(shut.tokens, 6, "and neither took a request");
 });
 
 test("a prebuild doesn't wait longer than prebuildWaitMs, nor after a 429", async () => {
@@ -84,8 +119,8 @@ test("a 429 stops every lane until Jupiter's window resets; counted per build", 
   const use = newUse(2);
   const reset = String(Math.ceil((t + 5_000) / 1000));
   const jupiter = (async () => new Response("{}", { status: 429, headers: { "x-ratelimit-reset": reset } })) as unknown as typeof fetch;
-  const r = await budget.fetchFn(2, use, jupiter)("https://api.jup.ag/swap/v1/quote?inputMint=x");
-  assert.equal(r.status, 429);
+  // A prebuild's 429 answers busy (it doesn't wait one out), and still counts.
+  await assert.rejects(budget.fetchFn(2, use, jupiter)("https://api.jup.ag/swap/v1/quote?inputMint=x"), isBusy);
   assert.deepEqual([use.calls, use.quotes, use.instructions, use.rateLimited], [1, 1, 0, 1]);
   await assert.rejects(budget.run(3, ok), (e: unknown) => isBusy(e) && /429/.test((e as Error).message));
   assert.equal(budget.tokens, 0);
@@ -285,11 +320,14 @@ test("after 20 seconds a trade routes afresh", async (t) => {
 
 test("a prebuild refused after routing still leaves the routing to the tap, which makes its own swap call", async (t) => {
   const calls = jupiter(t, routes);
-  // Lane 2 may take one request (the quote), not a second (the swap instructions).
-  const router = routerWith(new JupiterBudget({ reserve: 9, prebuildWaitMs: 0 }));
+  // One request a minute: the prebuild's quote takes it; its swap instructions (in a tap's turn
+  // once it has started) find the bucket empty and too long to wait for.
+  let now = 1_000_000;
+  const router = routerWith(new JupiterBudget({ perMinute: 1, burst: 1, reserve: 0, maxWaitMs: 0, prebuildWaitMs: 0 }, () => now));
   const a = Keypair.generate().publicKey;
   await assert.rejects(router.venueLegs([leg], a, 20, undefined, undefined, { lane: 2 }), isBusy);
   assert.equal(calls.length, 1);
+  now += 60_000;
   const tap = await router.venueLegs([leg], a, 20);
   assert.deepEqual([tap.jupiter.template, tap.jupiter.quotes, tap.jupiter.instructions], ["hit", 0, 1]);
   assert.equal(tap.venue.length, 1);
