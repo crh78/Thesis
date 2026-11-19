@@ -23,22 +23,46 @@
 // than its slippage limit fails at preflight, not silently: the client builds again (Try again),
 // and a wallet's repeat build of the same trade and stake after a scaled answer always quotes
 // afresh, dropping the routings it scaled from, so it never gets the same failing answer twice.
+//
+// Routes outlive the quotes (template "route"): which pools a token's best route goes through
+// rarely changes in minutes; its price does. So each swap leg's template is also kept per
+// underlying (USDC in, the token out) for FORK_API_ROUTE_TTL_MS (default 10 minutes), with the
+// token's Jupiter price when it was quoted. A later build of any take holding that underlying, at
+// any stake within SCALE_LIMITS of a kept template, reads the tokens' prices now (Price v3, one
+// call for the whole basket, shared by builds for PRICE_TTL_MS) and rewrites the template as
+// scaling does: in_amount exactly the leg's part of the stake (proof of trade), quoted_out_amount
+// in proportion and at the price now (scale.ts, priceFactor), the same 1% slippage and the same
+// shortfall and impact limits. A build whose swap legs all come from kept routes makes no quote
+// and no swap-instructions call: one price read, or none. A leg with no kept route, a route past
+// its time, a price Jupiter didn't give, a price that moved over 3%, an issuer now paused or a
+// multiplier that changed is quoted afresh, as before, and its new template replaces the old.
+// Routes are refreshed only by builds that need them: nothing polls Jupiter for takes nobody
+// views. The price a template is kept with is read after its build, in a prebuild's turn (it never
+// holds up the build), and only when the template could be rewritten at all.
+// A repriced estimate that's wrong fails at preflight (the fill is below the slippage limit or a
+// pool needs other accounts), never mistrades; the retry rule above applies, so the wallet's next
+// build of that trade and stake quotes afresh and replaces the kept routes.
 import type { PublicKey } from "@solana/web3.js";
-import { PRICEABLE_MIN_POOLED_USD, bestIssuer, issuerPool, type BestIssuerResult, type ReadMints } from "@thesis/venues/bank";
+import { PRICEABLE_MIN_POOLED_USD, bestIssuer, effectiveMultiplier, issuerPool, type BestIssuerResult, type ReadMints } from "@thesis/venues/bank";
 import { ineligible, otherSide, type GeminiContract } from "@thesis/venues/gemini";
 import {
   buyInstructions,
   fromTemplate,
   jupiterBuy,
   jupiterLendDeposit,
+  jupiterPrices,
   jupiterQuote,
   jupiterSwapInstructions,
   quoteFn,
   scaleTemplate,
   splitStake,
   swapTemplate,
+  unscalable,
+  PriceCache,
+  PRICE_TTL_MS,
   SCALE_LIMITS,
   TEMPLATE_OWNER,
+  type CachedPrice,
   type JupSwapInstructions,
   type JupiterAccess,
   type SwapTemplate,
@@ -72,6 +96,26 @@ const NO_ROUTE_TTL_MS = 10 * 60_000;
 export const TEMPLATE_TTL_MS = 20_000;
 /** How many fresh routings of one trade (at different stakes) are kept to scale from. */
 const MAX_ROOTS = 4;
+/** How long a swap leg's route (its template) is kept to reprice, unless FORK_API_ROUTE_TTL_MS says otherwise. */
+export const ROUTE_TTL_MS = 10 * 60_000;
+/** How many templates (at different sizes) are kept per underlying. */
+const MAX_ROUTES = 4;
+/** A template is kept with a price read at most PRICE_TTL_MS before its quote or this long after. */
+const ROUTE_PRICE_AFTER_MS = 20_000;
+/** When the price for a template couldn't be read at once (the budget kept it for trades), it's tried once more this much later. */
+const ROUTE_PRICE_RETRY_MS = 5_000;
+
+/**
+ * How long routes are kept (ms): FORK_API_ROUTE_TTL_MS, else ROUTE_TTL_MS. 0 keeps none (every
+ * build past TEMPLATE_TTL_MS quotes afresh, as before). A bad value fails clearly.
+ */
+export function routeTtlFromEnv(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.FORK_API_ROUTE_TTL_MS?.trim();
+  if (!raw) return ROUTE_TTL_MS;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 3_600_000) throw new Error(`FORK_API_ROUTE_TTL_MS must be a whole number of milliseconds (0–3600000), not "${raw}"`);
+  return n;
+}
 
 export type Route = typeof ROUTE & { dexes?: string[] };
 /**
@@ -83,6 +127,11 @@ type Winner = NonNullable<Awaited<ReturnType<typeof bestIssuer>>["winner"]>;
 type Excluded = { index: number; name: string; reason: string };
 /** How a traded leg is bought: the winning issuer's quote, a Lend deposit, or Phoenix. */
 type Way = Winner | "lend" | "phoenix";
+/**
+ * A swap leg's route kept to reprice (see the header): the winner and its template as quoted at
+ * `at`, the token's Jupiter price then, and its scaled-UI multiplier then.
+ */
+type KeptRoute = { at: number; winner: Winner; template: SwapTemplate; price: number; multiplier: number };
 const isQuote = (w: Way | null | undefined): w is Winner => typeof w === "object" && w !== null;
 /** A USDC-in quote as Jupiter returned it (with its mints and route), as buyInstructions reads it. */
 const routeQuote = (q: Winner["quote"]) => q as Winner["quote"] & { outputMint: string; inputMint?: string };
@@ -97,9 +146,14 @@ type Plan = {
   excluded: Excluded[];
   ways: Map<number, Way>;
   owner: string;
-  swaps: Map<number, { res: Promise<JupSwapInstructions>; template: Promise<SwapTemplate | null> }>;
+  /** Each swap leg's answer for `owner` (null: none, every wallet builds from the template) and its template. */
+  swaps: Map<number, { res: Promise<JupSwapInstructions> | null; template: Promise<SwapTemplate | null> }>;
   /** False when a leg was left out because its quote failed: that's this build's bad luck, not to share. */
   shareable: boolean;
+  /** Swap legs rewritten rather than quoted: scaled from another stake, or repriced from a kept route. */
+  rewritten: number;
+  /** Swap legs repriced from kept routes (#plan). */
+  routed: number;
 };
 /** A trade's routing as #plans holds it: in flight or done, and when it was quoted. */
 type PlanEntry = { at: number; done: boolean; plan: Promise<Plan> };
@@ -160,11 +214,23 @@ export class Router {
   /** Live mint reads for best-issuer routing (default: bestIssuer's, cached a minute; null: none, in tests). */
   #readMints: ReadMints | null | undefined;
 
-  constructor(o: ServiceOpts, deps: { budget?: JupiterBudget; readMints?: ReadMints | null } = {}) {
+  /** How long routes are kept to reprice (ms; 0: none). */
+  readonly routeTtlMs: number;
+  /** Underlying key → its kept routes (templates at different sizes, newest first; see the header). */
+  #routes = new Map<string, KeptRoute[]>();
+  /** Token prices for repricing, shared by builds for PRICE_TTL_MS. */
+  readonly prices: PriceCache;
+  /** Price reads for templates still running (routesLearned waits for them). */
+  #learning = new Set<Promise<void>>();
+
+  /** `routeTtlMs`: how long routes are kept (default: routeTtlFromEnv). `now`: the price cache's clock. */
+  constructor(o: ServiceOpts, deps: { budget?: JupiterBudget; readMints?: ReadMints | null; routeTtlMs?: number; prices?: PriceCache } = {}) {
     this.#o = o;
     this.route = { ...ROUTE, dexes: o.dexes };
     this.budget = deps.budget ?? jupiterBudget;
     this.#readMints = deps.readMints;
+    this.routeTtlMs = deps.routeTtlMs ?? routeTtlFromEnv();
+    this.prices = deps.prices ?? new PriceCache(PRICE_TTL_MS);
   }
 
   /**
@@ -186,7 +252,13 @@ export class Router {
 
   /** The budget and how much the router's caches saved, for the timings log. */
   jupiterStats() {
-    return { budget: this.budget.snapshot(), winners: this.#winners.size, noRoute: this.#noRoute.size, templates: { size: this.#plans.size, ...this.#templateStats } };
+    return {
+      budget: this.budget.snapshot(),
+      winners: this.#winners.size,
+      noRoute: this.#noRoute.size,
+      templates: { size: this.#plans.size, ...this.#templateStats },
+      routes: { size: this.#routes.size, ...this.#routeStats, prices: this.prices.stats },
+    };
   }
 
   /** Trade key → its routing (in flight or done) and when it started (see Plan). */
@@ -196,13 +268,16 @@ export class Router {
    * MAX_ROOTS, each at its own stake) that builds at other stakes scale from (#scaled).
    */
   #roots = new Map<string, Root[]>();
-  /** Wallet and trade key → when that wallet was last answered from a scaled routing (a repeat quotes afresh). */
+  /** Wallet and trade key → when that wallet was last answered from a rewritten routing (a repeat quotes afresh). */
   #scaledFor = new Map<string, number>();
   /**
    * Builds that reused a plan (`hits`), waited for one in flight (`waits`), scaled one made at
-   * another stake (`scaled`), routed their own (`misses`); swap legs built from templates.
+   * another stake (`scaled`), repriced every swap leg from kept routes (`routes`), routed their
+   * own (`misses`, some legs may be repriced); swap legs built from templates.
    */
-  #templateStats = { hits: 0, waits: 0, scaled: 0, misses: 0, templatedLegs: 0 };
+  #templateStats = { hits: 0, waits: 0, scaled: 0, routes: 0, misses: 0, templatedLegs: 0 };
+  /** Swap legs repriced from kept routes, templates kept, and templates not kept for want of a price. */
+  #routeStats = { repriced: 0, kept: 0, unpriced: 0 };
 
   /** A contract as currently known: the latest live read, else the asset bank's sweep, else the mapping's copy. */
   contract(c: GeminiContract): GeminiContract {
@@ -361,30 +436,32 @@ export class Router {
       const cached = this.#plans.get(key);
       return cached && cached.at > now - TEMPLATE_TTL_MS ? cached : null;
     };
+    // A wallet asking again for a trade and stake it was just answered from a rewritten routing
+    // (scaled or repriced: a retry after a refused submit) quotes afresh instead: no rewritten
+    // routing, no kept route, and the routings it scaled from go.
+    const mine = `${user.toBase58()} ${key}`;
+    const repeat = (this.#scaledFor.get(mine) ?? 0) > now - TEMPLATE_TTL_MS;
+    if (repeat) {
+      this.#scaledFor.delete(mine);
+      this.#roots.delete(shape);
+    }
     const reuse = async (cached: PlanEntry) => {
       use.template = cached.done ? "hit" : "wait";
       plan = await cached.plan.catch(() => null);
-      sized = plan?.shareable ? apply(plan) : null;
+      sized = plan?.shareable && !(repeat && plan.rewritten) ? apply(plan) : null;
       if (!sized) plan = null;
     };
     // Checked without awaiting first, so builds started together find each other's routing.
     const cached = cachedPlan();
     if (cached) await reuse(cached);
-    // Another stake of the same trade, quoted moments ago: scale its routing (see the header). A
-    // wallet asking again for a trade and stake it was just answered from a scaled routing (a
-    // retry after a refused submit) quotes afresh instead, and the routings it scaled from go.
-    const mine = `${user.toBase58()} ${key}`;
-    const roots = plan ? [] : this.#nearRoots(shape, stake, now);
-    if (!plan && (this.#scaledFor.get(mine) ?? 0) > now - TEMPLATE_TTL_MS) {
-      this.#scaledFor.delete(mine);
-      this.#roots.delete(shape);
-    } else if (roots.length) {
+    // Another stake of the same trade, quoted moments ago: scale its routing (see the header).
+    const roots = plan || repeat ? [] : this.#nearRoots(shape, stake, now);
+    if (roots.length) {
       plan = await this.#scaled(roots, usable, stake);
       sized = plan ? apply(plan) : null;
       if (sized) {
         use.template = "scaled";
         this.#sweep(now);
-        this.#scaledFor.set(mine, now);
       } else {
         plan = null;
         // While this build waited, another may have started routing this stake: wait for that one.
@@ -394,7 +471,7 @@ export class Router {
     }
     if (!plan) {
       use.template = "miss";
-      const routing = this.#plan(usable, stake, side, lane, use, now, user);
+      const routing = this.#plan(usable, stake, side, lane, use, now, user, repeat);
       const entry: PlanEntry = { at: now, done: false, plan: routing };
       this.#sweep(now);
       this.#plans.set(key, entry);
@@ -414,10 +491,14 @@ export class Router {
         forget,
       );
       plan = await routing;
+      // Every swap leg repriced from a kept route: no quote at all.
+      if (plan.routed && plan.routed === plan.ways.size - [...plan.ways.values()].filter((w) => !isQuote(w)).length) use.template = "route";
       sized = apply(plan);
     }
     if (!sized) throw new ApiError(502, "routing_failed", "A route disappeared while sizing the trade. Try again.");
-    this.#templateStats[({ hit: "hits", wait: "waits", scaled: "scaled", miss: "misses" } as const)[use.template ?? "miss"]]++;
+    // Answered (even in part) from a rewritten routing: this wallet's repeat quotes afresh.
+    if (plan.rewritten) this.#scaledFor.set(mine, now);
+    this.#templateStats[({ hit: "hits", wait: "waits", scaled: "scaled", route: "routes", miss: "misses" } as const)[use.template ?? "miss"]]++;
     usable = sized.legsNow;
     excluded.push(...plan.excluded);
     const { swapLegs, parts } = sized;
@@ -427,7 +508,7 @@ export class Router {
     const phoenixLegs = swapLegs.filter(onPhoenix);
     const subs = phoenixLegs.length ? await this.phoenix!.prepare(user, phoenixLegs.length) : [];
     const subOf = new Map(phoenixLegs.map((l, k) => [l.index, subs[k]]));
-    const shared = { plan, mine: use.template === "miss" };
+    const shared = { plan, mine: use.template === "miss" || use.template === "route" };
     const venue = (await Promise.all(
       swapLegs.map((l, j) => this.#legFor(l, parts[j], shared.plan.ways.get(l.index)!, user, payer, side, subOf.get(l.index), lane, use, shared)),
     ).catch((e: unknown) => {
@@ -493,31 +574,51 @@ export class Router {
         // The template's quote is the winner's own (a JupQuote), scaled.
         const quote = scaled.quote as unknown as Winner["quote"];
         ways.set(l.index, { ...w, quote, outAmountRaw: quote.outAmount, units: (w.units * Number(parts[j])) / Number(w.quote.inAmount) });
-        swaps.set(l.index, { res: Promise.resolve(scaled.res), template: Promise.resolve(scaled) });
+        swaps.set(l.index, { res: null, template: Promise.resolve(scaled) });
       }
       if (ways.size !== swapLegs.length) continue;
-      return { kept: p.kept, excluded: p.excluded, ways, owner: TEMPLATE_OWNER.toBase58(), swaps, shareable: true };
+      return { kept: p.kept, excluded: p.excluded, ways, owner: TEMPLATE_OWNER.toBase58(), swaps, shareable: true, rewritten: swaps.size, routed: 0 };
     }
     return null;
   }
 
   /**
-   * Routes a trade's traded legs (see venueLegs): quotes every swap leg at once (just the issuer
-   * that last won, when known), drops legs with no route and re-sizes the rest, then starts each
-   * swap leg's swap-instructions call for `user`, whose answers become the plan's templates.
+   * Routes a trade's traded legs (see venueLegs): reprices swap legs whose route is kept (one
+   * price read for all of them; none when `fresh`), quotes the other swap legs at once (just the
+   * issuer that last won, when known), drops legs with no route and re-sizes the rest, then starts
+   * each quoted swap leg's swap-instructions call for `user`, whose answers become the plan's
+   * templates (and kept routes).
    */
-  async #plan(usable: MappedLeg[], stake: bigint, side: "back" | "fade", lane: Lane, use: JupiterUse, now: number, user: PublicKey): Promise<Plan> {
+  async #plan(usable: MappedLeg[], stake: bigint, side: "back" | "fade", lane: Lane, use: JupiterUse, now: number, user: PublicKey, fresh = false): Promise<Plan> {
     const traded = () => usable.filter((l) => !isPaper(l.how));
     const tradedStake = () => stake - escrowShare(usable, stake);
     const onPhoenix = (l: MappedLeg) => side === "fade" || l.how === "perp";
     const excluded: Excluded[] = [];
     /** Legs whose quotes failed rather than found no route (by take leg index). */
     const failed = new Set<number>();
+    // Kept routes: the tokens' prices now, in one read (with the other legs' last winners, so their
+    // templates can be kept without another read), when any swap leg has a route kept.
+    const swapKeys = traded().filter((l) => !onPhoenix(l) && l.how === "swap").map((l) => l.key!);
+    // A retry after a rewritten answer: its legs' kept routes (at every size) go, and this build's
+    // quotes replace them.
+    if (fresh) for (const k of swapKeys) this.#routes.delete(k);
+    const keptMints = swapKeys.flatMap((k) => this.#keptRoutes(k, now).map((r) => r.winner.mint));
+    const prices = keptMints.length
+      ? await this.#readPrices([...new Set([...keptMints, ...swapKeys.flatMap((k) => this.#winners.get(k)?.mint ?? [])])], lane, use)
+      : new Map<string, CachedPrice>();
+    /** Swap legs repriced from kept routes (by take leg index): the winner and the rewritten template. */
+    const routed = new Map<number, { way: Winner; template: SwapTemplate }>();
     const quoteAll = (ls: MappedLeg[], parts: bigint[], only?: Way[]) =>
       Promise.all(
         ls.map(async (l, j): Promise<Way | null> => {
           if (onPhoenix(l)) return "phoenix";
           if (l.how === "lend") return "lend";
+          const repriced = prices.size ? this.#reprice(l.key!, parts[j], prices, now) : null;
+          if (repriced) {
+            routed.set(l.index, repriced);
+            return repriced.way;
+          }
+          routed.delete(l.index);
           const usdPart = Number(parts[j]) / USD;
           const quote = (onlyMints?: string[]) =>
             bestIssuer(l.key!, usdPart, this.#best(lane, use, onlyMints))
@@ -576,16 +677,28 @@ export class Router {
       }
     }
 
-    // Swap instructions for the routing wallet start now, alongside the rest of its build.
+    // Swap instructions for the routing wallet start now, alongside the rest of its build; legs
+    // repriced from kept routes need none.
     const swaps: Plan["swaps"] = new Map();
+    const quoted: { key: string; way: Winner; template: Promise<SwapTemplate | null> }[] = [];
+    let repriced = 0;
     for (const [j, l] of swapLegs.entries()) {
       const w = ways[j];
       if (!isQuote(w)) continue;
+      const r = routed.get(l.index);
+      if (r && r.way === w) {
+        repriced++;
+        swaps.set(l.index, { res: null, template: Promise.resolve(r.template) });
+        continue;
+      }
       const res = jupiterSwapInstructions({ ...this.jupiter(lane, use), quote: w.quote, user });
       res.catch(() => {}); // awaited by the leg; a build that fails earlier leaves it unawaited
       const template = res.then((r) => swapTemplate({ res: r, quote: routeQuote(w.quote) }, user)).catch(() => null);
       swaps.set(l.index, { res, template });
+      quoted.push({ key: l.key!, way: w, template });
     }
+    this.#routeStats.repriced += repriced;
+    if (quoted.length) this.#keep(quoted, Date.now());
     return {
       kept: new Set(swapLegs.map((l) => l.index)),
       excluded,
@@ -593,7 +706,103 @@ export class Router {
       owner: user.toBase58(),
       swaps,
       shareable: !excluded.some((e) => failed.has(e.index)),
+      rewritten: repriced,
+      routed: repriced,
     };
+  }
+
+  /** Prices for repricing (the shared cache, else one read in `lane`, counted in `use`); missing when the read fails or is refused. */
+  async #readPrices(mints: string[], lane: Lane, use: JupiterUse): Promise<Map<string, CachedPrice>> {
+    // Its own count, so a refused read leaves the build free to quote instead of answering busy.
+    const mine = newUse(lane);
+    const prices = await this.prices.get(mints, (ms) => jupiterPrices(ms, this.jupiter(lane, mine)));
+    use.calls += mine.calls;
+    use.prices += mine.prices;
+    use.waitedMs += mine.waitedMs;
+    use.rateLimited += mine.rateLimited;
+    return prices;
+  }
+
+  /** The routes kept for underlying `key` and still in time, newest first. */
+  #keptRoutes(key: string, now: number): KeptRoute[] {
+    if (this.routeTtlMs <= 0) return [];
+    return (this.#routes.get(key) ?? []).filter((r) => r.at > now - this.routeTtlMs);
+  }
+
+  /** The token's scaled-UI multiplier as the asset bank knows it (1 without one). */
+  #multiplier(mint: string, atMs: number): number {
+    return effectiveMultiplier(this.#o.bank().tokens[mint]?.scaledUi ?? null, Math.floor(atMs / 1000));
+  }
+
+  /**
+   * Underlying `key` bought with exactly `part` from a kept route, at the token's price now (see
+   * the header), or null when no kept route can be: none in time, no price now, the issuer no
+   * longer eligible, its multiplier changed, or scale.ts refuses (size, impact, shortfall, a price
+   * that moved too far). The kept template nearest in size is tried first.
+   */
+  #reprice(key: string, part: bigint, prices: Map<string, CachedPrice>, now: number): { way: Winner; template: SwapTemplate } | null {
+    const size = (r: KeptRoute) => Math.abs(Math.log(Number(part) / Number(r.template.quote.inAmount)));
+    for (const r of this.#keptRoutes(key, now).sort((x, y) => size(x) - size(y))) {
+      const price = prices.get(r.winner.mint);
+      if (!price) continue;
+      try {
+        if (!issuerPool(key, this.#o.bank(), { ...this.route, onlyMints: [r.winner.mint] }).pool.length) continue;
+      } catch {
+        continue; // not in the bank any more
+      }
+      if (this.#multiplier(r.winner.mint, now) !== r.multiplier) continue;
+      const template = scaleTemplate(r.template, part, SCALE_LIMITS, r.price / price.usd);
+      if (!template) continue;
+      // The template's quote is the winner's own (a JupQuote), rewritten.
+      const quote = template.quote as unknown as Winner["quote"];
+      const units = (r.winner.units * Number(quote.outAmount)) / Number(r.winner.quote.outAmount);
+      return { way: { ...r.winner, quote, outAmountRaw: quote.outAmount, units }, template };
+    }
+    return null;
+  }
+
+  /**
+   * Keeps freshly quoted swap legs' templates as routes (see the header), each with the token's
+   * price when it was quoted: from the cache when it was read moments before, else read once the
+   * build's own calls are done, in a prebuild's turn (and once more ROUTE_PRICE_RETRY_MS later if
+   * the budget kept it for trades). A template scale.ts couldn't rewrite isn't kept (no read).
+   */
+  #keep(quoted: { key: string; way: Winner; template: Promise<SwapTemplate | null> }[], quotedAt: number) {
+    if (this.routeTtlMs <= 0) return;
+    const job = (async () => {
+      const ready = (await Promise.all(quoted.map(async (q) => ({ ...q, template: await q.template }))))
+        .filter((q): q is typeof q & { template: SwapTemplate } => q.template !== null && !unscalable(q.template, BigInt(q.template.quote.inAmount)));
+      if (!ready.length) return;
+      const mints = [...new Set(ready.map((q) => q.way.mint))];
+      const inTime = (p: CachedPrice | null | undefined): p is CachedPrice => !!p && p.at >= quotedAt - PRICE_TTL_MS && p.at <= quotedAt + ROUTE_PRICE_AFTER_MS;
+      const read = () => this.prices.get(mints, (ms) => jupiterPrices(ms, this.jupiter(2)));
+      let prices = await read();
+      if (!mints.every((m) => inTime(prices.get(m)))) {
+        await new Promise((resolve) => setTimeout(resolve, ROUTE_PRICE_RETRY_MS));
+        prices = await read();
+      }
+      for (const q of ready) {
+        const p = prices.get(q.way.mint);
+        if (!inTime(p)) {
+          this.#routeStats.unpriced++;
+          continue;
+        }
+        const route: KeptRoute = { at: quotedAt, winner: q.way, template: q.template, price: p.usd, multiplier: this.#multiplier(q.way.mint, quotedAt) };
+        // Replaces a kept template of about the same size; keeps MAX_ROUTES sizes, in time, newest first.
+        const near = (r: KeptRoute) => Math.abs(Math.log(Number(q.template.quote.inAmount) / Number(r.template.quote.inAmount))) < Math.log(1.5);
+        const others = this.#keptRoutes(q.key, Date.now()).filter((r) => r.winner.mint === q.way.mint && !near(r));
+        this.#routes.set(q.key, [route, ...others].slice(0, MAX_ROUTES));
+        this.#routeStats.kept++;
+      }
+      if (this.#routes.size >= 500) for (const k of [...this.#routes.keys()]) if (!this.#keptRoutes(k, Date.now()).length) this.#routes.delete(k);
+    })().catch(() => {});
+    this.#learning.add(job);
+    void job.finally(() => this.#learning.delete(job));
+  }
+
+  /** Resolves once the routes being kept have their prices (or gave up): for tests and benches. */
+  async routesLearned(): Promise<void> {
+    while (this.#learning.size) await Promise.all([...this.#learning]);
   }
 
   /**
@@ -631,15 +840,15 @@ export class Router {
 
   /**
    * A swap leg's instructions for `user`: from the plan's answer when the plan routed for this
-   * wallet, from its template for any other wallet (no Jupiter call), else a fresh call. The
-   * build that made the plan (`mine`) gets its own call's errors; a later build whose shared
-   * answer failed makes its own call instead.
+   * wallet, from its template for any other wallet or a leg rewritten from a template (no Jupiter
+   * call), else a fresh call. The build that made the plan (`mine`) gets its own call's errors; a
+   * later build whose shared answer failed makes its own call instead.
    */
   async #swap(l: MappedLeg, w: Winner, user: PublicKey, payer: PublicKey, jupiter: JupiterAccess, use: JupiterUse, shared?: { plan: Plan; mine: boolean }) {
     const label = `${l.name} (${w.symbol})`;
     const swap = shared?.plan.swaps.get(l.index);
-    const own = shared?.plan.owner === user.toBase58();
-    if (swap && own) {
+    const own = shared?.plan.owner === user.toBase58() && swap?.res != null;
+    if (swap?.res && own) {
       const res = shared!.mine ? await swap.res : await swap.res.catch(() => null);
       if (res) return buyInstructions(res, routeQuote(w.quote), user, payer, label);
     }

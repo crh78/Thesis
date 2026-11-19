@@ -130,3 +130,40 @@ test("anything not read with certainty isn't scaled", () => {
   assert.match(unscalable(leg({ ...a.res, setupInstructions: [...a.res.setupInstructions, ix] }), 20_000_000n)!, /setup/);
   assert.match(unscalable(leg({ ...a.res, error: "no route" }), 20_000_000n)!, /error/);
 });
+
+// Repricing (a kept route reused minutes later): the output also moves by the template's price
+// over the price now.
+test("repriced: the exact new input, the output in proportion and at the price now, the same slippage", () => {
+  // The token is 2% dearer than when the template was quoted: 2% fewer tokens for the money.
+  const factor = 1 / 1.02;
+  const t = swapTemplate(leg(), a.user)!;
+  const repriced = scaleTemplate(t, 20_000_000n, SCALE_LIMITS, factor)!;
+  const f = BigInt(Math.round(factor * 1e12));
+  const expectOut = (9_849_790n * 20_000_000n * f) / (15_000_000n * 1_000_000_000_000n);
+  assert.ok(Math.abs(Number(expectOut) - (9_849_790 * 20 / 15) / 1.02) < 1);
+  assert.deepEqual(routeAmounts(repriced.res.swapInstruction), { name: "route", inAmount: 20_000_000n, quotedOutAmount: expectOut, slippageBps: 100, platformFeeBps: 0 });
+  assert.deepEqual([repriced.quote.inAmount, repriced.quote.outAmount, repriced.quote.otherAmountThreshold], ["20000000", String(expectOut), String(minOut(expectOut, 100))]);
+  // Only the hop that delivers the token is repriced; the wSOL hop's output scales with the input.
+  const hops = repriced.quote.routePlan!.map((h) => h.swapInfo as { outputMint: string; inAmount: string; outAmount: string });
+  const orig = quote.routePlan.map((h: { swapInfo: { outAmount: string } }) => BigInt(h.swapInfo.outAmount));
+  assert.equal(hops[0].outAmount, String((orig[0] * 20_000_000n) / 15_000_000n));
+  assert.equal(hops[1].outAmount, String((orig[1] * 20_000_000n * f) / (15_000_000n * 1_000_000_000_000n)));
+  // Accounts and the route are untouched; a second wallet builds it on its own accounts.
+  assert.deepEqual(repriced.res.swapInstruction.accounts, t.res.swapInstruction.accounts);
+  const built = fromTemplate(repriced, b.user, payer, "NVDAx");
+  assert.deepEqual([built.inUsdc, built.outAmount, built.minOutAmount], [20_000_000n, expectOut, minOut(expectOut, 100)]);
+  assert.equal(built.outputAccount?.toBase58(), associatedTokenAddress(b.user, NVDAX, TOKEN_2022_PROGRAM));
+  // A factor of 1 is plain scaling, to the byte.
+  assert.equal(scaleTemplate(t, 20_000_000n, SCALE_LIMITS, 1)!.res.swapInstruction.data, scaleTemplate(t, 20_000_000n)!.res.swapInstruction.data);
+});
+
+test("repriced only while the price moved at most maxPriceMovePct, and only with a price", () => {
+  assert.equal(unscalable(leg(), 20_000_000n, SCALE_LIMITS, 1 / 1.0299), null, "2.99% dearer");
+  assert.equal(unscalable(leg(), 20_000_000n, SCALE_LIMITS, 1 / 0.9701), null, "2.99% cheaper");
+  assert.match(unscalable(leg(), 20_000_000n, SCALE_LIMITS, 1 / 1.031)!, /price moved 3.10%/);
+  assert.match(unscalable(leg(), 20_000_000n, SCALE_LIMITS, 1 / 0.969)!, /price moved 3.10%/);
+  for (const bad of [0, -1, NaN, Infinity]) assert.match(unscalable(leg(), 20_000_000n, SCALE_LIMITS, bad)!, /no price/);
+  assert.equal(scaleTemplate(swapTemplate(leg(), a.user)!, 20_000_000n, SCALE_LIMITS, 1.05), null);
+  // The size bounds still apply on top.
+  assert.match(unscalable(leg(a.res, { ...quote, priceImpactPct: "0.0016" }), 75_000_000n, SCALE_LIMITS, 1)!, /short/);
+});

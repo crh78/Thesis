@@ -268,7 +268,7 @@ test("the same trade by a second wallet makes no Jupiter call, and its legs are 
   assert.equal(legDiff(second.venue[0] as unknown as JupiterBuy, fresh.venue[0] as unknown as JupiterBuy), null);
   assert.equal(second.venue[0].output.account.toBase58(), associatedTokenAddress(b, NVDAX, TOKEN_2022_PROGRAM));
   assert.equal((second.venue[0] as unknown as JupiterBuy).inUsdc, 20_000_000n);
-  assert.deepEqual(router.jupiterStats().templates, { size: 1, hits: 1, waits: 0, scaled: 0, misses: 1, templatedLegs: 1 });
+  assert.deepEqual(router.jupiterStats().templates, { size: 1, hits: 1, waits: 0, scaled: 0, routes: 0, misses: 1, templatedLegs: 1 });
 });
 
 test("a different stake routes on its own; the same wallet again reuses its own answer", async (t) => {

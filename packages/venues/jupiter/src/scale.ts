@@ -12,6 +12,13 @@
 // the 1% slippage. A fill worse than the slippage limit, or a pool that needs accounts the quote
 // didn't name, fails the transaction's preflight: nothing is mistraded.
 //
+// Repriced: a route template kept for minutes (the fork API's long-lived routes) is reused at the
+// token's price now. `priceFactor` is the price when the template was quoted over the price now
+// (USD per token, both read from Jupiter's Price v3): the expected output moves by it, on top of
+// the size scaling, so the pools' fees and the gap between Jupiter's price and the pools, measured
+// by the template's own quote, carry over. Prices that moved more than maxPriceMovePct since aren't
+// repriced (the caller quotes afresh): a move that big may have moved the pools' ticks too.
+//
 // Only layouts read with certainty are rewritten: Jupiter v6 `route` and `shared_accounts_route`,
 // whose Borsh arguments end in in_amount u64, quoted_out_amount u64, slippage_bps u16,
 // platform_fee_bps u8, and only when those read back exactly the quote's own numbers. Anything
@@ -45,9 +52,9 @@ const TAIL = 19;
  * preflight, never mistrades. A 0.02%-impact quote (a $20 leg in a deep pool) scales up to 10x, a
  * 0.16% one (MSFTx's Raydium CLMM pool for $5, on the owner's take) to ~4x. (Before: a fixed
  * 0.4x-2.5x missed $20 -> $50 on rounding; then a 0.1% impact cap failed the whole build on that one
- * thin leg.)
+ * thin leg.) `maxPriceMovePct`: the most a repriced template's price may have moved (see the header).
  */
-export const SCALE_LIMITS = { maxPriceImpactPct: 0.5, minRatio: 0.1, maxRatio: 10, maxShortfallPct: 0.5 };
+export const SCALE_LIMITS = { maxPriceImpactPct: 0.5, minRatio: 0.1, maxRatio: 10, maxShortfallPct: 0.5, maxPriceMovePct: 3 };
 export type ScaleLimits = typeof SCALE_LIMITS;
 
 /** The amounts an exact-in route instruction carries, or null if it isn't one read here. */
@@ -71,8 +78,15 @@ export function routeAmounts(ix: JupIx): { name: string; inAmount: bigint; quote
 /** Jupiter's minimum output for an exact-in quote: the output less its slippage, rounded in the output's favour (as its quotes do). */
 export const minOut = (out: bigint, slippageBps: number) => out - (out * BigInt(slippageBps)) / 10_000n;
 
-/** Why `leg` can't be scaled to `inAmount`, or null if it can (see the header). */
-export function unscalable(leg: SwapLeg, inAmount: bigint, limits: ScaleLimits = SCALE_LIMITS): string | null {
+/** `priceFactor` as an exact fraction over PRICE_ONE, so a factor of 1 scales exactly as before. */
+const PRICE_ONE = 1_000_000_000_000n;
+const priceFraction = (f: number) => BigInt(Math.round(f * Number(PRICE_ONE)));
+
+/**
+ * Why `leg` can't be scaled to `inAmount` (and repriced by `priceFactor`: the template's price over
+ * the price now), or null if it can (see the header).
+ */
+export function unscalable(leg: SwapLeg, inAmount: bigint, limits: ScaleLimits = SCALE_LIMITS, priceFactor = 1): string | null {
   const { res, quote } = leg;
   const q = quote;
   if (res.error) return `Jupiter answered an error: ${res.error}`;
@@ -97,21 +111,28 @@ export function unscalable(leg: SwapLeg, inAmount: bigint, limits: ScaleLimits =
   if (ratio < limits.minRatio || ratio > limits.maxRatio) return `${ratio.toFixed(2)}x the quoted amount is outside ${limits.minRatio}x-${limits.maxRatio}x`;
   const shortfall = Math.abs(impact) * Math.max(0, ratio - 1);
   if (shortfall > limits.maxShortfallPct) return `scaling ${ratio.toFixed(2)}x a ${impact.toFixed(3)}%-impact quote could fall ${shortfall.toFixed(3)}% short (over ${limits.maxShortfallPct}%)`;
+  if (!Number.isFinite(priceFactor) || priceFactor <= 0) return "no price to reprice it at";
+  const moved = Math.abs(1 / priceFactor - 1) * 100;
+  if (moved > limits.maxPriceMovePct) return `the price moved ${moved.toFixed(2)}% since the quote (over ${limits.maxPriceMovePct}%)`;
   return null;
 }
 
 /**
  * `leg` (a template or one wallet's answer) at `inAmount` instead of its quoted input: the route
  * instruction's in_amount set to `inAmount`, its quoted_out_amount and the quote's output, minimum
- * and per-hop amounts scaled in proportion. Accounts, programs, the route, slippage and every
+ * and per-hop amounts scaled in proportion, and the outputs also by `priceFactor` (the template's
+ * price over the price now; 1: not repriced). Accounts, programs, the route, slippage and every
  * other instruction stay as they are. Throws when unscalable says it can't be.
  */
-export function scaleSwap<T extends SwapLeg>(leg: T, inAmount: bigint, limits: ScaleLimits = SCALE_LIMITS): T {
-  const why = unscalable(leg, inAmount, limits);
+export function scaleSwap<T extends SwapLeg>(leg: T, inAmount: bigint, limits: ScaleLimits = SCALE_LIMITS, priceFactor = 1): T {
+  const why = unscalable(leg, inAmount, limits, priceFactor);
   if (why) throw new Error(`can't scale this swap: ${why}`);
   const quotedIn = BigInt(leg.quote.inAmount);
+  const f = priceFraction(priceFactor);
   const scale = (n: bigint) => (n * inAmount) / quotedIn;
-  const out = scale(BigInt(leg.quote.outAmount));
+  // The output: in proportion to the input, then at the price now (rounded down).
+  const scaleOut = (n: bigint) => (n * inAmount * f) / (quotedIn * PRICE_ONE);
+  const out = scaleOut(BigInt(leg.quote.outAmount));
   const slippageBps = leg.quote.slippageBps!;
   const data = Buffer.from(leg.res.swapInstruction.data, "base64");
   data.writeBigUInt64LE(inAmount, data.length - TAIL);
@@ -124,7 +145,8 @@ export function scaleSwap<T extends SwapLeg>(leg: T, inAmount: bigint, limits: S
       swapInfo: {
         ...info,
         ...(info.inAmount !== undefined ? { inAmount: String(scale(BigInt(info.inAmount))) } : {}),
-        ...(info.outAmount !== undefined ? { outAmount: String(scale(BigInt(info.outAmount))) } : {}),
+        // Only the hops that deliver the bought token are repriced (informational: the route instruction carries none of these).
+        ...(info.outAmount !== undefined ? { outAmount: String((info.outputMint === leg.quote.outputMint ? scaleOut : scale)(BigInt(info.outAmount))) } : {}),
       },
     };
   });
@@ -141,7 +163,7 @@ export function scaleSwap<T extends SwapLeg>(leg: T, inAmount: bigint, limits: S
   } as T;
 }
 
-/** A template at `inAmount` (scaleSwap), or null when it can't be scaled there. */
-export function scaleTemplate(t: SwapTemplate, inAmount: bigint, limits: ScaleLimits = SCALE_LIMITS): SwapTemplate | null {
-  return unscalable(t, inAmount, limits) ? null : scaleSwap(t, inAmount, limits);
+/** A template at `inAmount` (scaleSwap), repriced by `priceFactor`, or null when it can't be scaled there. */
+export function scaleTemplate(t: SwapTemplate, inAmount: bigint, limits: ScaleLimits = SCALE_LIMITS, priceFactor = 1): SwapTemplate | null {
+  return unscalable(t, inAmount, limits, priceFactor) ? null : scaleSwap(t, inAmount, limits, priceFactor);
 }

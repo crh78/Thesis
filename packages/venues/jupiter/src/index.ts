@@ -168,7 +168,8 @@ export const JUPITER_TIMEOUT_MS = 15_000;
 /** The most one Jupiter call waits out 429s in total before giving up (by default). */
 export const JUPITER_MAX_429_WAIT_MS = 20_000;
 
-const jupiterBase = (apiKey: string | null | undefined) => (apiKey ? "https://api.jup.ag" : "https://lite-api.jup.ag");
+/** Jupiter's API host: the keyed one with a key, else the keyless lite host. */
+export const jupiterBase = (apiKey: string | null | undefined) => (apiKey ? "https://api.jup.ag" : "https://lite-api.jup.ag");
 
 /** How a caller reaches Jupiter: its key, the fetch to use (a rate budget's) and how long it may wait out 429s. */
 export type JupiterAccess = { apiKey?: string | null; fetchFn?: FetchFn; max429WaitMs?: number };
@@ -233,3 +234,4 @@ export function splitStake(stake: bigint, weightsBps: number[]): bigint[] {
 export * from "./lend.ts";
 export * from "./template.ts";
 export * from "./scale.ts";
+export * from "./price.ts";
