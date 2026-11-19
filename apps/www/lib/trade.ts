@@ -22,8 +22,11 @@ export type Submission = {
 /** `unknown`: the watch gave up (the API never said, or doesn't know the build). */
 export type Outcome = Submission["status"] | "unknown";
 
-/** A trade sent with `until: "accepted"` and not yet confirmed: kept across reloads (sessionStorage). */
-export type PendingTrade = { buildId: string; owner: string; takeId: string; kind: "back" | "fade" | "sell"; usd: number | null; position: string | null; at: number };
+/**
+ * A trade sent with `until: "accepted"` and not yet confirmed: kept across reloads (sessionStorage).
+ * A sale's `side` is the holding it sold from (missing from one saved before partial sales).
+ */
+export type PendingTrade = { buildId: string; owner: string; takeId: string; kind: "back" | "fade" | "sell"; usd: number | null; position: string | null; side?: "back" | "fade"; at: number };
 
 const PENDING_KEY = "thesis.pendingTrade";
 export const pendingTrade = {
@@ -130,12 +133,15 @@ export type Taken = { built: Built; at: number; early: boolean; expiresAt: numbe
  * API for the build behind a key; a build is signed once. `ready` false (the sheet closed, the
  * wallet not ready) stops it, and anything cached just expires. `beforeEarly` runs before each
  * early build (the check that the last trade has finished confirming); false skips that build.
+ * `onEarlyError` hears an early build's refusal (a sale's part too big), so the sheet can say why
+ * before the tap.
  */
 export function useEarlyBuild(opts: {
   ready: boolean;
   make: (key: string, prebuild: boolean) => Promise<Built>;
   beforeEarly?: () => Promise<boolean>;
   onEarlyBuilt?: (key: string, built: Built) => void;
+  onEarlyError?: (key: string, error: unknown) => void;
 }) {
   const live = useRef(opts);
   live.current = opts;
@@ -209,6 +215,7 @@ export function useEarlyBuild(opts: {
         // Busy, rate-limited or unreachable: leave it for a while (the tap still builds now).
         // Anything else (no cash, the take closed) the tap's own build says.
         if (e instanceof ForkError && ["busy", "rate_limited", "fork_unreachable"].includes(e.code)) backoffUntil.current = Date.now() + EARLY.backoffMs;
+        else if (g === gen.current) live.current.onEarlyError?.(key, e);
         return null;
       } finally {
         flying.current.delete(key);

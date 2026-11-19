@@ -6,6 +6,21 @@
 import { useCallback, useMemo, useRef } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useSignMessage, useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
+import type { SaleFields } from "./data";
+
+/**
+ * What a sale build adds with partial sales (an older fork API sends none of it): `bps` sold of
+ * what's left (10,000 = all), `full` when that's the whole holding, `sale` the cost basis and value
+ * sold and left, `positions` the positions a holding sale (`/takes/:id/sell`) sells.
+ */
+export type SaleBuilt = {
+  bps?: number;
+  full?: boolean;
+  sale?: { stakeUsd: number; remainingStakeUsd: number; valueUsd: number | null; remainingValueUsd: number | null };
+  positions?: string[];
+  expectedUsd?: number | null;
+  escrowUsd?: number | null;
+};
 
 /**
  * `phoenixCashOut`: a sale that closed Phoenix legs; their cash comes back with `cashOutPhoenix`.
@@ -15,9 +30,9 @@ import { useSignMessage, useSignTransaction, useWallets } from "@privy-io/react-
  * be refreshed). `prebuilt`: the API served a `prebuild: true` request as a prebuild (its money
  * action counts at submit); without it the request was a normal build.
  */
-export type Built = { buildId: string; transactions: string[]; feeUsd?: number; phoenixCashOut?: boolean; closesTake?: boolean; expiresAt?: number; quotedAt?: number; prebuilt?: boolean };
+export type Built = SaleBuilt & { buildId: string; transactions: string[]; feeUsd?: number; phoenixCashOut?: boolean; closesTake?: boolean; expiresAt?: number; quotedAt?: number; prebuilt?: boolean };
 
-export type PortfolioPosition = {
+export type PortfolioPosition = SaleFields & {
   address: string;
   takeId: string;
   claim: string;
@@ -35,6 +50,8 @@ export type PortfolioPosition = {
   takeStatus?: string;
   /** Legs held on Phoenix (perp legs, a fade's shorts): where each is liquidated and how close it is. */
   phoenix?: PhoenixRisk[];
+  /** A holding (holdings()): the positions it groups, newest first as the portfolio lists them. */
+  members?: string[];
 };
 /**
  * One Phoenix leg of a position (the fork API's `phoenix.risk`): `liquidationUsd` is null when
@@ -118,6 +135,11 @@ const KNOWN: Record<string, string> = {
   // The API's own words for these are for developers ("Build again: transactions expire…").
   trade_changed: "This changed while you were signing. Try again.",
   build_expired: "That took too long. Try again.",
+  // Partial sales (the sheet words these with the refusal's figures where it has them: lib/sell.ts).
+  remainder_below_minimum: "That would leave less than the $10 minimum in the position. Sell less, or sell all of it.",
+  part_too_small: "That part is too small to sell. Pick a bigger part, or sell all of it.",
+  too_many_open_sales: "This position has too many sales still settling. Wait a few minutes, or sell all of it.",
+  already_exited: "That position is already sold.",
   // A crash on the API's side: its message is a stack line, not for people.
   internal: "Something went wrong on our side. Try again.",
 };
@@ -328,10 +350,12 @@ export function holdings(positions: PortfolioPosition[]): PortfolioPosition[] {
   }
   return order.map((key) => {
     const g = groups.get(key)!;
-    if (g.length === 1) return g[0];
+    if (g.length === 1) return { ...g[0], members: [g[0].address] };
     const total = (f: (p: PortfolioPosition) => number | null) => (g.every((p) => f(p) != null) ? g.reduce((s, p) => s + (f(p) ?? 0), 0) : null);
     const stake = g.reduce((s, p) => s + p.stakeUsd, 0);
     const scored = g.every((p) => p.returnBps != null) && stake > 0;
+    // Partial-sale figures only when every position has them (an older fork API sends none).
+    const sales = g.every((p) => p.remainingStakeUsd != null);
     return {
       ...g[0],
       stakeUsd: stake,
@@ -341,6 +365,12 @@ export function holdings(positions: PortfolioPosition[]): PortfolioPosition[] {
       pendingNote: g.find((p) => p.pendingNote)?.pendingNote ?? null,
       canExit: g.some((p) => p.canExit),
       exited: g.every((p) => p.exited),
+      remainingStakeUsd: sales ? g.reduce((s, p) => s + (p.remainingStakeUsd ?? 0), 0) : undefined,
+      soldStakeUsd: sales ? g.reduce((s, p) => s + (p.soldStakeUsd ?? 0), 0) : undefined,
+      realizedPnlUsd: g.some((p) => p.realizedPnlUsd != null) ? g.reduce((s, p) => s + (p.realizedPnlUsd ?? 0), 0) : null,
+      pendingSales: g.flatMap((p) => p.pendingSales ?? []),
+      closesTakeIfSoldAll: g.some((p) => p.closesTakeIfSoldAll),
+      members: g.map((p) => p.address),
       phoenix: closest(g.flatMap((p) => (p.exited ? [] : p.phoenix ?? []))),
     };
   });
