@@ -81,6 +81,8 @@ async function fakeChain() {
       getAccountInfo: async (key: PublicKey) => account(key),
       getAccountInfoAndContext: async (key: PublicKey) => ({ context: { slot: 1 }, value: account(key) }),
       getMultipleAccountsInfo: async (keys: PublicKey[]) => keys.map(() => null),
+      // Positions the service noted (the take's own buy-in) are read back with Anchor's fetchMultiple.
+      getMultipleAccountsInfoAndContext: async (keys: PublicKey[]) => ({ context: { slot: 1 }, value: keys.map(() => null) }),
       getProgramAccounts: async () => [],
     } as unknown as Connection,
     takeData: (author: PublicKey, o: { status?: object; closedAt?: number; horizonEnd?: number } = {}) =>

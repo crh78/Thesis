@@ -834,8 +834,9 @@ export class ForkService {
    */
   #notePosition(take: PublicKey, position: PublicKey, owner: string, isNew = false) {
     const key = take.toBase58();
-    // A take never read here gets its first scan when it's read, which finds this position too.
-    if (!isNew && !this.#positions.has(key)) return;
+    // A take never read here still gets its first scan when it's read (scannedAt stays 0), but the
+    // position is known now: that scan can fail, or run before the position shows (it used to be
+    // skipped here, and a sale right after the back found nothing: 404 position_missing).
     const fresh = !this.#positions.has(key);
     const e = this.#positionEntry(key);
     if (isNew && fresh) e.scannedAt = Date.now();
