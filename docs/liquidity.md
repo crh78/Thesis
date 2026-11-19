@@ -2,13 +2,13 @@
 
 _Generated 2026-11-17 18:13:36 UTC by `node packages/venues/registry/src/build.ts`. Do not edit by hand: rerun the script. Machine-readable copy: [`packages/venues/registry/assets.json`](../packages/venues/registry/assets.json)._
 
-Every asset Thesis could put in a basket, with liquidity measured live. Scope: what a user can trade from their own wallet without the issuer's KYC, plus the venues we already use (Phoenix, Kamino, Jupiter Lend, Collector Crypt) and Gemini, which Thesis trades custodially.
+Every asset Thesis could put in a basket, with liquidity measured live. Scope: what a user can trade from their own wallet without the issuer's KYC, plus the venues we already use (Phoenix, Kamino, Jupiter Lend, Collector Crypt) and Gemini prediction markets, whose legs are paper fills: Thesis places no Gemini orders; a leg's share of the stake is escrowed and returned, and its P&L counts only in the score.
 
 ## How to read this
 
-- **Buy cost** is a USDC buy quoted live on Jupiter (`https://lite-api.jup.ag/swap/v1/quote`, `maxAccounts=30`, the cap that fits a 3-leg Blink). It is the worst of three numbers, plus any Token-2022 transfer fee: Jupiter's `priceImpactPct`; the slippage against the $10 quote's rate; and the shortfall against Jupiter's USD price for the token (scaled by the token's UI multiplier). Proprietary AMMs and order books often report 0% impact, which is why the other two exist.
-- **Class:** tradeable = a $100 USDC buy routes on Jupiter with maxAccounts=30 and costs < 1%, where cost = the worst of Jupiter's priceImpactPct, slippage vs the $10 quote's rate, and the shortfall vs Jupiter's USD price (UI-multiplier adjusted), plus any Token-2022 transfer fee. thin = routes but costs more, or only $10 routes. price-only = no usable route but a Jupiter or Pyth price exists. no-market = neither.
-- **Not quoted:** tokens with less than $100 of pooled liquidity in Jupiter's token API (`https://lite-api.jup.ag/tokens/v2/tag?query=verified`) are not quoted, to stay inside the free rate limit. Run with `--quote-floor=0` to quote them too.
+- **Buy cost** is a USDC buy quoted live on Jupiter's swap API (`/swap/v1/quote`, `maxAccounts=30`, the cap the fork API routes trades with). It is the worst of three numbers, plus any Token-2022 transfer fee: Jupiter's `priceImpactPct`; the slippage against the $10 quote's rate; and the shortfall against Jupiter's USD price for the token (scaled by the token's UI multiplier). Proprietary AMMs and order books often report 0% impact, which is why the other two exist.
+- **Class:** tradeable = a $100 USDC buy routes on Jupiter with maxAccounts=30 and costs < 1%, where cost = the worst of Jupiter's priceImpactPct, slippage vs the $10 quote's rate, and the shortfall vs Jupiter's USD price (UI-multiplier adjusted), plus any Token-2022 transfer fee. thin = routes but costs more, or only $10 routes. price-only = no usable route but a Jupiter or Pyth price exists. no-market = neither. This table measures that rule only. The live rule (the trade router, the settler's price floor and the catalog's tradeable flag) also needs at least $50k pooled liquidity (`PRICEABLE_MIN_POOLED_USD`, `packages/venues/bank/src/route.ts`), so a token marked tradeable here may still not be tradeable in the app.
+- **Not quoted:** tokens with less than $100 of pooled liquidity in Jupiter's token API (`/tokens/v2/tag?query=verified`) are not quoted, to stay inside the rate limit. Run with `--quote-floor=0` to quote them too.
 - **Pyth:** feed symbols come from the keyless Hermes catalog (`https://hermes.pyth.network/v2/price_feeds`). "free on-chain" means Pyth's sponsored push account on mainnet (shard 0 of the Core or Core-Compatible push program) updated within the last 4 days, which allows for weekends and market close, so any program can read it for free. "push acct stale" means the account exists but stopped updating (most equity feeds have). "key" means pull-only: the signed update must come from Hermes, which needs a Pyth API key (<https://docs.pyth.network/pro/pyth-core-upgrade.mdx>). Each feed's `access` and push account are in `assets.json`.
 - **Token:** program, and Token-2022 extensions that matter: transfer fee, permanent delegate (issuer can move or burn your tokens), pausable, scaled UI amount (wallet shows raw amount x multiplier), transfer hook.
 - Inputs this run: Jupiter api.jup.ag (JUPITER_API_KEY); RPC QuickNode (QUICKNODE_RPC_URL); keys QUICKNODE_RPC_URL=set JUPITER_API_KEY=set PYTH_API_KEY=empty.
@@ -551,9 +551,9 @@ _Measured 2026-11-17T18:33:19.307Z._ 196,369 cards indexed; **14,875 listed for 
 
 Sources: <https://api.collectorcrypt.com/marketplace>, <https://docs.collectorcrypt.com/marketplace/api>, <https://docs.collectorcrypt.com/marketplace/program>.
 
-## Gemini prediction markets (custodial)
+## Gemini prediction markets (paper fills)
 
-_Measured 2026-11-17T18:33:19.307Z._ Custodial: Thesis's own Gemini account places every order; users never link Gemini. Orders need Gemini API credentials and acceptance of the prediction-markets terms (POST /v1/prediction-markets/terms/accept). Nothing is on-chain; resolution follows each contract's terms PDF. Regulated venue and US availability are unverified. 1,259 active events. The categories endpoint lists: Live, Sports, Crypto, Commodities, Economics, Economy, Fun/Culture, Media, Politics, Tech, Business, Weather, Culture, Other, Finance.
+_Measured 2026-11-17T18:33:19.307Z._ Paper fills on Gemini's public market data: Thesis places no Gemini orders and users never link Gemini; entry is at the side's ask, exit at 1 or 0 once resolved, else at the bid. Nothing is on-chain; resolution follows each contract's terms PDF. Regulated venue and US availability are unverified. 1,259 active events. The categories endpoint lists: Live, Sports, Crypto, Commodities, Economics, Economy, Fun/Culture, Media, Politics, Tech, Business, Weather, Culture, Other, Finance.
 
 - **How to list them:** GET https://api.gemini.com/v1/prediction-markets/categories, then GET https://api.gemini.com/v1/prediction-markets/events?status=active&category=<name>&limit=100&offset=<n> (pagination.total gives the count). Contracts carry instrumentSymbol, prices.buy/sell.yes/no, expiryDate and termsAndConditionsUrl.
 
@@ -573,7 +573,7 @@ Volume is Gemini's `volume` field, read as USD (unit unverified). Sources: <http
 
 ## Good basket candidates
 
-Liquid enough for a one-signature leg today, grouped by theme. Spot means tradeable on Jupiter ($100 buy under 1%) **and** a $1,000 buy under 2%, which drops tiny order books that fill $100 and then run out. Perp means a Phoenix market where a $1,000 buy fills within 1% of mid. Perps are closed to US users and need Phoenix onboarding; xStocks are closed to US persons. Tradeable assets with no theme mapping in `curated.ts` are not listed here.
+Liquid enough for a one-signature leg today, grouped by theme. Spot means tradeable on Jupiter ($100 buy under 1%) **and** a $1,000 buy under 2%, which drops tiny order books that fill $100 and then run out. Perp means a Phoenix market where a $1,000 buy fills within 1% of mid. The catalog keeps each asset's US flags (`us_persons`), but geoblocking is off for now, so everything is offered to every account. Tradeable assets with no theme mapping in `curated.ts` are not listed here.
 
 | Theme | Spot (cost of a $100 buy) | Phoenix perps (max leverage) |
 |---|---|---|
@@ -588,7 +588,7 @@ Liquid enough for a one-signature leg today, grouped by theme. Spot means tradea
 
 - **Crypto perps** (tradeable on Phoenix): UNI, ORE, CRV, ARB, kBONK, WLD, DRV, ENA, ANSEM, BNB, FARTCOIN, VIRTUAL, STONK, MON, XPL, XLM, AVAX, SOL, AERO, ZEC, TRX, JTO, LIT, ETH, ADA, PONS, FET, kPEPE, LTC, AAVE, NEAR, TAO, MET, BP, PUMP, VVV, BTC, ZRO, XRP, FIL, JUP, HYPE, CHIP, MORPHO, RAY, LINK, ORCA, ONDO, MEGA, DOGE, METADAO, SUI, RENDER, SKR, kSHIB.
 - **Cash leg:** Jupiter Lend Earn jupiter lend USDC ($464.5M TVL, 4.15% APY).
-- **Prediction legs (custodial, via Thesis's Gemini account):** Sports (1000), Crypto (102), Weather (98), Politics (20), Commodities (18), Economics (9).
+- **Prediction legs (paper fills on Gemini's prices):** Sports (1000), Crypto (102), Weather (98), Politics (20), Commodities (18), Economics (9).
 
 ## Unverified
 

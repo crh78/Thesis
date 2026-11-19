@@ -1,6 +1,7 @@
-# The app's fork API on 127.0.0.1:18901 and the fork Blink on 127.0.0.1:18902. Tailscale Funnel
-# publishes both over HTTPS (infra/executor/README.md, "Publishing"). FORK_BLINK_ORIGIN, the
-# Blink's public origin, comes from /etc/thesis/executor.env.
+# The app's fork API on 127.0.0.1:18901 and the fork Blink on 127.0.0.1:18902 (closed: its
+# listener is off). Caddy publishes the API over HTTPS (infra/executor/caddy); Tailscale Funnel,
+# which used to publish both, is off. FORK_BLINK_ORIGIN, the Blink's public origin, comes from
+# /etc/thesis/executor.env.
 [Unit]
 Description=Thesis: fork API
 After=thesis-fork-up.service
@@ -15,7 +16,7 @@ Environment=FORK_HOST=127.0.0.1 FORK_API_PORT=18901 FORK_BLINK_PORT=18902
 ExecStart=/usr/bin/node scripts/fork/api.ts
 Restart=always
 RestartSec=5
-# Public through Funnel: it writes only under .data, can't gain privileges, and sees no home
+# Public through Caddy: it writes only under .data, can't gain privileges, and sees no home
 # directories (infra/executor/README.md, "Hardening").
 NoNewPrivileges=yes
 ProtectSystem=strict

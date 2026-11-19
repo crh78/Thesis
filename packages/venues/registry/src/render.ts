@@ -77,11 +77,11 @@ export function renderMarkdown(r: Registry): string {
   const out: string[] = [];
   const when = r.generatedAt.replace("T", " ").replace(/\.\d+Z$/, " UTC");
   out.push(`# Liquidity registry\n\n_Generated ${when} by \`${r.generator}\`. Do not edit by hand: rerun the script. Machine-readable copy: [\`packages/venues/registry/assets.json\`](../packages/venues/registry/assets.json)._\n`);
-  out.push(`Every asset Thesis could put in a basket, with liquidity measured live. Scope: what a user can trade from their own wallet without the issuer's KYC, plus the venues we already use (Phoenix, Kamino, Jupiter Lend, Collector Crypt) and Gemini, which Thesis trades custodially.\n`);
+  out.push(`Every asset Thesis could put in a basket, with liquidity measured live. Scope: what a user can trade from their own wallet without the issuer's KYC, plus the venues we already use (Phoenix, Kamino, Jupiter Lend, Collector Crypt) and Gemini prediction markets, whose legs are paper fills: Thesis places no Gemini orders; a leg's share of the stake is escrowed and returned, and its P&L counts only in the score.\n`);
   out.push(`## How to read this\n`);
-  out.push(`- **Buy cost** is a USDC buy quoted live on Jupiter (\`${COMMON_SOURCES.jupiterQuote}\`, \`maxAccounts=30\`, the cap that fits a 3-leg Blink). It is the worst of three numbers, plus any Token-2022 transfer fee: Jupiter's \`priceImpactPct\`; the slippage against the $10 quote's rate; and the shortfall against Jupiter's USD price for the token (scaled by the token's UI multiplier). Proprietary AMMs and order books often report 0% impact, which is why the other two exist.`);
-  out.push(`- **Class:** ${r.inputs.tradeableRule}`);
-  out.push(`- **Not quoted:** tokens with less than ${usd(r.inputs.quoteFloorUsd)} of pooled liquidity in Jupiter's token API (\`${COMMON_SOURCES.jupiterTokens}\`) are not quoted, to stay inside the free rate limit. Run with \`--quote-floor=0\` to quote them too.`);
+  out.push(`- **Buy cost** is a USDC buy quoted live on Jupiter's swap API (\`/swap/v1/quote\`, \`maxAccounts=30\`, the cap the fork API routes trades with). It is the worst of three numbers, plus any Token-2022 transfer fee: Jupiter's \`priceImpactPct\`; the slippage against the $10 quote's rate; and the shortfall against Jupiter's USD price for the token (scaled by the token's UI multiplier). Proprietary AMMs and order books often report 0% impact, which is why the other two exist.`);
+  out.push(`- **Class:** ${r.inputs.tradeableRule} This table measures that rule only. The live rule (the trade router, the settler's price floor and the catalog's tradeable flag) also needs at least $50k pooled liquidity (\`PRICEABLE_MIN_POOLED_USD\`, \`packages/venues/bank/src/route.ts\`), so a token marked tradeable here may still not be tradeable in the app.`);
+  out.push(`- **Not quoted:** tokens with less than ${usd(r.inputs.quoteFloorUsd)} of pooled liquidity in Jupiter's token API (\`/tokens/v2/tag?query=verified\`) are not quoted, to stay inside the rate limit. Run with \`--quote-floor=0\` to quote them too.`);
   out.push(`- **Pyth:** feed symbols come from the keyless Hermes catalog (\`${COMMON_SOURCES.pythCatalog}\`). "free on-chain" means Pyth's sponsored push account on mainnet (shard 0 of the Core or Core-Compatible push program) updated within the last 4 days, which allows for weekends and market close, so any program can read it for free. "push acct stale" means the account exists but stopped updating (most equity feeds have). "key" means pull-only: the signed update must come from Hermes, which needs a Pyth API key (<${COMMON_SOURCES.pythKey}>). Each feed's \`access\` and push account are in \`assets.json\`.`);
   out.push(`- **Token:** program, and Token-2022 extensions that matter: transfer fee, permanent delegate (issuer can move or burn your tokens), pausable, scaled UI amount (wallet shows raw amount x multiplier), transfer hook.`);
   out.push(`- Inputs this run: Jupiter ${r.inputs.jupiter}; RPC ${r.inputs.rpc}; keys ${r.inputs.keys}.\n`);
@@ -152,13 +152,13 @@ export function renderMarkdown(r: Registry): string {
   // Gemini
   if (r.gemini) {
     const g = r.gemini;
-    out.push(`## Gemini prediction markets (custodial)\n\n_Measured ${g.measuredAt}._ ${g.custody} ${g.restrictions.join(" ")} ${g.totalActiveEvents.toLocaleString()} active events. The categories endpoint lists: ${g.listedCategories.join(", ")}.\n\n- **How to list them:** ${g.howToList}\n\n| Category | Active events | Contracts | Total volume | 24h volume | Busiest events (24h) |\n|---|---|---|---|---|---|\n${g.categories
+    out.push(`## Gemini prediction markets (paper fills)\n\n_Measured ${g.measuredAt}._ Paper fills on Gemini's public market data: Thesis places no Gemini orders and users never link Gemini; entry is at the side's ask, exit at 1 or 0 once resolved, else at the bid. ${g.restrictions.filter((x) => !/^Orders need/.test(x)).join(" ")} ${g.totalActiveEvents.toLocaleString()} active events. The categories endpoint lists: ${g.listedCategories.join(", ")}.\n\n- **How to list them:** ${g.howToList}\n\n| Category | Active events | Contracts | Total volume | 24h volume | Busiest events (24h) |\n|---|---|---|---|---|---|\n${g.categories
       .map((k) => `| ${esc(k.category)} | ${k.activeEvents} | ${k.activeContracts} | ${compactUsd(k.volumeUsd)} | ${compactUsd(k.volume24hUsd)} | ${k.top.map((e) => `${esc(e.title)} (\`${e.ticker}\`)`).join("; ")} |`)
       .join("\n")}\n\nVolume is Gemini's \`volume\` field, read as USD (unit unverified). Sources: ${g.sources.map((s) => `<${s.url}>`).join(", ")}.\n`);
   }
 
   // Candidates
-  out.push(`## Good basket candidates\n\nLiquid enough for a one-signature leg today, grouped by theme. Spot means tradeable on Jupiter ($100 buy under 1%) **and** a $1,000 buy under 2%, which drops tiny order books that fill $100 and then run out. Perp means a Phoenix market where a $1,000 buy fills within 1% of mid. Perps are closed to US users and need Phoenix onboarding; xStocks are closed to US persons. Tradeable assets with no theme mapping in \`curated.ts\` are not listed here.\n`);
+  out.push(`## Good basket candidates\n\nLiquid enough for a one-signature leg today, grouped by theme. Spot means tradeable on Jupiter ($100 buy under 1%) **and** a $1,000 buy under 2%, which drops tiny order books that fill $100 and then run out. Perp means a Phoenix market where a $1,000 buy fills within 1% of mid. The catalog keeps each asset's US flags (\`us_persons\`), but geoblocking is off for now, so everything is offered to every account. Tradeable assets with no theme mapping in \`curated.ts\` are not listed here.\n`);
   const themes = new Map<string, { spot: string[]; perp: string[] }>();
   for (const a of r.spot.filter((x) => x.liquidity.class === "tradeable" && (x.liquidity.buyCost1000Pct ?? Infinity) < 2)) for (const t of a.themes) {
     const e = themes.get(t) ?? { spot: [], perp: [] };
@@ -178,7 +178,7 @@ export function renderMarkdown(r: Registry): string {
   const cryptoPerps = r.phoenix?.markets.filter((m) => m.class === "tradeable" && m.assetClass === "crypto").map((m) => m.symbol) ?? [];
   if (cryptoPerps.length) out.push(`- **Crypto perps** (tradeable on Phoenix): ${cryptoPerps.join(", ")}.`);
   if (yieldBest) out.push(`- **Cash leg:** ${yieldBest.venue} ${yieldBest.name} (${compactUsd(yieldBest.tvlUsd)} TVL, ${pct(yieldBest.apyPct)} APY).`);
-  if (r.gemini) out.push(`- **Prediction legs (custodial, via Thesis's Gemini account):** ${r.gemini.categories.slice(0, 6).map((k) => `${k.category} (${k.activeEvents})`).join(", ")}.`);
+  if (r.gemini) out.push(`- **Prediction legs (paper fills on Gemini's prices):** ${r.gemini.categories.slice(0, 6).map((k) => `${k.category} (${k.activeEvents})`).join(", ")}.`);
   out.push("");
 
   // Unverified roll-up

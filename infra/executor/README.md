@@ -20,7 +20,7 @@ Always Free Arm (2 OCPUs, 12 GB) runs always-on at no cost, and the stack is sma
 ## Access
 
 - **Everything listens on 127.0.0.1.** Caddy publishes the fork API over HTTPS at `https://<fork-host>` (step 9), publicly, so the apps and teammates need nothing installed. Clients take the host from their settings: `FORK_API_URL` and `NEXT_PUBLIC_FORK_API_URL` for the web app, `FORK_API_URL` in the iOS app's `Config/Fork.local.xcconfig`.
-- **Tailscale Funnel** still serves the fork API's old Funnel address, for builds made before Caddy, and the closed Blink (`https://<fork-host>:8443`, whose listener is off: `FORK_BLINK_PORT=` in the env file). Turn it off once no build uses the old address.
+- **Tailscale Funnel is off** (2026-11-19): the web app and current iOS builds use Caddy's host, and the Blink is closed (its listener is off too: `FORK_BLINK_PORT=` in the env file). An iOS build made before Caddy still points at the old Funnel address: rebuild it with `FORK_API_URL = https:/$()/<fork-host>`. To serve the old address again for a while: `sudo tailscale funnel --bg 18901`.
 - **Anyone with the URL can spend the QuickNode and Jupiter quota** behind the fork API, so it enforces [abuse limits](../../scripts/fork/README.md#abuse-limits).
 - **Admin is key-only SSH** on port 22 (`ssh -A ubuntu@<vm-host>`; Ubuntu's Oracle image refuses passwords). `-A` forwards your GitHub key, which the VM uses to pull this private repo; it has no GitHub credential of its own. Tailscale SSH (`ubuntu@thesis-executor`) also works from a device on the tailnet.
 
@@ -61,7 +61,7 @@ Read load test (2026-11-18, from the VM through Caddy): 200 concurrent visitors,
    3. `sudo bash infra/executor/caddy/setup.sh <host>`. It installs Caddy (the Ubuntu package), binds it to the VM's own address (Tailscale holds 443 on its interface while Funnel is on), opens 443 in the VM's own firewall (live and in `/etc/iptables/rules.v4`), and gets the certificate by itself. The host is kept in `/etc/thesis/caddy.env`; `update.sh` reloads the Caddyfile from then on.
    4. Check from anywhere: `curl https://<fork-host>/config`.
 
-   The Blink (closed) still goes through Funnel when it's on: `sudo tailscale funnel --bg --https=8443 http://127.0.0.1:18902`, with `FORK_BLINK_ORIGIN` set to that URL.
+   The Blink is closed and Funnel is off. If the Blink comes back, it goes through Funnel: `sudo tailscale funnel --bg --https=8443 http://127.0.0.1:18902`, with `FORK_BLINK_ORIGIN` set to that URL and `FORK_BLINK_PORT` set.
 
 ## Mainnet RPC for the fork
 

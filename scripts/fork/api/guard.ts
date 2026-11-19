@@ -10,17 +10,21 @@
 //   money action counts at submit (`countMoney`), once the wallet's signature checked out.
 // - Reads: 120 a minute per signed-in Privy user (a valid token on the read), otherwise per IP.
 //   Behind the web app's proxy (Vercel) every visitor shares a few IPs, so the proxy sends
-//   `x-thesis-proxy-key` and `x-thesis-client-ip`, and only then is that IP used; a browser calling
-//   directly through Tailscale Funnel is counted by Funnel's last X-Forwarded-For entry.
+//   `x-thesis-proxy-key` and `x-thesis-client-ip`, and only then is that IP used; a browser or app
+//   calling directly through Caddy (infra/executor/caddy, which sets X-Forwarded-For to the address
+//   it saw) is counted by that header's last entry.
 //   `FORK_API_READ_LIMIT`: `report` (default) logs who'd be limited; `enforce` refuses (429).
 //   Verified tokens are cached for a minute (at most until they expire), so a read or a money
 //   route checks a token's signature once, not on every request.
-// - Jupiter calls, not whole builds, wait their turn (JupiterBudget): the free key allows 60
-//   requests a minute for the whole organisation, shared with the asset bank and the settler, so
-//   the API keeps to 30 a minute (bursts of 10) in three lanes: (1) builds at tap time wait for a
-//   request, up to a few seconds, then get 503 `busy`; (2) prebuilds and (3) route checks fail
-//   fast instead, whenever fewer than 6 requests are left (kept for taps) or Jupiter just answered
-//   429, and never wait out a 429. While builds' calls run or wait, the asset bank's
+// - Jupiter calls, not whole builds, wait their turn (JupiterBudget): a free key allows about 60
+//   requests a minute for its whole organisation, so the API keeps to 30 a minute (bursts of 10)
+//   by default, or FORK_API_JUPITER_RPM / FORK_API_JUPITER_BURST (the fork: its own trade key,
+//   JUPITER_TRADE_API_KEY, at 50 a minute in bursts of 3), in three lanes: (1) builds at tap time
+//   wait for a request, up to a few seconds, then get 503 `busy`; (2) prebuilds and (3) route
+//   checks are refused instead whenever the bucket would drop below its reserve (6 by default,
+//   burst − 2 when the burst is set) or Jupiter just answered 429, and never wait out a 429 (a
+//   prebuild may wait a few seconds for the reserve; a sell seed waits its retry-after and goes
+//   again, routing.ts). While builds' calls run or wait, the asset bank's
 //   `trade-builds.busy` file is touched every few seconds (`busyFile`), so the poller's probes
 //   leave the Jupiter key to trades.
 //
@@ -259,8 +263,8 @@ export class Guard {
     const proxy = header(req, "x-thesis-proxy-key");
     const claimed = header(req, "x-thesis-client-ip");
     if (proxy && claimed && this.#o.proxyKey && sameSecret(proxy, this.#o.proxyKey)) return `client:${claimed.trim()}`;
-    // Tailscale Funnel proxies from loopback and appends the address it saw to X-Forwarded-For;
-    // only that last entry is ours to trust.
+    // Caddy (and Tailscale Funnel, while it still serves older builds) proxies from loopback and
+    // sets the address it saw as X-Forwarded-For's last entry: only that entry is ours to trust.
     const forwarded = header(req, "x-forwarded-for")?.split(",").map((s) => s.trim()).filter(Boolean).at(-1);
     const peer = req.socket.remoteAddress ?? "unknown";
     const loopback = peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
