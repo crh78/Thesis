@@ -335,6 +335,26 @@ const publishRecord = (owner: Keypair, payer: Keypair, o: Partial<IncompleteTrad
   ...o,
 });
 
+test("retry: refused once for slippage by its preflight, the same bytes go again after the markets are reset and the trade finishes", async (t) => {
+  let refusals = 1;
+  const f = await fixture(t, {
+    record: publishRecord,
+    ticket: { grown: 0b1, phoenix: 0, named: 0b1 },
+    send: async () => {
+      if (refusals-- > 0) {
+        throw Object.assign(new Error("Transaction simulation failed"), { logs: ["Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 failed: custom program error: 0x1771"] });
+      }
+      return "sent";
+    },
+  });
+  const built = await f.service.buildRetry(f.wallet);
+  const { signatures } = await f.service.submit(built.buildId, f.sign(built));
+  assert.equal(f.sent.length, 2);
+  assert.equal(f.sentSigs()[0], f.sentSigs()[1], "the same signed transaction");
+  assert.deepEqual(signatures, ["landed-1", f.sentSigs()[0]], "the position opened over both parts");
+  assert.equal(f.service.incompleteTrades(f.wallet).trades.length, 0, "finished, not left to sweep");
+});
+
 test("retry: two retry builds send at most one; the other is refused before anything is sent", async (t) => {
   const f = await fixture(t, { record: publishRecord, ticket: { grown: 0b1, phoenix: 0, named: 0b1 }, send: async () => Promise.reject(new Error("custom program error: 0x1771")) });
   const a = await f.service.buildRetry(f.wallet);

@@ -94,7 +94,7 @@ import { contractResolver, escrowedKind, mapLegs, nameResolver, onChainLegs, per
 import { PhoenixDesk, type PhoenixClose } from "./phoenix.ts";
 import { LANE, newUse, type JupiterUse, type Lane } from "./guard.ts";
 import { Router, TEMPLATE_TTL_MS, escrowShare, type TradeLeg } from "./routing.ts";
-import { SendFailed, fates, refusedByPreflight, resendIfStale, sendBackToBack, type Fate } from "./send.ts";
+import { SendFailed, fates, refusedByPreflight, resendOnce, sendBackToBack, slippageRefusal, type Fate } from "./send.ts";
 import { SplitTrades, afterFailure, deserializeIx, incompleteView, serializeIx, sweepLegs } from "./split.ts";
 import { StateStore } from "./store.ts";
 import {
@@ -246,6 +246,8 @@ type Build = {
   kind: "back" | "publish" | "exit" | "claim" | "phoenix" | "sweep";
   /** Per transaction (cleanup left out), the take leg of each venue leg in it. */
   txLegs?: number[][];
+  /** Per transaction (cleanup left out), the underlyings its Jupiter swaps buy (routing's `dropBuys`). */
+  txKeys?: string[][];
   /** A create_take, back or fade. */
   trade?: TradeContext;
   /** The retry of this incomplete trade (as it stood when the retry was built). */
@@ -1675,9 +1677,12 @@ export class ForkService {
   /**
    * A trade's send failed. When part of a split trade had landed (or this was its retry), records
    * it as incomplete and answers 422 `trade_incomplete`, so the client retries or sweeps.
-   * Otherwise the error stands.
+   * Otherwise the error stands. One that sent nothing because its swaps were refused for slippage
+   * (the same bytes twice, the markets reset in between) says `requote: true`: nothing left the
+   * wallet, and a build with fresh quotes, signed again, is expected to go through.
    */
   #stopped(build: Build, e: unknown, txs: VersionedTransaction[] = []): unknown {
+    if (e instanceof SendFailed && e.nothingSent && slippageRefusal(e)) e.body = { ...e.body, requote: true };
     if (build.kind === "exit") return this.#saleStopped(build, e, txs);
     const trade = build.trade;
     if (!trade || (build.kind !== "back" && build.kind !== "publish")) return e;
@@ -2263,6 +2268,11 @@ export class ForkService {
           const mints = build.sale.txSteps.flat().flatMap((step) => (step.kind === "sell" ? [step.mint] : []));
           this.#router.dropSells(mints, `a sale of ${build.owner.slice(0, 6)}… failed to send (${e instanceof ApiError ? e.code : "error"})`);
         }
+        // A swap refused for slippage, even after the markets were reset: the routes its unsent
+        // transactions reused go, so the client's rebuild (or the retry) quotes those afresh.
+        if (build.txKeys && e instanceof SendFailed && e.refused && slippageRefusal(e)) {
+          this.#router.dropBuys(build.txKeys.slice(e.landed.length).flat(), `a trade of ${build.owner.slice(0, 6)}… was refused for slippage`);
+        }
         throw this.#stopped(build, e, txs);
       }
       this.#wallets.forgetActivity(build.owner);
@@ -2405,6 +2415,7 @@ export class ForkService {
     });
     t.add("compose", Date.now() - composeStarted);
     const txLegs = txs.map((c) => c.legs.map((j) => (venue[j] as Partial<TradeLeg>).output?.leg ?? -1));
+    const txKeys = txs.map((c) => c.legs.flatMap((j) => (venue[j] as Partial<TradeLeg>).key ?? []));
     // A sale too big for one transaction is a sequence too (api/sales.ts): its records ride last.
     // A trade the owner signs anyway also cancels their abandoned tickets. Not a sale: the app
     // expects exactly one transaction there. Each look is a getProgramAccounts, so it runs only
@@ -2431,6 +2442,7 @@ export class ForkService {
       position,
       cleanup,
       txLegs,
+      txKeys,
       lend: venue.flatMap((v) => ((v as Partial<TradeLeg>).how === "lend" ? [(v as TradeLeg).output.leg] : [])),
       trade: extra.trade,
       retry: extra.retry,
@@ -2527,14 +2539,15 @@ export class ForkService {
    *
    * `freshMs` leaves market accounts copied from mainnet that recently. If that left some and the
    * first transaction's preflight is refused (nothing went out), they're all reset and the same
-   * signed transactions are sent once more (api/send.ts `resendIfStale`).
+   * signed transactions are sent once more; so is a transaction refused for slippage, the first or
+   * a later one, with the ones after it (api/send.ts `resendOnce`).
    */
   async #send(txs: VersionedTransaction[], market: PublicKey[], t = new Timings(), accept?: () => void, freshMs = 0): Promise<string[]> {
     const refreshed = await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs }));
     // lib.ts says how many it left (`fresh`); a fork that doesn't say may have left any of them.
     const left = (refreshed as { fresh?: unknown } | undefined)?.fresh;
     try {
-      return await resendIfStale(() => (accept ? this.#sendAccepted(txs, t, accept) : this.#sendConfirmed(txs, t)), {
+      return await resendOnce((rest) => (accept ? this.#sendAccepted(rest, t, accept) : this.#sendConfirmed(rest, t)), txs, {
         stale: freshMs > 0 && market.length > 0 && (typeof left === "number" ? left > 0 : true),
         reset: () => {
           t.note("resent", "markets reset");
@@ -2555,6 +2568,7 @@ export class ForkService {
     const out: string[] = [];
     let unknown = false;
     let nothingSent = false;
+    let refused = false;
     try {
       for (const [i, tx] of txs.entries()) {
         const sent = Date.now();
@@ -2567,6 +2581,8 @@ export class ForkService {
         await conn.sendTransaction(tx, { skipPreflight: false }).catch(async (e) => {
           if (refusedByPreflight(e)) {
             nothingSent = i === 0;
+            // Each one before it was confirmed first: it alone stopped the trade, unsent.
+            refused = true;
             throw new ApiError(502, "send_failed", errorText(e));
           }
           // The RPC failed: the transaction may have gone out all the same.
@@ -2595,7 +2611,7 @@ export class ForkService {
         out.push(sig);
       }
     } catch (e) {
-      throw new SendFailed(e instanceof ApiError ? e : new ApiError(502, "send_failed", errorText(e)), out, unknown, nothingSent);
+      throw new SendFailed(e instanceof ApiError ? e : new ApiError(502, "send_failed", errorText(e)), out, unknown, nothingSent, refused);
     }
     return out;
   }

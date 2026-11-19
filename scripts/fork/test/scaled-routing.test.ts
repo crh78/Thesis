@@ -388,6 +388,38 @@ test("a wallet asking again after a repriced answer (a retry) quotes afresh", as
   assert.equal(smaller.jupiter.template, "miss");
 });
 
+test("a swap refused for slippage drops what its build reused: the next build of it quotes that leg afresh, even another wallet's", async (t) => {
+  const calls = jupiter(t);
+  const logs: string[] = [];
+  const router = new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null, log: (m: string) => logs.push(m) } as any, {
+    budget: new JupiterBudget({ perMinute: 6_000, burst: 1_000, reserve: 0 }, () => Date.now()),
+    readMints: null,
+    prices: new PriceCache(PRICE_TTL_MS, () => Date.now()),
+  });
+  const [a, b, c] = [Keypair.generate().publicKey, Keypair.generate().publicKey, Keypair.generate().publicKey];
+  const first = await router.venueLegs(legs, a, 20);
+  await router.routesLearned();
+  assert.equal(calls.length, 8);
+  // Each swap leg says which underlying it buys (the service keeps them per transaction).
+  assert.deepEqual(first.venue.map((v) => v.key), STOCKS.map((s) => s.key));
+  // A $30 build scales the $20 routing: no call.
+  assert.equal((await router.venueLegs(legs, b, 30)).jupiter.template, "scaled");
+  assert.equal(calls.length, 8);
+  // The $30 back's NVDA swap was refused for slippage at submit.
+  router.dropBuys([STOCKS[0].key], "refused for slippage");
+  assert.match(logs.at(-1)!, /buy routes dropped for equity:US:NVDA: refused for slippage/);
+  // Neither the scaled-from routing nor the shared $20 one, nor NVDA's kept route, serves again.
+  const again = await router.venueLegs(legs, c, 30);
+  assert.equal(again.jupiter.template, "miss");
+  assert.deepEqual([again.jupiter.quotes, again.jupiter.instructions], [1, 1], "NVDA quoted afresh; the other three repriced from their kept routes");
+  const twenty = await router.venueLegs(legs, c, 20);
+  assert.notEqual(twenty.jupiter.template, "hit", "the $20 routing that held NVDA is gone too");
+  // Nothing held them: nothing to drop, nothing logged.
+  const n = logs.length;
+  router.dropBuys(["equity:US:NONE"], "refused for slippage");
+  assert.equal(logs.length, n);
+});
+
 test("a multiplier change since the quote isn't repriced", async (t) => {
   const calls = jupiter(t);
   t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
