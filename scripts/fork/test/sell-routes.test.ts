@@ -11,7 +11,7 @@ import { Router, type SellSwap } from "../api/routing.ts";
 // from the last sale of that token, repriced at the token's price now, so a sale of tokens sold in
 // the last FORK_API_ROUTE_TTL_MS costs at most the one batched price read.
 
-const TOKENS = ["NVDAx", "AVGOx"].map((symbol, i) => ({ symbol, mint: Keypair.fromSeed(new Uint8Array(32).fill(i + 40)).publicKey.toBase58() }));
+const TOKENS = ["NVDAx", "AVGOx", "IRENx"].map((symbol, i) => ({ symbol, mint: Keypair.fromSeed(new Uint8Array(32).fill(i + 40)).publicKey.toBase58() }));
 
 function bank() {
   const s = emptyState();
@@ -40,7 +40,7 @@ function routeData(inAmount: bigint, quotedOut: bigint, slippageBps: number) {
  * account), and Price v3 with `price(mint)` (null: no price). `calls`: quotes and swap-instructions;
  * `calls.prices`: price reads.
  */
-function jupiter(t: { mock: { method: Function } }, o: { price?: (mint: string) => number | null; noRoute?: string } = {}) {
+function jupiter(t: { mock: { method: Function } }, o: { price?: (mint: string) => number | null; noRoute?: string; impact?: (mint: string) => string } = {}) {
   const calls = Object.assign([] as string[], { prices: [] as string[] });
   t.mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
     if (url.includes("/price/v3?")) {
@@ -59,7 +59,7 @@ function jupiter(t: { mock: { method: Function } }, o: { price?: (mint: string) 
       const out = amount * 2n;
       return Response.json({
         inputMint: q.get("inputMint"), outputMint: q.get("outputMint"), inAmount: String(amount), outAmount: String(out), otherAmountThreshold: String(out - (out * 100n) / 10_000n),
-        swapMode: "ExactIn", slippageBps: 100, platformFee: null, priceImpactPct: "0.0001",
+        swapMode: "ExactIn", slippageBps: 100, platformFee: null, priceImpactPct: o.impact?.(q.get("inputMint")!) ?? "0.0001",
         routePlan: [{ swapInfo: { label: "Whirlpool", inputMint: q.get("inputMint"), outputMint: q.get("outputMint"), inAmount: String(amount), outAmount: String(out) }, percent: 100 }],
       });
     }
@@ -83,8 +83,8 @@ function jupiter(t: { mock: { method: Function } }, o: { price?: (mint: string) 
 }
 
 let clock = Date.now();
-const routerWith = (o: { routeTtlMs?: number } = {}) =>
-  new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null } as any, {
+const routerWith = (o: { routeTtlMs?: number; log?: (m: string) => void } = {}) =>
+  new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null, log: o.log } as any, {
     budget: new JupiterBudget({ perMinute: 6_000, burst: 1_000, reserve: 0 }, () => Date.now()),
     readMints: null,
     routeTtlMs: o.routeTtlMs,
@@ -129,10 +129,10 @@ test("a sale of tokens sold minutes ago makes no quote: the kept routes, reprice
   assert.equal(calls2.prices.length, 1, "≤1 Jupiter call: the batched price read");
   assert.equal(later.calls, 1);
   assert.deepEqual(third.map((s) => s.quote.outAmount), ["2020000", "1990000"], "out at the price now");
-  assert.deepEqual(router.jupiterStats().sells, { size: 2, repriced: 4, quoted: 2, kept: 2, unkept: 0, seeded: 0, seedsRefused: 0 });
+  assert.deepEqual(router.jupiterStats().sells, { size: 2, repriced: 4, quoted: 2, kept: 2, unkept: 0, seeded: 0, seedsRefused: 0, dropped: 0 });
 });
 
-test("a sell route isn't reused past a 3% move, for a repeat moments after, without a price, or with routes off", async (t) => {
+test("a sell route isn't reused past a 3% move, after a failed sale, without a price, or with routes off", async (t) => {
   clock = Date.now();
   const priced: Record<string, number | null> = { [TOKENS[0].mint]: 200, [TOKENS[1].mint]: 200 };
   const calls = jupiter(t, { price: (m) => priced[m] ?? null });
@@ -150,13 +150,18 @@ test("a sell route isn't reused past a 3% move, for a repeat moments after, with
   assert.equal(calls.length - before, 4);
   await router.routesLearned();
 
-  // Repriced, then the same wallet asks for the same sale again at once (a refused submit): afresh.
+  // Repriced, and the same wallet's same sale again at once (a prebuild, then the tap's build) is
+  // repriced again; once that sale failed to send (the service drops its tokens' routes), afresh.
   clock += PRICE_TTL_MS + 1;
   priced[TOKENS[1].mint] = 200;
   const repriced = await router.sellSwaps(sells(1_500_000n, 1_500_000n), a, payer);
   assert.deepEqual(repriced.map((s) => s.repriced), [true, true]);
   const again = await router.sellSwaps(sells(1_500_000n, 1_500_000n), a, payer);
-  assert.deepEqual(again.map((s) => s.repriced), [false, false]);
+  assert.deepEqual(again.map((s) => s.repriced), [true, true]);
+  router.dropSells([TOKENS[0].mint, TOKENS[1].mint], "the sale failed to send");
+  const afterFailure = await router.sellSwaps(sells(1_500_000n, 1_500_000n), a, payer);
+  assert.deepEqual(afterFailure.map((s) => s.repriced), [false, false]);
+  assert.equal(router.jupiterStats().sells.dropped, 2);
   // `fresh` (simpler routes after one didn't fit) always quotes.
   await router.routesLearned();
   assert.deepEqual((await router.sellSwaps(sells(1_000_000n, 1_000_000n), payer, payer, { fresh: true })).map((s) => s.repriced), [false, false]);
@@ -242,4 +247,95 @@ test("a back seeds its tokens' sell routes when the budget has room, so the firs
   await busy.routesLearned();
   assert.equal(calls.length, before + 2, "the retry quoted it");
   assert.equal(busy.jupiterStats().sells.seeded, 1);
+});
+
+const three = (a: bigint, b: bigint, c: bigint) => [...sells(a, b), { mint: TOKENS[2].mint, amount: c, label: "Sell IRENx" }];
+
+test("as on the owner's phone: a Sell-tab prebuild refused by the budget doesn't make the tap quote every token afresh", async (t) => {
+  // Before: a prebuild whose kept tokens repriced (the price read in the cache) and whose other
+  // token's quote the budget refused (503 busy) still marked the repriced ones as answered, and the
+  // tap's own build of the same sale moments later counted as a retry: every kept route dropped,
+  // every token quoted afresh (9 calls, 4 quotes and 4 instructions, ~12 s waiting on the fork).
+  clock = Date.now();
+  const calls = jupiter(t);
+  // Every prebuild call is refused (more kept for taps than the bucket holds); taps go through.
+  const router = new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null } as any, {
+    budget: new JupiterBudget({ perMinute: 6_000, burst: 1_000, reserve: 5_000 }, () => Date.now()),
+    readMints: null,
+    prices: new PriceCache(PRICE_TTL_MS, () => clock),
+  });
+  const [wallet, payer] = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+  await router.sellSwaps(sells(4_000_000n, 4_000_000n), Keypair.generate().publicKey, payer, { use: newUse(1) });
+  assert.equal(calls.length, 4);
+  // The prebuild (lane 2): NVDAx and AVGOx reprice from the cache, IRENx has no kept route and its
+  // quote is refused.
+  const prebuild = newUse(2);
+  await assert.rejects(router.sellSwaps(three(1_000_000n, 1_000_000n, 1_000_000n), wallet, payer, { lane: 2, use: prebuild }),
+    (e: unknown) => e instanceof ApiError && e.code === "busy");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(calls.length, 4, "the prebuild made no call");
+  // The tap (lane 1), the same sale: only IRENx is quoted.
+  const tap = newUse(1);
+  const out = await router.sellSwaps(three(1_000_000n, 1_000_000n, 1_000_000n), wallet, payer, { use: tap });
+  assert.deepEqual(out.map((s) => s.repriced), [true, true, false]);
+  assert.deepEqual([tap.quotes, tap.instructions], [1, 1]);
+  // And the next sale, of any of the three, reprices every one: one price read at most.
+  clock += PRICE_TTL_MS + 1;
+  const next = newUse(1);
+  const after = await router.sellSwaps(three(500_000n, 2_000_000n, 700_000n), wallet, payer, { use: next });
+  assert.deepEqual(after.map((s) => s.repriced), [true, true, true]);
+  assert.equal(next.calls, 1, "≤1 Jupiter call");
+});
+
+test("partial sales reprice down to 0.01x of the kept route, and from a thin pool's quote (1.1% impact) as far as its shortfall allows", async (t) => {
+  clock = Date.now();
+  const calls = jupiter(t, { impact: (m) => (m === TOKENS[2].mint ? "0.01071" : "0.0001") });
+  const logs: string[] = [];
+  const router = routerWith({ log: (m) => logs.push(m) });
+  const [wallet, payer] = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+  // Sold whole once (or seeded after a back): 100 tokens of each.
+  await router.sellSwaps(three(100_000_000n, 100_000_000n, 100_000_000n), wallet, payer);
+  await router.routesLearned();
+  assert.equal(router.jupiterStats().sells.kept, 3, "IRENx's 1.071%-impact route is kept too");
+  assert.ok(!logs.some((l) => /not kept/.test(l)), logs.join("\n"));
+  const before = calls.length;
+  // 1% of NVDAx (0.01x), 5% of AVGOx, 25% of IRENx: all scaled down, no quote.
+  const small = await router.sellSwaps(three(1_000_000n, 5_000_000n, 25_000_000n), wallet, payer);
+  assert.deepEqual(small.map((s) => s.repriced), [true, true, true]);
+  assert.deepEqual(amounts(small).map((r) => r.inAmount), [1_000_000n, 5_000_000n, 25_000_000n]);
+  assert.equal(calls.length, before);
+  // Up: IRENx 1.4x falls ~0.43% short (fine), 1.6x ~0.64% (over 0.5%): quoted afresh, and the log says why.
+  assert.deepEqual((await router.sellSwaps(three(1_000_000n, 1_000_000n, 140_000_000n), wallet, payer)).map((s) => s.repriced), [true, true, true]);
+  const up = await router.sellSwaps(three(1_000_000n, 1_000_000n, 160_000_000n), wallet, payer);
+  assert.deepEqual(up.map((s) => s.repriced), [true, true, false]);
+  assert.ok(logs.some((l) => /^sell route for IRENx not repriced: scaling 1\.60x a 1\.071%-impact quote could fall 0\.643% short/.test(l)), logs.join("\n"));
+  // Under 0.01x, quoted afresh.
+  const tiny = await router.sellSwaps(sells(900_000n, 1_000_000n), wallet, payer);
+  assert.deepEqual(tiny.map((s) => s.repriced), [false, true]);
+  assert.ok(logs.some((l) => /^sell route for NVDAx not repriced: 0\.01x the quoted amount is outside 0\.01x-10x/.test(l)), logs.join("\n"));
+});
+
+test("every sell reprice miss says why in the log, once a minute per token", async (t) => {
+  clock = Date.now();
+  const priced: Record<string, number | null> = { [TOKENS[0].mint]: 200, [TOKENS[1].mint]: 200 };
+  jupiter(t, { price: (m) => priced[m] ?? null });
+  const logs: string[] = [];
+  const router = routerWith({ log: (m) => logs.push(m) });
+  const [wallet, payer] = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+  await router.sellSwaps(sells(1_000_000n, 1_000_000n), wallet, payer);
+  assert.equal(logs.filter((l) => /not repriced: no sell route kept/.test(l)).length, 2, "never sold: none kept");
+  await router.routesLearned();
+  clock += PRICE_TTL_MS + 1;
+  priced[TOKENS[0].mint] = 210; // 5% up
+  priced[TOKENS[1].mint] = null;
+  logs.length = 0;
+  await router.sellSwaps(sells(1_000_000n, 1_000_000n), wallet, payer);
+  assert.ok(logs.some((l) => /^sell route for NVDAx not repriced: the price moved 4\.76% since the quote/.test(l)), logs.join("\n"));
+  assert.ok(logs.some((l) => /^sell route for AVGOx not repriced: no price now/.test(l)), logs.join("\n"));
+  // Within the minute: not again.
+  logs.length = 0;
+  await router.routesLearned();
+  clock += PRICE_TTL_MS + 1;
+  await router.sellSwaps(sells(1_000_000n, 1_000_000n), wallet, payer);
+  assert.deepEqual(logs.filter((l) => /not repriced/.test(l)), []);
 });

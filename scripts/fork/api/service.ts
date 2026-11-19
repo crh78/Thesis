@@ -2257,6 +2257,12 @@ export class ForkService {
       } catch (e) {
         // The cleanup rides after the trade, so it wasn't sent: look again on the next build.
         if (cleanup.length) this.#split.suspect(build.owner);
+        // A sale that failed to send: its swaps' kept sell routes go (a repriced estimate may be
+        // what failed), so selling again quotes those tokens afresh (api/routing.ts "Sales").
+        if (build.sale) {
+          const mints = build.sale.txSteps.flat().flatMap((step) => (step.kind === "sell" ? [step.mint] : []));
+          this.#router.dropSells(mints, `a sale of ${build.owner.slice(0, 6)}… failed to send (${e instanceof ApiError ? e.code : "error"})`);
+        }
         throw this.#stopped(build, e, txs);
       }
       this.#wallets.forgetActivity(build.owner);
