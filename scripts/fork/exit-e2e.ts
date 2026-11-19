@@ -19,7 +19,9 @@
 // the holding route: half (the smaller position whole and part of the bigger one), then the rest.
 // Each token is swapped once per sale however many positions sell it, the records ride last (in
 // the last transaction when the sale needs several), and the second sale reuses the sell routes
-// the first one kept: at most one Jupiter call.
+// the first one kept: at most one Jupiter call. Then another wallet sells parts of a $100 back of it
+// a minute apart (25%, 10%, 33%, 5%), each built ahead and again at the tap, each at most one
+// Jupiter call (about four minutes).
 // With `--settle` it then runs the real settler until the sales are priced and settled, before the
 // take's horizon: the partial sale settles first, then the first position and its exit account
 // close into a scored profile, and the
@@ -282,6 +284,25 @@ async function e2e(): Promise<void> {
     checks.push(["chain: the $30 position sold too", bigSold.exited === true]);
     const leftover = await conn.getParsedTokenAccountsByOwner(seller.publicKey, { programId: TOKEN_2022_PROGRAM_ID }, "confirmed");
     checks.push(["wallet: none of the four stocks left", leftover.value.every((a) => Number(a.account.data.parsed.info.tokenAmount.amount) === 0)]);
+
+    // The Sell tab, as on the owner's phone: another wallet backs the four-stock take, then sells
+    // parts of different sizes a minute apart (the price cache long gone each time). Each sale is
+    // built twice, the sheet's build ahead and then the tap's own (as after a prebuild the budget
+    // refused): both reprice the sell routes kept above, at most one Jupiter call each. (Before, the
+    // tap's build of the same sale counted as a retry and quoted every token afresh.)
+    const parter = Keypair.generate();
+    const pw = parter.publicKey.toBase58();
+    await call("POST", `/wallets/${pw}/deposits`, { usd: 200 });
+    await submit("four-stock back ($100)", await call("POST", `/takes/${FOUR.id}/trades`, { owner: pw, side: "back", usd: 100 }), parter);
+    for (const [i, bps] of [2_500, 1_000, 3_300, 500].entries()) {
+      if (i > 0) await sleep(60_000);
+      const ahead = await call("POST", `/takes/${FOUR.id}/sell`, { owner: pw, side: "back", bps, prebuild: true });
+      const tap = await call("POST", `/takes/${FOUR.id}/sell`, { owner: pw, side: "back", bps });
+      console.log(`partial ${bps / 100}%: ahead ${ahead.status}, Jupiter ${jupiterCalls(ahead.timing)} calls; tap ${tap.status}, Jupiter ${jupiterCalls(tap.timing)} calls (${tap.timing})`);
+      checks.push([`partial ${bps / 100}%: built ahead and at the tap, at most one Jupiter call each`,
+        ahead.status === 200 && tap.status === 200 && (jupiterCalls(ahead.timing) ?? 99) <= 1 && (jupiterCalls(tap.timing) ?? 99) <= 1 && tap.json.full === false && swapsIn(tap) === bought]);
+      await submit(`partial ${bps / 100}%`, tap, parter);
+    }
 
     if (SETTLE) {
       // A tick prices the sale, the next settles it. Token prices need the trade's transactions
