@@ -8,6 +8,7 @@
     "test": "turbo run test",
     "badges:render": "swift infra/badges/render.swift",
     "badges:upload": "node infra/badges/upload.ts",
+    "logos:cache": "node infra/logos/cache.ts",
     "fork:up": "node scripts/fork/up.ts",
     "fork:fund": "node scripts/fork/fund.ts",
     "fork:status": "node scripts/fork/status.ts",

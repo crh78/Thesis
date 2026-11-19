@@ -51,6 +51,8 @@ export type TakeLeg = {
   ret?: number;
   /** How a fade takes the other side of this leg (a Phoenix short, a prediction's other side), or null. */
   fade_how?: string | null;
+  /** The catalog row (public.securities) the pick came from, when known. */
+  asset_id?: string | null;
 };
 
 /** Whether a fade can take any of this take's legs (unknown legs count as maybe: the take page checks). */
@@ -379,6 +381,19 @@ export async function rpcNow<T>(name: string, args: Record<string, unknown>): Pr
   });
   if (!r.ok) throw new Error(name + ": " + r.status);
   return (await r.json()) as T;
+}
+
+/** Each catalog row's logo key (its underlying ticker, else its symbol), by id, for take logos. */
+export async function assetKeys(ids: string[]): Promise<Record<string, string>> {
+  const unique = [...new Set(ids)].filter(Boolean);
+  if (!unique.length) return {};
+  const list = unique.map((id) => `"${id.replace(/["\\]/g, "")}"`).join(",");
+  const r = await fetch(`${supabaseUrl()}/rest/v1/securities?select=id,underlying,symbol&id=in.(${encodeURIComponent(list)})`, {
+    headers: { apikey: supabaseKey() },
+  });
+  if (!r.ok) throw new Error("securities: " + r.status);
+  const rows = (await r.json()) as { id: string; underlying: string | null; symbol: string }[];
+  return Object.fromEntries(rows.map((x) => [x.id, x.underlying ?? x.symbol]));
 }
 
 /** A card leg's kind, however it's labelled ("Cards" from the app, "card" from the take builder). */

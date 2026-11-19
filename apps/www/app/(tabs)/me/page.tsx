@@ -14,7 +14,8 @@ import { hasPhoenixCash, LiquidationLines, PhoenixCashCard } from "@/components/
 import { PostingRow } from "@/components/PostingRecovery";
 import { holdingWorth, SellAllSheet, SwipeRow } from "@/components/SellAll";
 import ShareButton from "@/components/ShareButton";
-import { dayLabel, money, pct, rpcNow, takeState, topicImage, type Profile, type Take } from "@/lib/data";
+import { assetKeys, dayLabel, money, pct, rpcNow, takeState, topicImage, type Profile, type Take } from "@/lib/data";
+import TakeLogo from "@/components/TakeLogo";
 import { fork, holdings, markTraded, TRADED_AT_KEY, TRADED_EVENT, useForkWallet, type CreatorFees as Fees, type History, type Incomplete, type PhoenixCash, type Portfolio, type PortfolioPosition, type WalletSummary } from "@/lib/fork";
 import StoppedTrade from "@/components/StoppedTrade";
 import { X_LOGIN } from "@/lib/flags";
@@ -58,6 +59,7 @@ export default function MePage() {
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [takes, setTakes] = useState<(Take & { posting?: boolean })[]>([]);
+  const [legKeys, setLegKeys] = useState<Record<string, string>>({});
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [summary, setSummary] = useState<WalletSummary | null>(null);
   const [history, setHistory] = useState<Record<string, History>>({});
@@ -108,7 +110,12 @@ export default function MePage() {
       social<{ takes: Take[] }>("GET", "takes/posting").then((r) => r.takes).catch(() => []),
     ]);
     setProfile(p);
-    setTakes([...posting.map((t) => ({ ...t, posting: true })), ...live.filter((t) => t.status === "live")]);
+    const mine = [...posting.map((t) => ({ ...t, posting: true })), ...live.filter((t) => t.status === "live")];
+    setTakes(mine);
+    // Each pick's ticker, for the takes' pie logos (the topic image until they're known).
+    assetKeys(mine.flatMap((t) => (t.legs ?? []).map((l) => l.asset_id ?? "")))
+      .then((k) => setLegKeys((old) => ({ ...old, ...k })))
+      .catch(() => {});
   }, [me?.id, social]);
 
   // Your money on the fork: cash, positions and badges.
@@ -346,8 +353,12 @@ export default function MePage() {
               <PostingRow key={t.id} take={t} stoppedAbove={stopped.some((s) => s.takeId === t.id)} onChanged={loadSocial} />
             ) : (
               <Link key={t.id} href={`/t/${t.id}`} className="item">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img className="tile" src={topicImage((t as Take & { topic?: string }).topic)} alt="" />
+                {t.legs?.length ? (
+                  <TakeLogo legs={t.legs.map((l) => ({ key: (l.asset_id && legKeys[l.asset_id]) || null, name: l.name, kind: l.kind, weight: l.weight }))} />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img className="tile" src={topicImage((t as Take & { topic?: string }).topic)} alt="" />
+                )}
                 <div className="item-main">
                   <div className="item-claim">{t.claim}</div>
                   <div className="item-meta">{myTakeState(t)} · {t.backs} traded</div>
