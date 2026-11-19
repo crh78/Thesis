@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, type AccountInfo } from "@solana/web3.js";
 import { THESIS_PROGRAM_ID, USDC_DECIMALS, USDC_MINT_MAINNET } from "@thesis/chain";
 import { ACTIVE_TRADER_BUFFER, GLOBAL_TRADER_INDEX, PERP_ASSET_MAP, syncMakers } from "@thesis/venues/phoenix";
 
@@ -134,16 +134,22 @@ export function thesisLookupTable(): PublicKey | null {
  * `freshMs`: accounts this process reset less than that long ago are left as they are (`fresh`),
  * and when none needed a reset the clock isn't touched either. 0 (the default): every account.
  *
+ * `always`: accounts reset whatever `freshMs` says (a Phoenix leg's market, spline and PerpAssetMap).
+ *
  * `phoenixMakers`: when the accounts include Phoenix's PerpAssetMap (a Phoenix order or close is
  * about to go out), also put mainnet's traders back to their mainnet state in Phoenix's active
  * trader buffer (`syncPhoenixMakers`). Only a caller that holds the Phoenix lock asks for it
  * (api/phoenix-lock.ts): the sync rewrites that whole account.
  */
-export async function refreshMarkets(accounts: PublicKey[], o: { freshMs?: number; phoenixMakers?: boolean } = {}): Promise<{ reset: number; skipped: number; fresh: number }> {
+export async function refreshMarkets(accounts: PublicKey[], o: { freshMs?: number; phoenixMakers?: boolean; always?: PublicKey[] } = {}): Promise<{ reset: number; skipped: number; fresh: number }> {
   const now = Date.now();
   const all = [...new Set(accounts.map(String))];
-  const unique = all.filter((k) => !o.freshMs || (resetAt.get(k) ?? -Infinity) <= now - o.freshMs);
-  const makers = o.phoenixMakers && all.includes(PERP_ASSET_MAP.toBase58()) ? syncPhoenixMakers() : null;
+  const always = new Set((o.always ?? []).map(String));
+  const unique = all.filter((k) => always.has(k) || !o.freshMs || (resetAt.get(k) ?? -Infinity) <= now - o.freshMs);
+  const phoenix = all.includes(PERP_ASSET_MAP.toBase58());
+  const makers = o.phoenixMakers && phoenix ? syncPhoenixMakers() : null;
+  // A Phoenix build (no sync asked): read mainnet's makers now, so the submit's sync finds them ready.
+  if (phoenix && !o.phoenixMakers) warmPhoenixMakers();
   if (o.freshMs && !unique.length) {
     await makers;
     return { reset: 0, skipped: 0, fresh: all.length };
@@ -159,6 +165,34 @@ export async function refreshMarkets(accounts: PublicKey[], o: { freshMs?: numbe
   return { reset: unique.length - failed, skipped: failed, fresh: all.length - unique.length };
 }
 
+const MAKER_ACCOUNTS = [new PublicKey(ACTIVE_TRADER_BUFFER), new PublicKey(GLOBAL_TRADER_INDEX)];
+/**
+ * How long a read of mainnet's active trader buffer and trader index serves the maker sync. The
+ * read is ~150 ms (110 KB from QuickNode), most of a Phoenix submit's sync; a trade's build starts
+ * it (`warmPhoenixMakers`), so the submit seconds later finds it done. Mainnet's makers barely move
+ * in 10 s, and what the sync must undo is the fork's own fills, which the fork's copy (read fresh
+ * every time) holds.
+ */
+export const MAKERS_MAINNET_TTL_MS = 10_000;
+let mainnetRead: { at: number; read: Promise<(AccountInfo<Buffer> | null)[]> } | null = null;
+
+/** Mainnet's active trader buffer and trader index, read at most once per MAKERS_MAINNET_TTL_MS. */
+function mainnetMakers(): Promise<(AccountInfo<Buffer> | null)[]> {
+  if (mainnetRead && Date.now() - mainnetRead.at < MAKERS_MAINNET_TTL_MS) return mainnetRead.read;
+  const read = mainnet().getMultipleAccountsInfo(MAKER_ACCOUNTS);
+  const entry = { at: Date.now(), read };
+  mainnetRead = entry;
+  read.catch(() => {
+    if (mainnetRead === entry) mainnetRead = null;
+  });
+  return read;
+}
+
+/** Starts mainnet's maker read for a Phoenix trade being built (its submit syncs with it). Never throws. */
+export function warmPhoenixMakers(): void {
+  mainnetMakers().catch(() => {});
+}
+
 /** Mainnet, for reading what Surfpool would copy: the fork's datasource, else the public RPC. */
 const mainnet = () => new Connection(process.env.FORK_DATASOURCE_RPC_URL || "https://api.mainnet-beta.solana.com", "confirmed");
 
@@ -171,11 +205,10 @@ const mainnet = () => new Connection(process.env.FORK_DATASOURCE_RPC_URL || "htt
  * unreachable, a layout that doesn't check out) is logged and the trade goes out as before.
  */
 export async function syncPhoenixMakers(log: (m: string) => void = console.log): Promise<void> {
-  const keys = [new PublicKey(ACTIVE_TRADER_BUFFER), new PublicKey(GLOBAL_TRADER_INDEX)];
   try {
     const [[mAtb, mGti], [fAtb, fGti]] = await Promise.all([
-      mainnet().getMultipleAccountsInfo(keys),
-      connection().getMultipleAccountsInfo(keys, "processed"),
+      mainnetMakers(),
+      connection().getMultipleAccountsInfo(MAKER_ACCOUNTS, "processed"),
     ]);
     if (!mAtb || !mGti || !fAtb || !fGti) return log("Phoenix makers: not synced (a trader account is missing)");
     const out = syncMakers({ atb: fAtb.data, gti: fGti.data }, { atb: mAtb.data, gti: mGti.data });
