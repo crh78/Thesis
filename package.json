@@ -32,7 +32,8 @@
     "fork:phoenix-api-e2e": "node scripts/fork/phoenix-api-e2e.ts",
     "fork:phoenix-makers-e2e": "node scripts/fork/phoenix-makers-e2e.ts",
     "fork:friend": "node scripts/fork/friend.ts",
-    "fork:latency-bench": "node scripts/fork/latency-bench.ts"
+    "fork:latency-bench": "node scripts/fork/latency-bench.ts",
+    "fork:load-trades": "node scripts/fork/load-trades.ts"
   },
   "devDependencies": {
     "turbo": "^2.0.0"
