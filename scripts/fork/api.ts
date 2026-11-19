@@ -26,7 +26,7 @@ import { LiveContracts } from "./api/gemini-live.ts";
 import { Guard, parseMode, parseServiceKeys } from "./api/guard.ts";
 import { forkApiServer, parseCorsOrigins } from "./api/server.ts";
 import { DEFAULT_STATE_PATH, ForkService, type AppTake, type TakeSource } from "./api/service.ts";
-import { DATA_DIR, FORK_DEXES, HOST, PATHS, addUsdc, connection, deployedElf, loadKeypair, main, refreshMarkets, requireSurfpool, setUsdc, syncClock, thesisLookupTable, topUpSol } from "./lib.ts";
+import { DATA_DIR, FORK_DEXES, HOST, PATHS, addUsdc, connection, deployedElf, forgetFresh, loadKeypair, main, refreshMarkets, requireSurfpool, setUsdc, syncClock, thesisLookupTable, topUpSol } from "./lib.ts";
 import { fetchConfig, thesisProgram } from "@thesis/chain";
 
 /** Longest wait for one Supabase, Gemini (proxy) or Alpaca read before it's abandoned. */
@@ -122,7 +122,7 @@ export async function startForkService(log: (m: string) => void, o: { takes?: Ta
     jupiterApiKey: envVar("JUPITER_TRADE_API_KEY") ?? envVar("JUPITER_API_KEY"),
     dexes: FORK_DEXES,
     statePath: o.statePath ?? join(mkdtempSync(join(tmpdir(), "thesis-fork-api-")), "api-state.json"),
-    fork: { addUsdc: (w, usd) => addUsdc(w, usd), setUsdc, refreshMarkets, syncClock },
+    fork: { addUsdc: (w, usd) => addUsdc(w, usd), setUsdc, refreshMarkets, forgetFresh, syncClock },
     relay: relay ? (signatures) => relayTransactions(conn.rpcEndpoint, signatures) : undefined,
     phoenix,
     log,

@@ -6,6 +6,7 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   EXACT_IN_ROUTES,
   SCALE_LIMITS,
+  SELL_SCALE_LIMITS,
   TEMPLATE_OWNER,
   TOKEN_2022_PROGRAM,
   associatedTokenAddress,
@@ -103,6 +104,25 @@ test("the safety bounds: ratio, price impact, shortfall when scaling up", () => 
   assert.equal(unscalable(leg(), 50_000_000n, { ...SCALE_LIMITS, maxRatio: 4 }), null, "limits are a parameter");
   assert.equal(scaleTemplate(swapTemplate(leg(), a.user)!, 160_000_000n), null);
   assert.throws(() => scaleSwap(leg(), 160_000_000n), /outside/);
+});
+
+test("sell routes scale down to 0.01x and from quotes up to 2% impact; up only as far as the shortfall allows; never to dust", () => {
+  // A partial sale is often a small share of the kept route's size: down is always safe.
+  assert.equal(unscalable(leg(), 150_000n, SELL_SCALE_LIMITS), null, "0.01x");
+  assert.match(unscalable(leg(), 149_999n, SELL_SCALE_LIMITS)!, /outside 0.01x-10x/);
+  assert.match(unscalable(leg(), 150_000n)!, /outside 0.1x-10x/, "trades keep 0.1x");
+  // IREN's sell quote moved the price 1.071% on the fork: kept, scaled down freely, up to ~1.47x.
+  const thin = leg(a.res, { ...quote, priceImpactPct: "0.01071" });
+  assert.equal(unscalable(thin, 15_000_000n, SELL_SCALE_LIMITS), null, "kept as quoted");
+  assert.equal(unscalable(thin, 3_750_000n, SELL_SCALE_LIMITS), null, "a quarter of it");
+  assert.equal(unscalable(thin, 150_000n, SELL_SCALE_LIMITS), null, "1% of it");
+  assert.equal(unscalable(thin, 21_000_000n, SELL_SCALE_LIMITS), null, "1.4x: ~0.43% short");
+  assert.match(unscalable(thin, 24_000_000n, SELL_SCALE_LIMITS)!, /1\.60x a 1\.071%-impact quote could fall 0\.643% short/);
+  assert.match(unscalable(thin, 3_750_000n)!, /price impact 1.071% is over 0.5%/, "trades keep 0.5%");
+  assert.match(unscalable(leg(a.res, { ...quote, priceImpactPct: "0.021" }), 3_750_000n, SELL_SCALE_LIMITS)!, /price impact 2.100% is over 2%/);
+  // An output of under 1,000 base units is dust, whatever the ratio allows.
+  assert.match(unscalable(leg(), 1_000n, { ...SELL_SCALE_LIMITS, minRatio: 0 })!, /dust/);
+  assert.equal(unscalable(leg(), 1_600n, { ...SELL_SCALE_LIMITS, minRatio: 0 }), null, "1,050 base units out");
 });
 
 test("anything not read with certainty isn't scaled", () => {

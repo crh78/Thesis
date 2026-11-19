@@ -150,6 +150,16 @@ export async function refreshMarkets(accounts: PublicKey[], o: { freshMs?: numbe
 
 /** Account → when this process last reset it from mainnet (refreshMarkets' `freshMs`). */
 const resetAt = new Map<string, number>();
+
+/**
+ * Forgets that `accounts` are fresh. A trade on the fork really moves the pools it swaps through,
+ * and nobody arbitrages them back as on mainnet, so after a send the next build must copy them from
+ * mainnet again, not price against the fork's own last trade (a scaled or repriced quote from before
+ * it then fails its slippage check, Jupiter's 0x1771).
+ */
+export function forgetFresh(accounts: PublicKey[]): void {
+  for (const k of accounts) resetAt.delete(String(k));
+}
 /** Past this many, entries over a minute old are dropped. */
 const RESETS_KEPT = 5_000;
 

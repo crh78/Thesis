@@ -10,7 +10,8 @@
 // SCALE_LIMITS.maxPriceImpactPct, the new amount is within SCALE_LIMITS' ratio of the quoted one,
 // and scaling up can't fall more than maxShortfallPct short of the estimate (see SCALE_LIMITS), inside
 // the 1% slippage. A fill worse than the slippage limit, or a pool that needs accounts the quote
-// didn't name, fails the transaction's preflight: nothing is mistraded.
+// didn't name, fails the transaction's preflight: nothing is mistraded. Sales use SELL_SCALE_LIMITS,
+// which scale further down and from thinner pools (a smaller sale only does better than the quote).
 //
 // Repriced: a route template kept for minutes (the fork API's long-lived routes) is reused at the
 // token's price now. `priceFactor` is the price when the template was quoted over the price now
@@ -54,8 +55,20 @@ const TAIL = 19;
  * 0.4x-2.5x missed $20 -> $50 on rounding; then a 0.1% impact cap failed the whole build on that one
  * thin leg.) `maxPriceMovePct`: the most a repriced template's price may have moved (see the header).
  */
-export const SCALE_LIMITS = { maxPriceImpactPct: 0.5, minRatio: 0.1, maxRatio: 10, maxShortfallPct: 0.5, maxPriceMovePct: 3 };
+export const SCALE_LIMITS = { maxPriceImpactPct: 0.5, minRatio: 0.1, maxRatio: 10, maxShortfallPct: 0.5, maxPriceMovePct: 3, minOutUnits: 1_000 };
 export type ScaleLimits = typeof SCALE_LIMITS;
+
+/**
+ * Sell routes (a token back to USDC, kept by the fork API for minutes): a partial sale is often a
+ * small share of what the kept route was quoted for (25% of one position, $10 of a large holding),
+ * and some stock tokens' pools are thin (IREN's sell quote moves the price ~1.1%). Scaling down is
+ * always safe: a smaller sale moves the price less, so it fills at least at the proportional
+ * estimate, whatever the quote's impact. So these go down to 0.01x and keep quotes up to 2% impact;
+ * scaling up stays bounded by the same shortfall (a 1.1%-impact quote scales up to ~1.45x), the same
+ * 3% price move and the same 1% slippage. `minOutUnits` (all limits): an output this small in base
+ * units (a tenth of a cent of USDC) is dust, where rounding is a real share of it: quoted afresh.
+ */
+export const SELL_SCALE_LIMITS: ScaleLimits = { ...SCALE_LIMITS, maxPriceImpactPct: 2, minRatio: 0.01 };
 
 /** The amounts an exact-in route instruction carries, or null if it isn't one read here. */
 export function routeAmounts(ix: JupIx): { name: string; inAmount: bigint; quotedOutAmount: bigint; slippageBps: number; platformFeeBps: number } | null {
@@ -114,6 +127,7 @@ export function unscalable(leg: SwapLeg, inAmount: bigint, limits: ScaleLimits =
   if (!Number.isFinite(priceFactor) || priceFactor <= 0) return "no price to reprice it at";
   const moved = Math.abs(1 / priceFactor - 1) * 100;
   if (moved > limits.maxPriceMovePct) return `the price moved ${moved.toFixed(2)}% since the quote (over ${limits.maxPriceMovePct}%)`;
+  if (Number(out) * ratio * priceFactor < limits.minOutUnits) return `the output would be dust (under ${limits.minOutUnits} base units)`;
   return null;
 }
 

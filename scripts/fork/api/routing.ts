@@ -16,9 +16,10 @@
 //
 // The same trade at another stake scales a fresh routing instead of quoting again (template
 // "scaled"): within TEMPLATE_TTL_MS of the quotes, when each swap leg's quote moved the price
-// under 0.1% and its new part is within 0.4x-2.5x of the quoted one (packages/venues/jupiter
-// scale.ts, SCALE_LIMITS), each swap instruction is rewritten to spend exactly the new part and
-// expect a proportional output, with the same slippage limit. So a trade sheet's builds at every
+// under 0.5% and its new part is within 0.1x-10x of the quoted one, with the shortfall bound
+// scaling up (packages/venues/jupiter scale.ts, SCALE_LIMITS), each swap instruction is
+// rewritten to spend exactly the new part and expect a proportional output, with the same
+// slippage limit. So a trade sheet's builds at every
 // chip or typed amount after the first cost no Jupiter call. A scaled leg that would fill worse
 // than its slippage limit fails at preflight, not silently: the client builds again (Try again),
 // and a wallet's repeat build of the same trade and stake after a scaled answer always quotes
@@ -47,14 +48,21 @@
 // FORK_API_ROUTE_TTL_MS (`sellSwaps`). A sale's swap of a token sold in that time by any wallet
 // rewrites the kept template: in_amount exactly the tokens to sell, quoted_out_amount in
 // proportion and at the token's price now (the price now over the price then: the USDC out moves
-// with the price), the same 1% slippage, impact, shortfall and 3% move limits. So a sale whose
-// tokens all have kept sell routes costs one price read, or none. Any other token is quoted
-// afresh (a quote and a swap-instructions call) and its template kept, with a price read in the
-// sale build's own turn: a read left for later, in a prebuild's turn, is refused while trades
-// queue (that's how the first version of this kept nothing on the fork). A wallet's repeat of the
-// same sale moments after a repriced answer quotes afresh, as for trades. After a back lands, the
-// tokens it bought with no sell route kept are quoted back to USDC once (`seedSells`, in the
-// route checks' lane: refused whenever the budget is short), so the first sale is repriced too.
+// with the price), the same 1% slippage, shortfall and 3% move limits, scaling down to 0.01x and
+// from quotes up to 2% impact (SELL_SCALE_LIMITS: a partial sale is often a small share of the
+// kept size, and a smaller sale only does better than the quote). So a sale whose tokens all have
+// kept sell routes costs one price read, or none. Any other token is quoted afresh (a quote and a
+// swap-instructions call) and its template kept, with a price read in the sale build's own turn: a
+// read left for later, in a prebuild's turn, is refused while trades queue (that's how the first
+// version of this kept nothing on the fork). A sale whose send fails drops its tokens' kept sell
+// routes (`dropSells`, from the service), so selling again quotes afresh. (Sales used to drop them
+// when the same wallet asked for the same sale within 20 s of a repriced answer, as trades do; on
+// the fork that fired on a Sell-tab prebuild refused by the budget, whose other tokens had already
+// repriced, followed by the tap's own build, and every token was quoted afresh at the tap.) Every
+// token a sale quotes afresh although it was sold lately says why in the log, at most once a
+// minute per token. After a back lands, the tokens it bought with no sell route kept are quoted
+// back to USDC once (`seedSells`, in the route checks' lane: refused whenever the budget is
+// short), so the first sale is repriced too.
 import type { PublicKey } from "@solana/web3.js";
 import { PRICEABLE_MIN_POOLED_USD, bestIssuer, effectiveMultiplier, issuerPool, type BestIssuerResult, type ReadMints } from "@thesis/venues/bank";
 import { ineligible, otherSide, type GeminiContract } from "@thesis/venues/gemini";
@@ -67,6 +75,7 @@ import {
   jupiterQuote,
   jupiterSwapInstructions,
   quoteFn,
+  scaleSwap,
   scaleTemplate,
   splitStake,
   swapTemplate,
@@ -74,6 +83,7 @@ import {
   PriceCache,
   PRICE_TTL_MS,
   SCALE_LIMITS,
+  SELL_SCALE_LIMITS,
   TEMPLATE_OWNER,
   USDC_MINT,
   type CachedPrice,
@@ -644,11 +654,12 @@ export class Router {
         ls.map(async (l, j): Promise<Way | null> => {
           if (onPhoenix(l)) return "phoenix";
           if (l.how === "lend") return "lend";
-          const repriced = prices.size ? this.#reprice(l.key!, parts[j], prices, now) : null;
-          if (repriced) {
+          const repriced = this.#keptRoutes(l.key!, now).length ? this.#reprice(l.key!, parts[j], prices, now) : null;
+          if (repriced && "way" in repriced) {
             routed.set(l.index, repriced);
             return repriced.way;
           }
+          if (repriced) this.#notRepriced("buy", l.key!, repriced.why);
           routed.delete(l.index);
           const usdPart = Number(parts[j]) / USD;
           const quote = (onlyMints?: string[]) =>
@@ -767,29 +778,46 @@ export class Router {
 
   /**
    * Underlying `key` bought with exactly `part` from a kept route, at the token's price now (see
-   * the header), or null when no kept route can be: none in time, no price now, the issuer no
-   * longer eligible, its multiplier changed, or scale.ts refuses (size, impact, shortfall, a price
-   * that moved too far). The kept template nearest in size is tried first.
+   * the header), or why no kept route can be: none in time, no price now, the issuer no longer
+   * eligible, its multiplier changed, or scale.ts refuses (size, impact, shortfall, a price that
+   * moved too far). The kept template nearest in size is tried first; the reason given is its.
    */
-  #reprice(key: string, part: bigint, prices: Map<string, CachedPrice>, now: number): { way: Winner; template: SwapTemplate } | null {
+  #reprice(key: string, part: bigint, prices: Map<string, CachedPrice>, now: number): { way: Winner; template: SwapTemplate } | { why: string } {
     const size = (r: KeptRoute) => Math.abs(Math.log(Number(part) / Number(r.template.quote.inAmount)));
-    for (const r of this.#keptRoutes(key, now).sort((x, y) => size(x) - size(y))) {
+    const kept = this.#keptRoutes(key, now);
+    let why: string | null = null;
+    for (const r of kept.sort((x, y) => size(x) - size(y))) {
       const price = prices.get(r.winner.mint);
-      if (!price) continue;
-      try {
-        if (!issuerPool(key, this.#o.bank(), { ...this.route, onlyMints: [r.winner.mint] }).pool.length) continue;
-      } catch {
-        continue; // not in the bank any more
+      if (!price) {
+        why ??= "no price now (Jupiter gave none, or the read was refused or failed)";
+        continue;
       }
-      if (this.#multiplier(r.winner.mint, now) !== r.multiplier) continue;
-      const template = scaleTemplate(r.template, part, SCALE_LIMITS, r.price / price.usd);
-      if (!template) continue;
+      try {
+        if (!issuerPool(key, this.#o.bank(), { ...this.route, onlyMints: [r.winner.mint] }).pool.length) {
+          why ??= `${r.winner.symbol} isn't eligible to route now`;
+          continue;
+        }
+      } catch {
+        why ??= "it isn't in the asset bank any more";
+        continue;
+      }
+      if (this.#multiplier(r.winner.mint, now) !== r.multiplier) {
+        why ??= "its multiplier changed since the quote";
+        continue;
+      }
+      const factor = r.price / price.usd;
+      const refused = unscalable(r.template, part, SCALE_LIMITS, factor);
+      if (refused) {
+        why ??= refused;
+        continue;
+      }
+      const template = scaleSwap(r.template, part, SCALE_LIMITS, factor);
       // The template's quote is the winner's own (a JupQuote), rewritten.
       const quote = template.quote as unknown as Winner["quote"];
       const units = (r.winner.units * Number(quote.outAmount)) / Number(r.winner.quote.outAmount);
       return { way: { ...r.winner, quote, outAmountRaw: quote.outAmount, units }, template };
     }
-    return null;
+    return { why: `${why ?? "no kept route in time"} (${kept.length} kept)` };
   }
 
   /**
@@ -846,10 +874,12 @@ export class Router {
 
   /** Token → its kept sell routes (templates at different sizes, newest first; see "Sales" in the header). */
   #sells = new Map<string, KeptSell[]>();
-  /** Wallet, token and amount → when that wallet's sale of it was last answered from a kept sell route (a repeat quotes afresh). */
-  #sellRepeats = new Map<string, number>();
-  /** Sell swaps repriced from kept routes and quoted afresh; sell templates kept and not kept (any reason); routes seeded after backs. */
-  #sellStats = { repriced: 0, quoted: 0, kept: 0, unkept: 0, seeded: 0, seedsRefused: 0 };
+  /**
+   * Sell swaps repriced from kept routes and quoted afresh; sell templates kept and not kept (any
+   * reason); routes seeded after backs, and seeds the budget refused; tokens whose kept routes were
+   * dropped after a failed sale.
+   */
+  #sellStats = { repriced: 0, quoted: 0, kept: 0, unkept: 0, seeded: 0, seedsRefused: 0, dropped: 0 };
 
   /** The sell routes kept for `mint` and still in time, newest first. */
   #keptSells(mint: string, now: number): KeptSell[] {
@@ -861,7 +891,8 @@ export class Router {
    * A sale's swaps back to USDC (see "Sales" in the header): each token's exact `amount` in, from
    * a kept sell route repriced at the token's price now (one batched price read for all of them,
    * none when the shared cache has it), else a fresh quote and swap-instructions call whose
-   * template is kept. `fresh`: quote every one afresh (and drop their kept routes). Throws 422
+   * template is kept. `fresh`: quote every one afresh (and drop their kept routes). A token quoted
+   * afresh says why it wasn't repriced (logged, once a minute per token). Throws 422
    * `no_exit_route` when a token has no route, 503 `busy` when its quote failed or the budget
    * refused a call.
    */
@@ -875,13 +906,8 @@ export class Router {
     const lane = (use.lane = o.lane ?? use.lane);
     const now = Date.now();
     const maxAccounts = o.maxAccounts ?? this.route.maxAccounts;
-    const mine = (s: { mint: string; amount: bigint }) => `${user.toBase58()} ${s.mint} ${s.amount}`;
-    // A wallet selling the same tokens again moments after a repriced answer (a refused submit): afresh.
-    for (const s of sells) {
-      if (!o.fresh && !((this.#sellRepeats.get(mine(s)) ?? 0) > now - TEMPLATE_TTL_MS)) continue;
-      this.#sells.delete(s.mint);
-      this.#sellRepeats.delete(mine(s));
-    }
+    // Simpler routes asked for (a swap didn't fit): every token afresh, its kept routes replaced.
+    if (o.fresh) for (const s of sells) this.#sells.delete(s.mint);
     // With any kept route: every token's price now, in one read in the build's own turn. It
     // reprices the kept routes, and the fresh quotes' routes are kept with it (cached).
     const mints = [...new Set(sells.map((s) => s.mint))];
@@ -890,13 +916,17 @@ export class Router {
     const jupiter = this.jupiter(lane, use);
     const quoted: { mint: string; template: SwapTemplate | null; at: number }[] = [];
     const out = await Promise.all(sells.map(async (s): Promise<SellSwap> => {
-      const repriced = pricesNow && this.#keptSells(s.mint, now).length ? this.#repriceSell(s.mint, s.amount, await pricesNow, now) : null;
-      if (repriced) {
-        this.#sellRepeats.set(mine(s), now);
+      const repriced = o.fresh
+        ? { why: "simpler routes were asked for (a swap didn't fit)" }
+        : pricesNow && this.#keptSells(s.mint, now).length
+        ? this.#repriceSell(s.mint, s.amount, await pricesNow, now)
+        : { why: `no sell route kept from the last ${Math.round(this.routeTtlMs / 60_000)} min (none quoted or seeded, or dropped after a failed sale)` };
+      if ("template" in repriced) {
         this.#sellStats.repriced++;
         use.templatedLegs++;
-        return { mint: s.mint, amount: s.amount, quote: repriced.quote, venue: fromTemplate(repriced, user, payer, s.label), repriced: true };
+        return { mint: s.mint, amount: s.amount, quote: repriced.template.quote, venue: fromTemplate(repriced.template, user, payer, s.label), repriced: true };
       }
+      if (this.routeTtlMs > 0) this.#notRepriced("sell", s.mint, repriced.why);
       const { quote, error } = await jupiter.quoteExactIn(s.mint, USDC_MINT, s.amount, { ...this.route, maxAccounts });
       if (use.refused) throw use.refused;
       if (!quote && error && TRANSIENT_QUOTE.test(error)) throw busy(s.label);
@@ -916,8 +946,18 @@ export class Router {
     // when it's recent, else one more read): a read left for later, in a prebuild's turn, is
     // refused while trades queue, and the route wouldn't be kept.
     await this.#keepSells(quoted, lane, use);
-    if (this.#sellRepeats.size >= 1_000) for (const [k, at] of this.#sellRepeats) if (at <= now - TEMPLATE_TTL_MS) this.#sellRepeats.delete(k);
     return out;
+  }
+
+  /**
+   * Drops the kept sell routes of `mints` (a sale of them failed to send: its repriced estimate may
+   * be what failed), so the next sale of each quotes afresh and keeps that route instead.
+   */
+  dropSells(mints: string[], why: string) {
+    const gone = [...new Set(mints)].filter((m) => this.#sells.delete(m));
+    if (!gone.length) return;
+    this.#sellStats.dropped += gone.length;
+    this.#o.log?.(`sell routes dropped for ${gone.map((m) => this.#o.bank().tokens[m]?.symbol ?? m).join(", ")}: ${why}`);
   }
 
   /** Tokens whose sell route was seeded lately, or found to have none (see seedSells): when, so each is quoted at most once per route lifetime. */
@@ -978,21 +1018,31 @@ export class Router {
   }
 
   /**
-   * `mint` sold for exactly `amount` from a kept sell route at the token's price now, or null when
-   * none can be: none in time, no price now, the token paused, its multiplier changed, or scale.ts
-   * refuses (size, impact, shortfall, a price that moved over 3%). The nearest size is tried first.
+   * `mint` sold for exactly `amount` from a kept sell route at the token's price now, or why none
+   * can be: none in time, no price now, the token paused, its multiplier changed, or scale.ts
+   * refuses (size, impact, shortfall, a price that moved over 3%; SELL_SCALE_LIMITS). The nearest
+   * size is tried first; the reason given is the nearest one's.
    */
-  #repriceSell(mint: string, amount: bigint, prices: Map<string, CachedPrice>, now: number): SwapTemplate | null {
+  #repriceSell(mint: string, amount: bigint, prices: Map<string, CachedPrice>, now: number): { template: SwapTemplate } | { why: string } {
+    const kept = this.#keptSells(mint, now);
+    if (!kept.length) return { why: "its kept sell route expired" };
     const price = prices.get(mint);
-    if (!price || this.#o.bank().tokens[mint]?.paused) return null;
+    if (!price) return { why: "no price now (Jupiter gave none, or the read was refused or failed)" };
+    if (this.#o.bank().tokens[mint]?.paused) return { why: "the token is paused" };
     const size = (r: KeptSell) => Math.abs(Math.log(Number(amount) / Number(r.template.quote.inAmount)));
-    for (const r of this.#keptSells(mint, now).sort((x, y) => size(x) - size(y))) {
-      if (this.#multiplier(mint, now) !== r.multiplier) continue;
+    let why: string | null = null;
+    for (const r of kept.sort((x, y) => size(x) - size(y))) {
+      if (this.#multiplier(mint, now) !== r.multiplier) {
+        why ??= "its multiplier changed since the quote";
+        continue;
+      }
       // Selling, the USDC out moves with the token's price: the price now over the price then.
-      const template = scaleTemplate(r.template, amount, SCALE_LIMITS, price.usd / r.price);
-      if (template) return template;
+      const factor = price.usd / r.price;
+      const refused = unscalable(r.template, amount, SELL_SCALE_LIMITS, factor);
+      if (!refused) return { template: scaleSwap(r.template, amount, SELL_SCALE_LIMITS, factor) };
+      why ??= refused;
     }
-    return null;
+    return { why: `${why} (${kept.length} kept)` };
   }
 
   /**
@@ -1005,7 +1055,7 @@ export class Router {
     if (this.routeTtlMs <= 0 || !quoted.length) return;
     const ready: { mint: string; template: SwapTemplate; at: number }[] = [];
     for (const q of quoted) {
-      const why = q.template ? unscalable(q.template, BigInt(q.template.quote.inAmount)) : "Jupiter's answer can't serve other wallets";
+      const why = q.template ? unscalable(q.template, BigInt(q.template.quote.inAmount), SELL_SCALE_LIMITS) : "Jupiter's answer can't serve other wallets";
       if (why) this.#unkept(q.mint, why);
       else ready.push(q as { mint: string; template: SwapTemplate; at: number });
     }
@@ -1034,6 +1084,22 @@ export class Router {
     this.#unkeptLogged.set(mint, now);
     if (this.#unkeptLogged.size >= 1_000) for (const [k, at] of this.#unkeptLogged) if (at <= now - 60_000) this.#unkeptLogged.delete(k);
     this.#o.log?.(`sell route for ${this.#o.bank().tokens[mint]?.symbol ?? mint} not kept: ${why}`);
+  }
+
+  /** Side, token and kind of reason → when a reprice miss of it was last logged (at most once a minute each). */
+  #missLogged = new Map<string, number>();
+  /**
+   * Logs why a token sold (or bought) lately was quoted afresh rather than repriced from its kept
+   * route, at most once a minute per token, side and kind of reason (its words without the
+   * numbers), so the next slow build says why directly.
+   */
+  #notRepriced(side: "buy" | "sell", mint: string, why: string) {
+    const now = Date.now();
+    const key = `${side} ${mint} ${why.replace(/[\d.]+/g, "#")}`;
+    if ((this.#missLogged.get(key) ?? 0) > now - 60_000) return;
+    this.#missLogged.set(key, now);
+    if (this.#missLogged.size >= 1_000) for (const [k, at] of this.#missLogged) if (at <= now - 60_000) this.#missLogged.delete(k);
+    this.#o.log?.(`${side} route for ${this.#o.bank().tokens[mint]?.symbol ?? mint} not repriced: ${why}`);
   }
 
   /** Resolves once the routes being kept have their prices (or gave up): for tests and benches. */
