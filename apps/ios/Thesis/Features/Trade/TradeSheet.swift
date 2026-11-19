@@ -88,6 +88,11 @@ private struct BuyPanel: View {
     @State private var youreIn = false
     /// The app is in front: builds are kept fresh only then.
     @State private var active = true
+    /// A split trade that stopped partway, and whether its retry is left: finish it or swap it
+    /// back here (Cash lists it too).
+    @State private var stopped: (trade: ForkIncomplete?, retry: Bool)?
+    /// What finishing or sweeping it did, shown for a moment before the sheet closes.
+    @State private var recovered: String?
 
     private static let log = Logger(subsystem: "xyz.yourthesis.app", category: "trade")
 
@@ -292,7 +297,23 @@ private struct BuyPanel: View {
                         .foregroundStyle(Palette.down)
                         .accessibilityIdentifier("trade-failure")
                 }
-                if confirming != nil || youreIn {
+                if let recovered {
+                    Label(recovered, systemImage: "checkmark.circle")
+                        .font(.geist(14, .medium))
+                        .frame(maxWidth: .infinity, minHeight: 56)
+                        .accessibilityIdentifier("stopped-trade-done")
+                } else if let stopped {
+                    StoppedTradeCard(trade: stopped.trade, retry: stopped.retry) { text in
+                        withAnimation(.snappy) {
+                            self.stopped = nil
+                            recovered = text
+                        }
+                        Task {
+                            try? await Task.sleep(for: .seconds(2))
+                            dismiss()
+                        }
+                    }
+                } else if confirming != nil || youreIn {
                     // Placed: the fork accepted it (mock data: it's done). Landing follows.
                     SidePill(side: side, title: confirming != nil ? "You're in · Confirming on-chain…" : "You're in",
                              height: 56, expand: true) {}
@@ -321,6 +342,7 @@ private struct BuyPanel: View {
                              height: 56, expand: true, action: place)
                         .disabled(placing)
                 }
+                if stopped == nil, recovered == nil {
                 Text(confirming != nil || youreIn
                      ? "\(amountText) from your balance"
                      : !current.isOpen
@@ -334,6 +356,7 @@ private struct BuyPanel: View {
                      : "From your balance · \(Fmt.usd(app.balance - amount - fee, cents: true)) left")
                     .font(.geist(13))
                     .foregroundStyle(Palette.muted)
+                }
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 8)
@@ -398,6 +421,10 @@ private struct BuyPanel: View {
             marks.mark("shown")
             Self.log.info("trade shown (prebuilt: \(prebuilt)): \(marks.values.description, privacy: .public)")
             await showYoureIn(id)
+        } catch let e as ForkAPIError where e.code == "trade_incomplete" {
+            // Stopped partway at the submit itself: finish it or swap it back here.
+            stopped = (e.incomplete, e.retry == true && e.incomplete?.canRetry != false)
+            await app.refreshCash()
         } catch {
             failure = CashErrorText.message(for: error)
             // Its author sold while the sheet was open: show it closed.
@@ -408,6 +435,10 @@ private struct BuyPanel: View {
 
     private func placeMock() async {
         #if DEBUG
+        if AppState.mockTradesStop {
+            await showYoureIn(app.mockStoppingTrade(take, side: side, amount: amount))
+            return
+        }
         if AppState.mockTradesFail {
             await showYoureIn(app.mockFailingTrade(take, side: side, amount: amount))
             return
@@ -443,8 +474,10 @@ private struct BuyPanel: View {
             confirming = nil
             app.sheetShows(id, false)
             prebuild()
-        case .incomplete(let message)?:
-            failure = message
+        case .incomplete?:
+            // The app already tried its one retry (AppState.track): what's left is the card's.
+            let trade = app.pendingTrades[id]?.stopped
+            stopped = (trade, trade?.canRetry ?? false)
             confirming = nil
             app.sheetShows(id, false)
         default:

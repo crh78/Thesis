@@ -414,6 +414,15 @@ private struct TradeNoticeBanner: View {
                     .buttonStyle(.glass)
                     .accessibilityIdentifier("trade-notice-retry")
                 }
+                if notice.fixInCash {
+                    Button("Fix it") {
+                        app.tradeNotice = nil
+                        app.showCash = true
+                    }
+                    .font(.geist(14, .semibold))
+                    .buttonStyle(.glass)
+                    .accessibilityIdentifier("trade-notice-fix")
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

@@ -197,6 +197,72 @@ struct ForkAPI {
         }
     }
 
+    // MARK: Stopped split trades
+
+    // A trade split over several transactions can stop partway (`ForkIncomplete`): part of it
+    // landed, so the wallet holds tokens that aren't in a position. The owner's rule: retry once
+    // (`retryTrade`), and if that doesn't finish it, sweep them back to USDC (`sweepToCash`).
+
+    /// Your split trades that stopped partway, newest first (`GET /wallets/:w/incomplete`), so they
+    /// can be finished or swept after a relaunch or from another device.
+    func incompleteTrades() async throws -> [ForkIncomplete] {
+        struct List: Decodable { let trades: [ForkIncomplete]? }
+        let list: List = try await get("wallets/\(wallet.address)/incomplete")
+        return list.trades ?? []
+    }
+
+    /// How finishing or sweeping a stopped trade ended. `complete`: it went through after all;
+    /// `partial`: the sweep still had something left after its last round; `gone`: nothing was
+    /// left to finish or sell.
+    enum Recovery { case complete, swept, partial, nothing, gone }
+
+    /// Builds the rest of a stopped trade (the trade at `position`, or the newest) once more, signs
+    /// it and sends it (`POST /wallets/:w/retry`). Throws a ForkAPIError with `retry == false` when
+    /// only the sweep is left (`retry_used`, `retry_unavailable`, `take_closed`, or a retry that
+    /// stopped again: `trade_incomplete`).
+    func retryTrade(position: String?) async throws -> Recovery {
+        do {
+            let built: ForkBuild = try await post("wallets/\(wallet.address)/retry", PositionBody(position: position))
+            _ = try await signAndSubmit(built)
+            return .complete
+        } catch let e as ForkAPIError where e.code == "trade_complete" {
+            return .complete
+        } catch let e as ForkAPIError where e.code == "incomplete_gone" {
+            return .gone
+        }
+    }
+
+    /// Swaps what a stopped trade bought back to USDC (`POST /wallets/:w/sweep`), round after round
+    /// until the API says `done`; Phoenix legs then go through the Phoenix cash-out.
+    func sweepToCash(position: String?) async throws -> Recovery {
+        struct Round: Decodable { let done: Bool; let buildId: String?; let transactions: [String]?; let phoenixCashOut: Bool? }
+        var swept = false, phoenix = false, done = false
+        do {
+            for _ in 0..<4 where !done {
+                let round: Round
+                do {
+                    round = try await post("wallets/\(wallet.address)/sweep", PositionBody(position: position))
+                } catch let e as ForkAPIError where swept && e.code == "incomplete_missing" {
+                    // A sweep that lands forgets the stopped trade: after a landed round, nothing is left.
+                    done = true
+                    break
+                }
+                phoenix = phoenix || round.phoenixCashOut == true
+                guard !round.done, let id = round.buildId, let txs = round.transactions, !txs.isEmpty else { done = true; break }
+                _ = try await signAndSubmit(ForkBuild(buildId: id, transactions: txs, expectedUsd: nil, minimumUsd: nil, phoenixCashOut: nil, excluded: nil))
+                swept = true
+            }
+        } catch let e as ForkAPIError where e.code == "trade_complete" {
+            return .complete
+        }
+        if phoenix { try await cashOutPhoenix() }
+        // Every round landed and the API never said `done`: something may be left (Cash still lists it).
+        if swept && !done { return .partial }
+        return swept || phoenix ? .swept : .nothing
+    }
+
+    private struct PositionBody: Encodable { let position: String? }
+
     // MARK: Creator fees
 
     /// What you earned as a creator, per take: earned, claimed and left to claim. Only your own:
@@ -339,14 +405,35 @@ struct ForkSubmission: Decodable {
     private let status: String?
     let signatures: [String]?
     let error: Problem?
+    /// `incomplete`: the split trade that stopped partway, to finish or sweep.
+    let incomplete: ForkIncomplete?
 
     var state: Status { status.flatMap(Status.init(rawValue:)) ?? .landed }
 
-    init(state: Status, signatures: [String]? = nil, error: Problem? = nil) {
+    init(state: Status, signatures: [String]? = nil, error: Problem? = nil, incomplete: ForkIncomplete? = nil) {
         status = state.rawValue
         self.signatures = signatures
         self.error = error
+        self.incomplete = incomplete
     }
+}
+
+/// A split trade that stopped partway (the fork API's `incomplete`, in `trade_incomplete` refusals,
+/// stopped submissions and `GET /wallets/:w/incomplete`): `landed` of its transactions went
+/// through, so the wallet holds what they bought and no position exists yet. `next` is "retry"
+/// while its one retry is left, then "sweep".
+struct ForkIncomplete: Decodable, Equatable, Identifiable {
+    let position: String
+    let take: String
+    let takeId: String
+    let side: String
+    let usd: Double
+    var next: String
+    let landed: Int
+
+    var id: String { position }
+    var canRetry: Bool { next == "retry" }
+    var isFade: Bool { side == "fade" }
 }
 
 /// When each step of a trade happened, in ms after the tap (a build made before the tap is
@@ -372,13 +459,23 @@ struct ForkAPIError: Error, Decodable, LocalizedError {
     var maxPartialBps: Int? = nil
     var maxPartialUsd: Double? = nil
     var minStakeUsd: Double? = nil
+    /// `trade_incomplete` and the retry's refusals: whether the stopped trade's one retry is left,
+    /// and the trade itself.
+    var retry: Bool? = nil
+    var incomplete: ForkIncomplete? = nil
+    /// A submit refused for slippage before anything went out (the API already sent the same bytes
+    /// once more after copying the pools again): nothing left the wallet, and a fresh build, signed
+    /// again, is expected to go through.
+    var requote: Bool? = nil
 
     init(code: String, message: String?) {
         self.code = code
         self.message = message
     }
 
-    enum CodingKeys: String, CodingKey { case code = "error", message, maxPartialBps, maxPartialUsd, minStakeUsd }
+    enum CodingKeys: String, CodingKey {
+        case code = "error", message, maxPartialBps, maxPartialUsd, minStakeUsd, retry, incomplete, requote
+    }
 
     var errorDescription: String? {
         switch code {
@@ -397,6 +494,10 @@ struct ForkAPIError: Error, Decodable, LocalizedError {
         case "already_exited": "You already sold this position."
         // A fork API from before partial sales (the app says so itself, ForkAPI.noPartialSales).
         case "whole_positions_only": "This fork sells whole positions only. Sell all of it instead."
+        // A split trade that stopped partway (StoppedTradeCard finishes or sweeps it).
+        case "trade_incomplete": "This trade didn't finish: part of your cash was swapped into tokens that aren't in a position."
+        // A trade's rebuild after a `requote` was refused for slippage too (the API's text is the raw program error).
+        case "requote_failed": "Prices moved while that was sent, and nothing left your balance. Try again in a moment."
         default: message ?? "The fork didn't take that (\(code))."
         }
     }

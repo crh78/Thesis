@@ -110,6 +110,8 @@ final class AppState {
     private(set) var creatorFees: ForkCreatorFees?
     /// Fork mode: cash left on Phoenix after a sale, or positions left open after a take settled.
     private(set) var phoenixCash: ForkPhoenixCash?
+    /// Fork mode: your split trades that stopped partway, to finish or swap back to cash (Cash).
+    private(set) var stoppedTrades: [ForkIncomplete] = []
     /// Fork mode: your portfolio chart by range ("1D", "1W", "1M", "All"), loaded as you pick one.
     private(set) var portfolioHistory: [String: ForkHistory] = [:]
     /// Your inbox (newest first) and how many are unread.
@@ -411,8 +413,7 @@ final class AppState {
     @discardableResult
     func commitTrade(_ take: Take, side: Side, amount: Double, built: ForkPrepared, marks: TradeMarks) async throws -> String {
         guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
-        let sent = try await fork.commit(built.build, marks: marks)
-        let id = built.build.buildId
+        let (sent, id) = try await commitRequoting(fork, take, side: side, amount: amount, built.build, marks: marks)
         let cost = amount * (1 + (forkFeeRate ?? 0))
         balance -= cost
         updateTake(take.id) {
@@ -432,6 +433,25 @@ final class AppState {
             await self?.refreshAfterTrade(take.id)
         }
         return id
+    }
+
+    /// Sends a trade's build. Refused for slippage with nothing sent (`requote`: the fork API already
+    /// sent the same bytes once more): built again with fresh quotes and signed once more, without
+    /// asking (signing is silent, so it's one tap all the same). Returns the accepted build's id.
+    private func commitRequoting(_ fork: ForkAPI, _ take: Take, side: Side, amount: Double, _ build: ForkBuild,
+                                 marks: TradeMarks) async throws -> (ForkSubmission, String) {
+        do {
+            return (try await fork.commit(build, marks: marks), build.buildId)
+        } catch let e as ForkAPIError where e.requote == true {
+            marks.mark("requote")
+            log.info("trade \(build.buildId, privacy: .public) refused for slippage: building it again")
+            let again = try await fork.prepareTrade(take.id, side: side, amount: amount).build
+            do {
+                return (try await fork.commit(again, marks: marks), again.buildId)
+            } catch let e as ForkAPIError where e.requote == true {
+                throw ForkAPIError(code: "requote_failed", message: nil)
+            }
+        }
     }
 
     /// Signs and sends prepared sales (one per on-chain position behind a holding), each once the
@@ -560,7 +580,18 @@ final class AppState {
         log.info("trade \(id, privacy: .public) accepted: \(marks.values.description, privacy: .public)")
         pendingTrades[id] = pending
         Task {
-            let end = await outcome()
+            var end = await outcome()
+            var stoppedTrade = pending.kind == .sale ? nil : end?.incomplete
+            // A split trade that stopped partway: its one retry (the legs that didn't land, quoted
+            // afresh) is built, signed and sent at once, without asking: signing is silent, and the
+            // owner's rule is "retry once, then sweep". Still "confirming" meanwhile.
+            if end?.state == .incomplete, let stopped = stoppedTrade, stopped.canRetry {
+                switch await retryStopped(stopped) {
+                case .finished: end = ForkSubmission(state: .landed)
+                case .used: stoppedTrade?.next = "sweep"
+                case .unsure: break // busy or unreachable: the retry is still offered
+                }
+            }
             let state = end?.state ?? .landed
             switch state {
             case .pending, .landed:
@@ -568,14 +599,19 @@ final class AppState {
                 pendingTrades[id]?.status = .landed
                 await landed()
             case .failed, .incomplete:
-                let message = state == .incomplete
-                    ? end?.error?.message ?? "That trade stopped partway. Check Cash for what it bought."
+                // A stopped trade (not a sale: a stopped sale is finished by selling again).
+                let stopped = state == .incomplete && pending.kind != .sale
+                let message = stopped
+                    ? Self.tradeStopped
+                    : state == .incomplete
+                    ? end?.error?.message ?? "That sale stopped partway. Sell again to finish it."
                     : pending.kind == .sale ? Self.saleFailed : Self.tradeFailed
                 withAnimation(.snappy) { undo() }
+                pendingTrades[id]?.stopped = stopped ? stoppedTrade : nil
                 pendingTrades[id]?.status = state == .incomplete ? .incomplete(message) : .failed(message)
                 log.error("trade \(id, privacy: .public) \(state.rawValue, privacy: .public): \(end?.error?.code ?? "", privacy: .public)")
                 if !shownBySheet.contains(id) {
-                    tradeNotice = TradeNotice(message: message, retry: state == .failed ? retry : nil)
+                    tradeNotice = TradeNotice(message: message, retry: state == .failed ? retry : nil, fixInCash: stopped)
                 }
                 // Cash and positions as the chain has them now (a stopped split trade bought some).
                 await refreshCash()
@@ -611,9 +647,91 @@ final class AppState {
         }
         return id
     }
+
+    /// UI tests (`-mockTradeStops`): a mock split trade that the "fork" accepts and then stops
+    /// partway, with its retry left, to check the stopped-trade card (sheet and Cash).
+    static var mockTradesStop: Bool { ProcessInfo.processInfo.arguments.contains("-mockTradeStops") }
+
+    func mockStoppingTrade(_ take: Take, side: Side, amount: Double) -> String {
+        let id = UUID().uuidString
+        let stopped = ForkIncomplete(position: "mock-\(id)", take: take.id, takeId: take.id, side: side == .back ? "back" : "fade",
+                                     usd: amount, next: "retry", landed: 1)
+        balance -= amount
+        track(id, PendingTrade(takeID: take.id, kind: .trade(side, amount: amount), status: .confirming), marks: TradeMarks(),
+              retry: TradeIntent(take: take, side: side), undo: { [weak self] in
+                  self?.balance += amount
+                  self?.stoppedTrades.insert(stopped, at: 0)
+              }, landed: {}) {
+            try? await Task.sleep(for: .milliseconds(800))
+            return ForkSubmission(state: .incomplete, error: .init(code: "trade_incomplete", message: nil), incomplete: stopped)
+        }
+        return id
+    }
+
+    private func mockRecovery(_ position: String?, _ outcome: ForkAPI.Recovery) async throws -> ForkAPI.Recovery {
+        try await Task.sleep(for: .milliseconds(600))
+        stoppedTrades.removeAll { $0.position == position }
+        return outcome
+    }
     #endif
 
     static let tradeFailed = "That trade didn't go through. Nothing left your balance."
+    static let tradeStopped = "Part of that trade went through and the rest didn't. Finish it, or swap the leftover back to cash."
+
+    private enum RetryOutcome { case finished, used, unsure }
+
+    /// A stopped trade's one retry, right after it stopped. `used`: only the sweep is left.
+    private func retryStopped(_ stopped: ForkIncomplete) async -> RetryOutcome {
+        guard let fork else { return .unsure }
+        do {
+            let outcome = try await fork.retryTrade(position: stopped.position)
+            log.info("stopped trade \(stopped.position, privacy: .public) retried: \(String(describing: outcome), privacy: .public)")
+            return outcome == .complete ? .finished : .used
+        } catch let e as ForkAPIError {
+            log.error("stopped trade retry: \(e.code, privacy: .public)")
+            return e.code == "trade_incomplete" || e.retry == false ? .used : .unsure
+        } catch {
+            log.error("stopped trade retry: \(error.localizedDescription, privacy: .public)")
+            return .unsure
+        }
+    }
+
+    /// Finishes a stopped trade with its one retry (Cash, or the trade sheet). Throws a
+    /// ForkAPIError with `retry == false` (or `trade_incomplete`) when only the sweep is left.
+    func finishStoppedTrade(_ position: String?) async throws -> ForkAPI.Recovery {
+        #if DEBUG
+        if fork == nil, Self.mockTradesStop { return try await mockRecovery(position, .complete) }
+        #endif
+        guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
+        defer { Task { await self.refreshAfterRecovery() } }
+        return try await fork.retryTrade(position: position)
+    }
+
+    /// Swaps what a stopped trade bought back to cash.
+    func sweepStoppedTrade(_ position: String?) async throws -> ForkAPI.Recovery {
+        #if DEBUG
+        if fork == nil, Self.mockTradesStop { return try await mockRecovery(position, .swept) }
+        #endif
+        guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
+        defer { Task { await self.refreshAfterRecovery() } }
+        return try await fork.sweepToCash(position: position)
+    }
+
+    private func refreshAfterRecovery() async {
+        await refreshCash()
+        await refreshPortfolio()
+    }
+
+    /// What finishing or sweeping a stopped trade did, for the user.
+    static func recoveryText(_ outcome: ForkAPI.Recovery) -> String {
+        switch outcome {
+        case .complete: "Done: the trade went through."
+        case .swept: "The leftover is back in your balance as cash."
+        case .partial: "Most of the leftover is back in your balance as cash. If any is left, Cash shows it with the same button."
+        case .nothing: "Nothing was left to swap: it's already back in your balance."
+        case .gone: "Nothing left to do: this trade was already cleared up."
+        }
+    }
     static let saleFailed = "That sale didn't go through. You still hold the position."
 
     /// Long-polls a submitted build until it isn't pending (about two minutes at most). Nil when the
@@ -718,6 +836,7 @@ final class AppState {
             log.error("fork wallet failed: \(error.localizedDescription, privacy: .public)")
         }
         phoenixCash = try? await fork.phoenixCash()
+        if let stopped = try? await fork.incompleteTrades() { stoppedTrades = stopped }
     }
 
     // MARK: Fork mode
@@ -1476,6 +1595,8 @@ struct PendingTrade: Equatable {
     let takeID: String
     let kind: Kind
     var status: Status
+    /// `incomplete`: the stopped trade, to finish or sweep (nil for a sale).
+    var stopped: ForkIncomplete? = nil
 }
 
 /// A trade that didn't go through after its sheet closed (the banner), and the trade to try again.
@@ -1483,6 +1604,8 @@ struct TradeNotice: Equatable, Identifiable {
     let id = UUID()
     let message: String
     let retry: TradeIntent?
+    /// A stopped trade: the banner opens Cash, where it can be finished or swept.
+    var fixInCash = false
 
     static func == (a: TradeNotice, b: TradeNotice) -> Bool { a.id == b.id }
 }
