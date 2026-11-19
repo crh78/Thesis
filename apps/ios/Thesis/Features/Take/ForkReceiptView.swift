@@ -5,8 +5,10 @@ import SwiftUI
 struct ForkReceiptView: View {
     @Environment(AppState.self) private var app
     let receipt: ForkReceipt?
-    /// Sell: the on-chain positions behind one of your holdings (every buy is its own position).
-    var onExit: (([String]) -> Void)? = nil
+    /// The take's id: a sale of yours on it shows "Selling…" while it confirms.
+    var takeID: String? = nil
+    /// Sell: opens the trade sheet's Sell tab on that side of the take.
+    var onExit: ((Side) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -104,6 +106,19 @@ struct ForkReceiptView: View {
         !p.addresses.isEmpty && p.addresses.allSatisfy(app.soldPositions.contains)
     }
 
+    private func selling(_ p: ForkReceipt.MyHolding) -> Bool {
+        guard !p.exited else { return false }
+        let here = takeID.map { app.isSelling(takeID: $0, side: p.side == "fade" ? .fade : .back) } ?? false
+        return here || p.pendingSales.contains { !$0.priced }
+    }
+
+    /// "You traded $20", or "You traded $20 · $15 held" once part of it is sold.
+    private func holdingTitle(_ p: ForkReceipt.MyHolding) -> String {
+        let did = p.side == "back" ? "You traded \(Fmt.usd(p.stakeUsd))" : "You faded \(Fmt.usd(p.stakeUsd))"
+        guard !p.exited, p.soldStakeUsd > 0.005 else { return did }
+        return "\(did) · \(Fmt.usd(p.heldStakeUsd, cents: true)) held"
+    }
+
     @ViewBuilder
     private func positions(_ r: ForkReceipt) -> some View {
         let mine = ForkReceipt.MyHolding.group(r.viewerPositions ?? [])
@@ -112,13 +127,17 @@ struct ForkReceiptView: View {
             ForEach(mine) { p in
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
-                        Text(p.side == "back" ? "You traded \(Fmt.usd(p.stakeUsd))" : "You faded \(Fmt.usd(p.stakeUsd))")
+                        Text(holdingTitle(p))
                             .font(.geist(14))
                         Spacer()
                         // What the wallet holds now against what it paid (fee included).
                         // Sold here (confirming, or the receipt hasn't caught up yet) shows as sold.
                         if p.exited || sold(p) {
                             Text("Sold").font(.mono(13, .semibold))
+                        } else if selling(p) {
+                            // A partial sale on its way, or waiting for its prices.
+                            Text("Selling…").font(.mono(13, .semibold)).foregroundStyle(Palette.muted)
+                                .accessibilityIdentifier("holding-selling")
                         } else if let pnl = p.pnl, let value = p.valueUsd {
                             Text("\(Fmt.usd(value, cents: true)) · \(Fmt.pct(pnl.pct * 100))")
                                 .font(.mono(13, .semibold))
@@ -133,8 +152,15 @@ struct ForkReceiptView: View {
                     ForEach(p.phoenix, id: \.leg) { risk in
                         liquidationLine(risk, legName: r.legs.first { $0.index == risk.leg }?.name ?? risk.symbol)
                     }
+                    // P&L already made on the parts sold.
+                    if let realized = p.realizedPnlUsd, !p.exited {
+                        Text("Sold \(Fmt.usd(p.soldStakeUsd, cents: true)) of it · \(Fmt.usd(realized, cents: true, signed: true)) realized")
+                            .font(.geist(12))
+                            .foregroundStyle(realized < 0 ? Palette.down : Palette.up)
+                            .accessibilityIdentifier("holding-realized")
+                    }
                     if p.canExit, !sold(p), let onExit {
-                        Button("Sell position") { onExit(p.addresses) }
+                        Button("Sell position") { onExit(p.side == "fade" ? .fade : .back) }
                             .font(.geist(13, .semibold))
                             .buttonStyle(.bordered)
                     }
@@ -180,12 +206,27 @@ extension ForkReceipt {
         let exited: Bool
         /// Each leveraged leg's liquidation risk; across several buys, the one closest to it.
         let phoenix: [Holding.PhoenixRisk]
+        /// Partial sales: the cost basis still held, P&L from settled partial sales, sales not
+        /// settled yet, and the limits on the next one (see `ForkReceipt.Holding`).
+        var heldStakeUsd: Double
+        var realizedPnlUsd: Double? = nil
+        var pendingSales: [PendingSale] = []
+        var minStakeUsd: Double? = nil
+        var maxPartialBps: Int? = nil
+        var closesTakeIfSoldAll = false
+        /// The fork API sells part of a position (it sent the partial-sale fields).
+        var partialSales = false
 
         var id: String { addresses.joined(separator: ",") }
+        var soldStakeUsd: Double { max(0, stakeUsd - heldStakeUsd) }
 
+        /// What the part still held is worth against what it cost: after a partial sale the cost
+        /// (stake plus fee) counts only for the share still held, like the value.
         var pnl: (usd: Double, pct: Double)? {
-            guard let costUsd, let valueUsd, costUsd > 0 else { return nil }
-            return (valueUsd - costUsd, valueUsd / costUsd - 1)
+            guard let costUsd, let valueUsd, costUsd > 0, stakeUsd > 0 else { return nil }
+            let cost = costUsd * heldStakeUsd / stakeUsd
+            guard cost > 0 else { return nil }
+            return (valueUsd - cost, valueUsd / cost - 1)
         }
 
         private static func closest(_ risks: [Holding.PhoenixRisk]) -> [Holding.PhoenixRisk] {
@@ -222,7 +263,15 @@ extension ForkReceipt {
                     // Sell sells all of them, so every one has to be sellable.
                     canExit: first.exited != true && group.allSatisfy { $0.canExit == true },
                     exited: first.exited == true,
-                    phoenix: first.exited == true ? [] : closest(group.flatMap { $0.phoenix ?? [] }))
+                    phoenix: first.exited == true ? [] : closest(group.flatMap { $0.phoenix ?? [] }),
+                    heldStakeUsd: group.reduce(0) { $0 + $1.heldStakeUsd },
+                    realizedPnlUsd: group.contains { $0.realizedPnlUsd != nil }
+                        ? group.reduce(0) { $0 + ($1.realizedPnlUsd ?? 0) } : nil,
+                    pendingSales: group.flatMap { $0.pendingSales ?? [] },
+                    minStakeUsd: first.minStakeUsd,
+                    maxPartialBps: SaleLimits.holdingMaxBps(group.map { ($0.heldStakeUsd, $0.maxPartialBps) }),
+                    closesTakeIfSoldAll: group.contains { $0.closesTakeIfSoldAll == true },
+                    partialSales: group.allSatisfy(\.hasPartialSales))
             }
             // Open holdings first, then what was sold.
             return merged.filter { !$0.exited } + merged.filter(\.exited)

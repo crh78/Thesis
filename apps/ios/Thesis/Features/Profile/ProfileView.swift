@@ -15,6 +15,11 @@ struct ProfileView: View {
     @State private var sharing: CallCard?
     /// A draft you tapped: the new-take flow opens on it.
     @State private var resuming: TakeDraft?
+    /// A holding you swiped left on (or tapped its red arrow): "Sell all of it?" is up.
+    @State private var askingToSell: HoldingSale?
+    /// Fork mode: its sale, built as the question opened, so Sell all only signs and sends it.
+    @State private var salePrebuilds: Prebuilds<SaleKey>?
+    @State private var saleError: String?
 
     private var drafts: [TakeDraft] { DraftStore.shared.drafts(for: app.me.id) }
 
@@ -32,7 +37,12 @@ struct ProfileView: View {
         case .takes: return app.myTakes.map(ProfileItem.init(liveTake:))
         case .positions:
             guard app.isOnFork else { return app.positions.map { ProfileItem(position: $0, me: app.me) } }
-            return (app.forkPortfolio?.holdings ?? []).map { ProfileItem(forkPosition: $0, take: app.loadedTake($0.takeId), me: app.me) }
+            return (app.forkPortfolio?.holdings ?? []).map { p in
+                // Sold here and confirming (all of it, or part): "Selling…" until the portfolio has it.
+                let side: Side = p.side == "fade" ? .fade : .back
+                let selling = app.isSelling(takeID: p.takeId, side: side) || p.addresses.allSatisfy(app.soldPositions.contains)
+                return ProfileItem(forkPosition: p, take: app.loadedTake(p.takeId), me: app.me, selling: selling)
+            }
         case .badges: return (app.forkPortfolio?.badges ?? []).map(ProfileItem.init(forkBadge:))
         }
     }
@@ -249,17 +259,22 @@ struct ProfileView: View {
                                     ProfileItemRow(item: item)
                                     PostingBar(take: take).padding(.leading, 56)
                                 }
+                            } else if tab == .positions {
+                                // Swipe left (or the red arrow) to sell all of it.
+                                HStack(spacing: 4) {
+                                    if let take = item.take {
+                                        NavigationLink(value: take) { ProfileItemRow(item: item) }
+                                            .buttonStyle(.plain)
+                                    } else {
+                                        ProfileItemRow(item: item)
+                                    }
+                                    if let sale = item.sale { sellButton(sale) }
+                                    if let card = item.share { shareButton(card) }
+                                }
+                                .modifier(SwipeToSell(enabled: item.sale != nil) { item.sale.map(askToSell) })
                             } else if let take = item.take {
-                                HStack(spacing: 4) {
-                                    NavigationLink(value: take) { ProfileItemRow(item: item) }
-                                        .buttonStyle(.plain)
-                                    if tab == .positions, let card = item.share { shareButton(card) }
-                                }
-                            } else if tab == .positions, let card = item.share {
-                                HStack(spacing: 4) {
-                                    ProfileItemRow(item: item)
-                                    shareButton(card)
-                                }
+                                NavigationLink(value: take) { ProfileItemRow(item: item) }
+                                    .buttonStyle(.plain)
                             } else {
                                 ProfileItemRow(item: item)
                             }
@@ -293,6 +308,20 @@ struct ProfileView: View {
             .sheet(isPresented: $editing) { EditProfileView() }
             .sheet(item: $sharing) { CalledItShareSheet(card: $0) }
             .fullScreenCover(item: $resuming) { CreateFlow(draft: $0) }
+            .alert(askingToSell?.question ?? "", isPresented: Binding(get: { askingToSell != nil }, set: { if !$0 { askingToSell = nil } }),
+                   presenting: askingToSell) { sale in
+                Button("Sell all", role: .destructive) { sellAll(sale) }
+                Button("Cancel", role: .cancel) { salePrebuilds = nil }
+            } message: { sale in
+                Text(sale.closesTake
+                     ? "It's your own buy-in, so selling closes this take: no new trades, and its result is final at today's prices."
+                     : "It's sold at today's prices and scored at the sale.")
+            }
+            .alert("That sale didn't go through", isPresented: Binding(get: { saleError != nil }, set: { if !$0 { saleError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(saleError ?? "")
+            }
             .navigationDestination(isPresented: $showSettings) { SettingsView() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -319,6 +348,45 @@ struct ProfileView: View {
 }
 
 extension ProfileView {
+    /// The red arrow on an open holding: sell all of it, after a confirmation.
+    fileprivate func sellButton(_ sale: HoldingSale) -> some View {
+        Button { askToSell(sale) } label: {
+            Image(systemName: "arrow.left")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.down)
+                .frame(width: 40, height: 40)
+                .background(Palette.down.opacity(0.14), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sell all")
+        .accessibilityIdentifier("position.sell")
+    }
+
+    /// Asks "Sell all of your $X position in …?", and on the fork builds the sale meanwhile.
+    fileprivate func askToSell(_ sale: HoldingSale) {
+        salePrebuilds = nil
+        if app.isOnFork {
+            let prebuilds = Prebuilds.sales(app, takeID: sale.takeID)
+            if sale.partialSales { prebuilds.want(.holding(sale.side, .all)) } else { sale.addresses.forEach { prebuilds.want(.position($0)) } }
+            salePrebuilds = prebuilds
+        }
+        askingToSell = sale
+    }
+
+    /// Sells all of it: the same accepted / confirming / rollback flow as other trades (the row
+    /// says "Selling…"; a sale that then doesn't land is rolled back and the banner says so).
+    fileprivate func sellAll(_ sale: HoldingSale) {
+        let prebuilds = salePrebuilds
+        salePrebuilds = nil
+        Task {
+            do {
+                try await app.sellAll(sale, prebuilds: prebuilds)
+            } catch {
+                saleError = CashErrorText.message(for: error)
+            }
+        }
+    }
+
     /// Share one of your positions as a called-it card.
     fileprivate func shareButton(_ card: CallCard) -> some View {
         Button { sharing = card } label: {
@@ -335,18 +403,33 @@ extension ProfileView {
 }
 
 private extension ProfileItem {
-    /// One of your positions on the fork: what your wallet holds now against what it paid.
-    init(forkPosition p: ForkPortfolio.Position, take: Take?, me: Person) {
-        let pnl = p.valueUsd.flatMap { value in p.costUsd.map { cost in cost > 0 ? (value / cost - 1) * 100 : 0 } }
+    /// One of your positions on the fork: what your wallet holds now against what it paid. After a
+    /// partial sale: what's left ("$15 of $20 held") and what the sales made ("+$1.20 realized");
+    /// "Selling…" while a sale confirms or waits for its prices.
+    init(forkPosition p: ForkPortfolio.Position, take: Take?, me: Person, selling: Bool) {
+        // The cost (stake plus fee) of the part still held, like the value.
+        let pnl = p.valueUsd.flatMap { value in p.heldCostUsd.map { cost in cost > 0 ? (value / cost - 1) * 100 : 0 } }
         let score = p.returnBps.map { "score \(Fmt.pct(Double($0) / 100))" }
         let detail = p.pendingNote ?? score ?? "pricing…"
+        let sold = p.stakeUsd - p.heldStakeUsd > 0.005
+        let held = sold ? "\(Fmt.usd(p.heldStakeUsd, cents: true)) of \(Fmt.usd(p.stakeUsd)) held" : nil
+        let realized = p.realizedPnlUsd.map { "\(Fmt.usd($0, cents: true, signed: true)) realized" }
+        let selling = selling || (p.pendingSales ?? []).contains { !$0.priced }
+        let side: Side = p.side == "fade" ? .fade : .back
+        // Your own buy-in on an open take: selling all of it closes the take.
+        let ownBuyIn = side == .back && take.map { $0.isOpen && $0.author.profileID == me.profileID } == true
         self.init(topic: p.topic ?? "topic-coin", claim: p.claim,
-                  kind: p.side == "fade" ? "Faded" : "Traded", kindColor: p.side == "fade" ? Palette.down : Palette.up,
-                  meta: [p.authorHandle.map { "@\($0)" }, detail].compactMap { $0 }.joined(separator: " · "),
-                  value: Fmt.usd(p.valueUsd ?? p.stakeUsd, cents: true), ret: pnl ?? 0, take: take, showsReturn: pnl != nil,
+                  kind: selling ? "Selling…" : p.side == "fade" ? "Faded" : "Traded",
+                  kindColor: selling ? Palette.muted : p.side == "fade" ? Palette.down : Palette.up,
+                  meta: [p.authorHandle.map { "@\($0)" }, held, realized, detail].compactMap { $0 }.joined(separator: " · "),
+                  value: Fmt.usd(p.valueUsd ?? p.heldStakeUsd, cents: true), ret: pnl ?? 0, take: take, showsReturn: pnl != nil,
                   share: pnl.map { CallCard(takeID: p.takeId, claim: p.claim, ret: $0, faded: p.side == "fade",
                                             author: p.authorHandle, name: me.name, handle: me.id, avatar: me.avatar,
-                                            since: take?.since, legs: take?.legs ?? []) })
+                                            since: take?.since, legs: take?.legs ?? []) },
+                  sale: selling || p.canExit != true || p.exited == true ? nil
+                      : HoldingSale(takeID: p.takeId, claim: p.claim, side: side, worthUsd: p.valueUsd ?? p.heldStakeUsd,
+                                    addresses: p.addresses, partialSales: p.hasPartialSales,
+                                    closesTake: p.closesTakeIfSoldAll ?? ownBuyIn))
     }
 
     /// A "called it" badge your wallet holds (a non-transferable Token-2022 token).
@@ -365,7 +448,9 @@ private extension ProfileItem {
                   value: Fmt.usd(p.value, cents: true), ret: p.ret, take: p.take,
                   share: CallCard(takeID: p.take.id, claim: p.take.claim, ret: p.ret, faded: p.side == .fade,
                                   author: p.take.author.handleID, name: me.name, handle: me.id, avatar: me.avatar,
-                                  since: p.take.since, legs: p.take.legs))
+                                  since: p.take.since, legs: p.take.legs),
+                  sale: HoldingSale(takeID: p.take.id, claim: p.take.claim, side: p.side, worthUsd: p.value, addresses: [],
+                                    partialSales: true, closesTake: false))
     }
 
     /// One of your takes as a profile row (still posting: only you see it).
@@ -384,6 +469,53 @@ private extension ProfileItem {
                       meta: "closed\(day) · \(take.backs) traded",
                       value: Fmt.usd(take.moneyIn), ret: take.ret, take: take)
         }
+    }
+}
+
+/// An open holding's row: dragging it left shows the red arrow, and letting go past it asks to
+/// sell all of it (the row's arrow button does the same). Vertical drags scroll as usual.
+private struct SwipeToSell: ViewModifier {
+    let enabled: Bool
+    let onSell: () -> Void
+    @State private var dx: CGFloat = 0
+    /// A sideways drag is on: the row's link (a button, which fires on lift inside it) stays off,
+    /// so a swipe never also opens the take.
+    @State private var swiping = false
+
+    private static let trigger: CGFloat = 60
+
+    func body(content: Content) -> some View {
+        content
+            .disabled(swiping)
+            .offset(x: dx)
+            .background(alignment: .trailing) {
+                if dx < -8 {
+                    Image(systemName: "arrow.left")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Palette.down)
+                        .padding(.trailing, 12)
+                        .opacity(Double(min(1, -dx / Self.trigger)))
+                        .accessibilityHidden(true)
+                }
+            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 20)
+                    .onChanged { v in
+                        guard enabled, abs(v.translation.width) > abs(v.translation.height) else { return }
+                        swiping = true
+                        dx = max(-90, min(0, v.translation.width))
+                    }
+                    .onEnded { v in
+                        let sell = enabled && v.translation.width < -Self.trigger && abs(v.translation.width) > abs(v.translation.height)
+                        withAnimation(.snappy) { dx = 0 }
+                        if sell { onSell() }
+                        // The link stays off until the lift that ended the swipe has passed.
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(350))
+                            swiping = false
+                        }
+                    },
+                including: enabled ? .all : .subviews)
     }
 }
 

@@ -9,14 +9,12 @@ struct TakeDetailView: View {
     @State private var range = "All"
     @State private var scrub: Int?
     @State private var trade: TradeIntent?
-    @State private var exitPosition: ExitPosition?
     @State private var showComments = false
     @State private var topComments: [Comment] = []
     @State private var traders: [Trader] = []
     @State private var showTraders = false
     /// Fork mode: the take as the chain sees it.
     @State private var receipt: ForkReceipt?
-    @State private var selling: OwnedPosition?
 
     /// Real takes only have the since-posted history until prices are wired.
     private var ranges: [String] { app.isLive ? ["All"] : MockData.takeRanges }
@@ -32,7 +30,11 @@ struct TakeDetailView: View {
                 performance.padding(.top, 22)
                 if !held.isEmpty { section { yourPosition } }
                 section { basket }
-                if app.isOnFork { section { ForkReceiptView(receipt: receipt) { exitPosition = ExitPosition(addresses: $0) } } }
+                if app.isOnFork {
+                    section {
+                        ForkReceiptView(receipt: receipt, takeID: take.id) { trade = TradeIntent(take: current, side: $0, tab: .sell) }
+                    }
+                }
                 section { sentiment }
                 section { commentsPreview }
                 LockedNote(text: "LOCKED \(take.since.uppercased()) · CAN'T BE EDITED OR DELETED")
@@ -93,11 +95,6 @@ struct TakeDetailView: View {
                 receipt = await app.receipt(for: take)
             }
         }) { TradeSheet(intent: $0) }
-        .sheet(item: $exitPosition, onDismiss: {
-            Task { receipt = await app.receipt(for: take) }
-        }) { position in
-            SellSheet(take: take, forkPositions: position.addresses)
-        }
         .task {
             guard app.isOnFork else { return }
             receipt = await app.receipt(for: take)
@@ -113,7 +110,6 @@ struct TakeDetailView: View {
             }
         }
         .sheet(isPresented: $showTraders) { TradersView(take: take, traders: traders) }
-        .sheet(item: $selling, onDismiss: { Task { traders = await app.traders(for: take) } }) { SellSheet(position: $0) }
         .task { traders = await app.traders(for: take) }
         .sheet(isPresented: $showComments, onDismiss: { Task { await loadComments() } }) {
             CommentsView(take: take)
@@ -307,7 +303,7 @@ struct TakeDetailView: View {
     // MARK: Your position
 
     /// Your trade and/or fade on this take, on mock data. Signed in, positions are on-chain
-    /// (the receipt's "Sell position"), so these don't apply.
+    /// (the receipt's "Sell position"), so these don't apply. Sell opens the trade sheet's Sell tab.
     private var held: [OwnedPosition] {
         guard !app.isOnFork else { return [] }
         return [Side.back, .fade].compactMap { app.position(in: take, side: $0) }
@@ -322,7 +318,7 @@ struct TakeDetailView: View {
                         .font(.geist(13, .semibold))
                         .foregroundStyle(p.side.text)
                     PositionFigures(position: p)
-                    Button { selling = p } label: {
+                    Button { trade = TradeIntent(take: current, side: p.side, tab: .sell) } label: {
                         Text("Sell").font(.geist(15, .semibold)).frame(maxWidth: .infinity, minHeight: 36)
                     }
                     .buttonStyle(.glass)
@@ -444,9 +440,4 @@ struct TakeDetailView: View {
             .padding(.top, 4)
         }
     }
-}
-
-private struct ExitPosition: Identifiable {
-    let addresses: [String]
-    var id: String { addresses.joined(separator: ",") }
 }

@@ -41,6 +41,20 @@ struct ForkAPI {
         return try await prepared { try await post("takes/\(takeID)/trades", body) }
     }
 
+    /// Sells part or all of your holding in a take on one side (`POST /takes/:id/sell`): `bps` of
+    /// it (1–10,000), or `usd` worth of it (the API converts it from what the holding is worth now);
+    /// neither sells all of it. Whole positions go first, smallest first, then at most one partial
+    /// sale: one build, one approval. A fork API from before partial sales has no such route
+    /// (`noPartialSales`): it sells whole positions with `prepareExit`.
+    func prepareSale(_ takeID: String, side: Side, bps: Int? = nil, usd: Double? = nil, prebuild: Bool = false) async throws -> ForkPrepared {
+        struct Body: Encodable { let owner: String; let side: String; let bps: Int?; let usd: Double?; let prebuild: Bool? }
+        let body = Body(owner: wallet.address, side: side == .back ? "back" : "fade", bps: bps, usd: usd, prebuild: prebuild ? true : nil)
+        return try await prepared { try await post("takes/\(takeID)/sell", body) }
+    }
+
+    /// Answers meaning the fork API has no partial sales (it's older than them).
+    static let noPartialSales: Set<String> = ["no_such_route", "http_404"]
+
     /// Builds the sale of one position (the whole position), ready to sign.
     func prepareExit(_ takeID: String, position: String, prebuild: Bool = false) async throws -> ForkPrepared {
         struct Body: Encodable { let owner: String; let prebuild: Bool? }
@@ -353,8 +367,18 @@ final class TradeMarks: @unchecked Sendable {
 struct ForkAPIError: Error, Decodable, LocalizedError {
     let code: String
     let message: String?
+    /// `remainder_below_minimum`: the largest part you can sell now (nil or 0: only all of it), and
+    /// the minimum a position has to keep.
+    var maxPartialBps: Int? = nil
+    var maxPartialUsd: Double? = nil
+    var minStakeUsd: Double? = nil
 
-    enum CodingKeys: String, CodingKey { case code = "error", message }
+    init(code: String, message: String?) {
+        self.code = code
+        self.message = message
+    }
+
+    enum CodingKeys: String, CodingKey { case code = "error", message, maxPartialBps, maxPartialUsd, minStakeUsd }
 
     var errorDescription: String? {
         switch code {
@@ -366,8 +390,23 @@ struct ForkAPIError: Error, Decodable, LocalizedError {
         case "build_expired": "That took too long. Try again."
         // A back or fade on a take whose author sold their buy-in.
         case "take_closed": "This take is closed: its author sold, so it takes no new trades or fades."
+        // Partial sales: what a position keeps after one has to be at least the minimum stake.
+        case "remainder_below_minimum": Self.remainderText(maxUsd: maxPartialUsd, maxBps: maxPartialBps, minimum: minStakeUsd)
+        case "part_too_small": "That's too small a part to sell. Sell more of it, or all of it."
+        case "too_many_open_sales": "Too many of your sales on this take are still settling. Try again in a few minutes, or sell all of it."
+        case "already_exited": "You already sold this position."
+        // A fork API from before partial sales (the app says so itself, ForkAPI.noPartialSales).
+        case "whole_positions_only": "This fork sells whole positions only. Sell all of it instead."
         default: message ?? "The fork didn't take that (\(code))."
         }
+    }
+
+    /// "A position has to keep at least $10. Sell up to $5.00, or all of it."
+    static func remainderText(maxUsd: Double?, maxBps: Int?, minimum: Double?) -> String {
+        let keep = "A position has to keep at least \(Fmt.usd(minimum ?? 10))."
+        guard let maxBps, maxBps > 0 else { return "\(keep) Sell all of it instead." }
+        let most = maxUsd.map { Fmt.usd($0, cents: true) } ?? "\(maxBps / 100)%"
+        return "\(keep) Sell up to \(most), or all of it."
     }
 }
 
@@ -401,6 +440,24 @@ struct ForkBuild: Decodable {
     /// The fork API served a `prebuild: true` request as a prebuild (its money action counts at
     /// submit). Missing: it was a normal build, so the app stops building ahead (`PrebuildSupport`).
     var prebuilt: Bool? = nil
+    /// A sale: the share of the holding it sells (10,000 = all of it), and whether that's all of
+    /// it. Both missing: a fork API from before partial sales.
+    var bps: Int? = nil
+    var full: Bool? = nil
+    /// A sale: the cost basis and value it sells, and what stays.
+    var sale: Sale? = nil
+    /// A holding's sale (`/takes/:id/sell`): the on-chain positions it sells, whole or in part.
+    var positions: [String]? = nil
+
+    struct Sale: Decodable, Equatable {
+        let stakeUsd: Double
+        let remainingStakeUsd: Double
+        let valueUsd: Double?
+        let remainingValueUsd: Double?
+    }
+
+    /// A sale built by a fork API that sells part of a position.
+    var knowsPartialSales: Bool { bps != nil && full != nil }
 
     struct LeftOut: Decodable, Equatable {
         let name: String
@@ -412,7 +469,8 @@ struct ForkBuild: Decodable {
         ForkBuild(buildId: buildId, transactions: transactions, expectedUsd: expectedUsd ?? old.expectedUsd,
                   minimumUsd: minimumUsd ?? old.minimumUsd, phoenixCashOut: phoenixCashOut ?? old.phoenixCashOut,
                   excluded: excluded ?? old.excluded, closesTake: closesTake ?? old.closesTake,
-                  expiresAt: expiresAt, quotedAt: quotedAt ?? old.quotedAt, prebuilt: prebuilt ?? old.prebuilt)
+                  expiresAt: expiresAt, quotedAt: quotedAt ?? old.quotedAt, prebuilt: prebuilt ?? old.prebuilt,
+                  bps: bps ?? old.bps, full: full ?? old.full, sale: sale ?? old.sale, positions: positions ?? old.positions)
     }
 }
 
@@ -471,6 +529,16 @@ struct ForkReceipt: Decodable, Equatable {
         }
     }
 
+    /// A partial sale that hasn't settled yet (`priced`: the settler signed its prices).
+    struct PendingSale: Decodable, Equatable {
+        let seq: Int
+        let bps: Int
+        let stakeUsd: Double
+        /// Unix seconds.
+        let soldAt: Double
+        let priced: Bool
+    }
+
     struct Holding: Decodable, Equatable {
         let address: String
         let side: String
@@ -489,6 +557,23 @@ struct ForkReceipt: Decodable, Equatable {
         let escrowedUsd: Double?
         /** Legs held on Phoenix (leverage, shorts): where each is liquidated and how close it is. */
         let phoenix: [PhoenixRisk]?
+        /** Partial sales; all missing on a fork API from before them. The cost basis still held
+            and sold so far, and P&L from settled partial sales (`valueUsd` is then what's left). */
+        var remainingStakeUsd: Double? = nil
+        var soldStakeUsd: Double? = nil
+        var realizedPnlUsd: Double? = nil
+        /** Partial sales not settled yet. */
+        var pendingSales: [PendingSale]? = nil
+        var minStakeUsd: Double? = nil
+        /** The largest partial sale allowed now, in bps of what's left; nil = only "sell all". */
+        var maxPartialBps: Int? = nil
+        /** Selling all of it closes the take (the author's own buy-in on an open take). */
+        var closesTakeIfSoldAll: Bool? = nil
+
+        /** This fork API sells part of a position. */
+        var hasPartialSales: Bool { remainingStakeUsd != nil }
+        /** The cost basis still held. */
+        var heldStakeUsd: Double { remainingStakeUsd ?? stakeUsd }
 
         struct PhoenixRisk: Decodable, Equatable {
             let leg: Int
@@ -505,10 +590,13 @@ struct ForkReceipt: Decodable, Equatable {
             let level: String
         }
 
-        /** Profit or loss on what the wallet actually holds. */
+        /** Profit or loss on what the wallet actually holds. `costUsd` stays the original total
+            and `valueUsd` covers only what's left, so the cost counts for the share still held. */
         var pnl: (usd: Double, pct: Double)? {
-            guard let costUsd, let valueUsd, costUsd > 0 else { return nil }
-            return (valueUsd - costUsd, valueUsd / costUsd - 1)
+            guard let costUsd, let valueUsd, costUsd > 0, stakeUsd > 0 else { return nil }
+            let cost = costUsd * heldStakeUsd / stakeUsd
+            guard cost > 0 else { return nil }
+            return (valueUsd - cost, valueUsd / cost - 1)
         }
 
         /** Just traded and still waiting for its entry prices: worth re-reading soon. */
@@ -577,6 +665,25 @@ struct ForkPortfolio: Decodable, Equatable {
         let pendingNote: String?
         let canExit: Bool?
         let exited: Bool?
+        /// Partial sales (as on `ForkReceipt.Holding`); missing on a fork API from before them.
+        var remainingStakeUsd: Double? = nil
+        var soldStakeUsd: Double? = nil
+        var realizedPnlUsd: Double? = nil
+        var pendingSales: [ForkReceipt.PendingSale]? = nil
+        var minStakeUsd: Double? = nil
+        var maxPartialBps: Int? = nil
+        var closesTakeIfSoldAll: Bool? = nil
+        /// Every on-chain position behind a merged holding (`holdings`); nil for a single one.
+        var merged: [String]? = nil
+
+        /// The on-chain positions this row stands for.
+        var addresses: [String] { merged ?? [address] }
+        var hasPartialSales: Bool { remainingStakeUsd != nil }
+        /// The cost basis still held: the stake, less what partial sales sold.
+        var heldStakeUsd: Double { remainingStakeUsd ?? stakeUsd }
+        /// What the part still held cost (stake plus fee), to set against `valueUsd`, which is
+        /// what that part is worth.
+        var heldCostUsd: Double? { costUsd.map { stakeUsd > 0 ? $0 * heldStakeUsd / stakeUsd : $0 } }
     }
 
     struct Badge: Decodable, Equatable {
@@ -605,6 +712,7 @@ extension ForkPortfolio {
         return order.compactMap { key in
             guard let group = groups[key], let first = group.first else { return nil }
             if group.count == 1 { return first }
+            let partial = group.allSatisfy(\.hasPartialSales)
             func total(_ value: (Position) -> Double?) -> Double? {
                 let values = group.compactMap(value)
                 return values.count == group.count ? values.reduce(0, +) : nil
@@ -618,7 +726,15 @@ extension ForkPortfolio {
                 returnBps: returns.count == group.count && stake > 0 ? Int((returns.reduce(0, +) / stake).rounded()) : nil,
                 pendingNote: group.lazy.compactMap(\.pendingNote).first,
                 canExit: group.contains { $0.canExit == true },
-                exited: group.allSatisfy { $0.exited == true })
+                exited: group.allSatisfy { $0.exited == true },
+                remainingStakeUsd: partial ? group.reduce(0) { $0 + $1.heldStakeUsd } : nil,
+                soldStakeUsd: partial ? group.reduce(0) { $0 + ($1.soldStakeUsd ?? 0) } : nil,
+                realizedPnlUsd: group.contains { $0.realizedPnlUsd != nil } ? group.reduce(0) { $0 + ($1.realizedPnlUsd ?? 0) } : nil,
+                pendingSales: group.flatMap { $0.pendingSales ?? [] },
+                minStakeUsd: first.minStakeUsd,
+                maxPartialBps: SaleLimits.holdingMaxBps(group.map { ($0.heldStakeUsd, $0.maxPartialBps) }),
+                closesTakeIfSoldAll: group.contains { $0.closesTakeIfSoldAll == true },
+                merged: group.map(\.address))
         }
     }
 }

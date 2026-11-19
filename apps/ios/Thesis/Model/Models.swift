@@ -324,6 +324,8 @@ struct ProfileItem: Identifiable, Hashable {
     var imageURL: URL? = nil
     /// Your positions only: what the share button turns into a called-it card.
     var share: CallCard? = nil
+    /// Your open positions only: what swiping left (or the red arrow) sells, all of it.
+    var sale: HoldingSale? = nil
 }
 
 /// One inbox notification (supabase/migrations/*_notifications.sql).

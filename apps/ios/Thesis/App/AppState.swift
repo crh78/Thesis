@@ -249,6 +249,7 @@ final class AppState {
         postStates = [:]
         pendingTrades = [:]
         soldPositions = []
+        sellingHoldings = []
         tradeNotice = nil
         retryTrade = nil
         feedState = .idle
@@ -370,6 +371,11 @@ final class AppState {
     private(set) var pendingTrades: [String: PendingTrade] = [:]
     /// Positions sold (or being sold) here: shown as sold before the receipt catches up.
     private(set) var soldPositions: Set<String> = []
+    /// Holdings ("takeID|side") with a partial sale confirming here: shown as "Selling…".
+    private(set) var sellingHoldings: Set<String> = []
+
+    /// A partial sale of your holding on this side of the take is confirming.
+    func isSelling(takeID: String, side: Side) -> Bool { sellingHoldings.contains("\(takeID)|\(side.rawValue)") }
     /// A trade that didn't go through after its sheet closed: the banner says so, with Try again.
     var tradeNotice: TradeNotice?
     /// Try again from that banner: RootView opens the trade sheet again.
@@ -382,9 +388,16 @@ final class AppState {
         return try await fork.prepareTrade(take.id, side: side, amount: amount, prebuild: prebuild)
     }
 
-    func prepareExit(_ take: Take, position: String, prebuild: Bool) async throws -> ForkPrepared {
+    /// A whole position's sale: the only sale a fork API from before partial sales has.
+    func prepareExit(takeID: String, position: String, prebuild: Bool) async throws -> ForkPrepared {
         guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
-        return try await fork.prepareExit(take.id, position: position, prebuild: prebuild)
+        return try await fork.prepareExit(takeID, position: position, prebuild: prebuild)
+    }
+
+    /// Part (`bps`, or `usd` worth) or all (neither) of your holding on one side of a take.
+    func prepareSale(takeID: String, side: Side, bps: Int? = nil, usd: Double? = nil, prebuild: Bool) async throws -> ForkPrepared {
+        guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
+        return try await fork.prepareSale(takeID, side: side, bps: bps, usd: usd, prebuild: prebuild)
     }
 
     /// A build with a fresh blockhash, or nil when it has to be built again.
@@ -424,7 +437,7 @@ final class AppState {
     /// Signs and sends prepared sales (one per on-chain position behind a holding), each once the
     /// last was accepted. Returns their build ids. Whatever was accepted before a failure stays sold.
     @discardableResult
-    func commitExit(_ take: Take, positions: [String], built: [ForkPrepared], marks: TradeMarks) async throws -> [String] {
+    func commitExit(takeID: String, positions: [String], built: [ForkPrepared], marks: TradeMarks) async throws -> [String] {
         guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
         var ids: [String] = []
         for (position, sale) in zip(positions, built) {
@@ -432,21 +445,98 @@ final class AppState {
             let id = sale.build.buildId
             ids.append(id)
             soldPositions.insert(position)
-            let cashOut = sale.build.phoenixCashOut == true
-            track(id, PendingTrade(takeID: take.id, kind: .sale, status: .confirming), sent, marks: marks, retry: nil,
+            track(id, PendingTrade(takeID: takeID, kind: .sale, status: .confirming), sent, marks: marks, retry: nil,
                   undo: { [weak self] in self?.soldPositions.remove(position) }) { [weak self] in
-                guard let self else { return }
-                // A sale with Phoenix legs closed them; their cash comes back to USDC in a second
-                // step once it landed. If that fails, it waits on the Cash screen ("Cash out").
-                if cashOut {
-                    do { try await fork.cashOutPhoenix() } catch {
-                        self.log.error("phoenix cash-out failed: \(error.localizedDescription, privacy: .public)")
-                    }
-                }
-                await self.refreshCash()
-                await self.refreshPortfolio()
+                await self?.saleLanded(sale.build)
             }
         }
+        return ids
+    }
+
+    /// Sells `amount` of your holding on one side of a take with a build made ahead (`Prebuilds`
+    /// keyed by `SaleKey`), or made now: one build and one approval for the whole holding. Returns
+    /// the build ids once the fork accepted them. All of it shows as sold at once; part of it
+    /// shows "Selling…" until it lands; either comes back if it doesn't land.
+    ///
+    /// A fork API from before partial sales (`wholePositionsOnly`, no `/sell` route, or a sale
+    /// build without `bps` / `full`) sells all of it the old way, one whole position at a time,
+    /// and refuses part of it (`whole_positions_only`).
+    @discardableResult
+    func commitSale(takeID: String, side: Side, amount: SellAmount, addresses: [String], wholePositionsOnly: Bool,
+                    prebuilds: Prebuilds<SaleKey>, marks: TradeMarks) async throws -> [String] {
+        guard let fork else { throw SocialAPIError.invalid("fork_unavailable") }
+        if !wholePositionsOnly {
+            do {
+                let (made, _) = try await prebuilds.take(.holding(side, amount))
+                marks.mark("built", at: made.madeAt)
+                if made.build.knowsPartialSales {
+                    return [try await commitHoldingSale(fork, takeID: takeID, side: side, made.build, addresses: addresses, marks: marks)]
+                }
+                log.info("sale build without bps/full: an older fork API, selling whole positions")
+            } catch let e as ForkAPIError where ForkAPI.noPartialSales.contains(e.code) {
+                log.info("no /sell route: an older fork API, selling whole positions")
+            }
+        }
+        guard amount == .all else { throw ForkAPIError(code: "whole_positions_only", message: nil) }
+        var built: [ForkPrepared] = []
+        for position in addresses {
+            let (made, _) = try await prebuilds.take(.position(position))
+            marks.mark("built", at: made.madeAt)
+            built.append(made)
+        }
+        return try await commitExit(takeID: takeID, positions: addresses, built: built, marks: marks)
+    }
+
+    private func commitHoldingSale(_ fork: ForkAPI, takeID: String, side: Side, _ build: ForkBuild, addresses: [String],
+                                   marks: TradeMarks) async throws -> String {
+        let sent = try await fork.commit(build, marks: marks)
+        let id = build.buildId
+        let key = "\(takeID)|\(side.rawValue)"
+        let sold = build.full == true ? Set(build.positions ?? addresses) : []
+        soldPositions.formUnion(sold)
+        if sold.isEmpty { sellingHoldings.insert(key) }
+        track(id, PendingTrade(takeID: takeID, kind: .sale, status: .confirming), sent, marks: marks, retry: nil,
+              undo: { [weak self] in
+                  self?.soldPositions.subtract(sold)
+                  self?.sellingHoldings.remove(key)
+              }) { [weak self] in
+            await self?.saleLanded(build)
+            // The receipt and portfolio now have it (a partial sale as a pending sale until it's priced).
+            self?.sellingHoldings.remove(key)
+        }
+        return id
+    }
+
+    /// After a sale landed. One with Phoenix legs closed them (or part of them); their cash comes
+    /// back to USDC in a second step. If that fails, it waits on the Cash screen ("Cash out").
+    private func saleLanded(_ build: ForkBuild) async {
+        if build.phoenixCashOut == true, let fork {
+            do { try await fork.cashOutPhoenix() } catch {
+                log.error("phoenix cash-out failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        await refreshCash()
+        await refreshPortfolio()
+    }
+
+    /// Profile: sells all of one of your holdings on the fork (swipe left, or its red arrow, then
+    /// confirm), with a build made as the confirmation opened when there is one. Mock data: sells
+    /// the position at today's price.
+    @discardableResult
+    func sellAll(_ sale: HoldingSale, prebuilds: Prebuilds<SaleKey>?) async throws -> [String] {
+        guard isOnFork else {
+            guard let p = positions.first(where: { $0.take.id == sale.takeID && $0.side == sale.side }) else {
+                throw SocialAPIError.invalid("no_position")
+            }
+            try await sell(p, amount: nil)
+            return []
+        }
+        guard let prebuilds else { throw SocialAPIError.invalid("fork_unavailable") }
+        let marks = TradeMarks()
+        let ids = try await commitSale(takeID: sale.takeID, side: sale.side, amount: .all, addresses: sale.addresses,
+                                       wholePositionsOnly: !sale.partialSales, prebuilds: prebuilds, marks: marks)
+        marks.mark("shown")
+        log.info("profile sale shown: \(marks.values.description, privacy: .public)")
         return ids
     }
 
@@ -557,8 +647,8 @@ final class AppState {
     }
 
     /// Mock data only: sells `amount` dollars of a position at today's price, or all of it when
-    /// nil. The money goes back into your balance. Signed in, a sale is a full exit on the fork
-    /// (`prepareExit` / `commitExit`).
+    /// nil. The money goes back into your balance. Signed in, a sale is built ahead on the fork
+    /// (`prepareSale`) and sent at the tap (`commitSale`).
     @discardableResult
     func sell(_ position: OwnedPosition, amount: Double?) async throws -> SaleResult {
         guard let i = positions.firstIndex(where: { $0.id == position.id }) else {
@@ -571,6 +661,15 @@ final class AppState {
             guard amount >= Self.minTrade else { throw SocialAPIError.invalid("below_minimum") }
             let keep = 1 - amount / p.value
             let costSold = p.amount * (1 - keep)
+            // Like the program: what's left has to stay at least the minimum stake.
+            guard p.amount - costSold >= SaleLimits.mockMinimum - 0.005 else {
+                let most = SaleLimits.maxBps(held: p.amount, minimum: SaleLimits.mockMinimum)
+                var e = ForkAPIError(code: "remainder_below_minimum", message: nil)
+                e.maxPartialBps = most
+                e.maxPartialUsd = most.map { p.value * Double($0) / Double(SaleLimits.all) }
+                e.minStakeUsd = SaleLimits.mockMinimum
+                throw e
+            }
             p.shares *= keep
             p.amount *= keep
             p.value *= keep

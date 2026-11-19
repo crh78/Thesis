@@ -71,7 +71,9 @@ struct DebugScreen: View {
             StartWithCashView()
         case .sell:
             NavigationStack { TakeDetailView(take: MockData.aiPower) }
-                .sheet(isPresented: .constant(true)) { SellSheet(position: MockData.positions[0]) }
+                .sheet(isPresented: .constant(true)) {
+                    TradeSheet(intent: TradeIntent(take: MockData.aiPower, side: .back, tab: .sell))
+                }
         default:
             EmptyView()
         }
