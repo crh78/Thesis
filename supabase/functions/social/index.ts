@@ -164,7 +164,8 @@ async function createTake(me: string, body: Record<string, unknown>) {
 
   check(Array.isArray(body.legs), "invalid_legs");
   const rawLegs = body.legs as Record<string, unknown>[];
-  check(rawLegs.length >= 1 && rawLegs.length <= 10, "invalid_legs");
+  // At most 5 legs (the take builder's cap: each swap leg costs Jupiter calls on a trade's first build).
+  check(rawLegs.length >= 1 && rawLegs.length <= 5, "invalid_legs");
   const legs = rawLegs.map((leg, i) => {
     check(leg && typeof leg === "object", "invalid_legs");
     const weight = Number(leg.weight);

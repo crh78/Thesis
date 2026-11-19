@@ -2,8 +2,9 @@ import Foundation
 
 /// Editing a basket by hand: add, remove and reweight picks so the weights always add up to 100.
 enum BasketMath {
-    /// The most picks a take can hold (the program's limit).
-    static let maxPicks = 10
+    /// The most picks a take can hold: 5 (the take builder and the social function hold it too; each
+    /// swap leg costs Jupiter calls on a trade's first build). The program itself allows 10.
+    static let maxPicks = 5
 
     /// Whole percents that add up to exactly 100, in the same proportions (each at least 1).
     static func normalized(_ legs: [Leg]) -> [Leg] {

@@ -12,7 +12,7 @@ Live on the fork since the cards reset ([`cards-reset.md`](cards-reset.md)).
 - **Fades** exclude card legs, shown before the user confirms (`FadeVia::None` in the program).
 - **Venue:** Collector Crypt only.
 - **Finding a card:** a live CC search (`/marketplace?search=`) when a basket is built: one request, 0.1–0.5 s, no key, covers all ~197k cards. A picked card gets one `securities` row (`card:<cardId>`) so `take_legs.asset_id` can point at it, and the asset bank then tracks its value. The `search` parameter isn't in CC's docs; if it stops working, baskets are built without cards.
-- **When the take builder offers cards:** medium and high risk only. A take about cards can be all cards; any other take gets at most one card, at most 20%, never alone. Later: tune the builder so it reliably reaches for the card search on card takes.
+- **When the take builder offers cards:** medium and high risk only. A take about cards can be all cards; any other take gets at most three cards, each at most 20%, never only cards (one card until 2026-11-19). Later: tune the builder so it reliably reaches for the card search on card takes.
 
 ## Why real cards were set aside (research)
 
