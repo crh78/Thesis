@@ -497,10 +497,11 @@ const MAX_PAUSE_MS = 15_000;
  */
 export type JupiterUse = {
   lane: Lane;
-  /** Jupiter requests made: `quotes` plus `instructions` (swap and Lend instructions). */
+  /** Jupiter requests made: `quotes`, `instructions` (swap and Lend instructions) and `prices` (Price v3 reads). */
   calls: number;
   quotes: number;
   instructions: number;
+  prices: number;
   /** Time spent waiting for the budget (tap-time builds only; the others fail fast). */
   waitedMs: number;
   /** 429s Jupiter answered. */
@@ -510,11 +511,13 @@ export type JupiterUse = {
   winnerMisses: number;
   /**
    * The shared routing (api/routing.ts): "hit" reused another build's, "wait" waited for one in
-   * flight, "scaled" rewrote one made at another stake moments ago, "miss" routed its own. Unset
-   * when the trade has no traded legs.
+   * flight, "scaled" rewrote one made at another stake moments ago, "route" repriced every swap
+   * leg from kept routes at the tokens' prices now (no quote; its one call, if any, is the price
+   * read), "miss" routed its own (some legs may still be repriced: see templatedLegs). Unset when
+   * the trade has no traded legs.
    */
-  template?: "hit" | "wait" | "scaled" | "miss";
-  /** Swap legs built from another wallet's (or another stake's) template (no Jupiter call each). */
+  template?: "hit" | "wait" | "scaled" | "route" | "miss";
+  /** Swap legs built from another wallet's (or another stake's, or a kept route's) template (no Jupiter call each). */
   templatedLegs: number;
   /** The first call the budget refused (lanes 2 and 3, or a full queue): routing answers 503 busy with it. */
   refused?: ApiError;
@@ -522,7 +525,7 @@ export type JupiterUse = {
   first?: Promise<void>;
 };
 
-export const newUse = (lane: Lane = 1): JupiterUse => ({ lane, calls: 0, quotes: 0, instructions: 0, waitedMs: 0, rateLimited: 0, winnerHits: 0, winnerMisses: 0, templatedLegs: 0 });
+export const newUse = (lane: Lane = 1): JupiterUse => ({ lane, calls: 0, quotes: 0, instructions: 0, prices: 0, waitedMs: 0, rateLimited: 0, winnerHits: 0, winnerMisses: 0, templatedLegs: 0 });
 
 /**
  * The fork API's Jupiter budget: a token bucket (BudgetLimits) with lanes, behind a concurrency
@@ -704,6 +707,7 @@ export class JupiterBudget {
       const r = await this.run(lane, () => inner(url, init), use);
       if (use) {
         if (String(url).includes("/swap/v1/quote?")) use.quotes++;
+        else if (String(url).includes("/price/v3?")) use.prices++;
         else use.instructions++;
       }
       const reset = Number(r.headers?.get?.("x-ratelimit-reset"));
