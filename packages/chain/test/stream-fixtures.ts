@@ -248,6 +248,7 @@ const authorExitEvents = [
     side: SIDE.back,
     exitedAt: new BN(1_790_000_000),
     escrowReturned: new BN(0),
+    stake: STAKE,
   }, 2),
   eventIx("TakeClosed", { take, author, closedAt: new BN(1_790_000_000) }, 2),
 ];
@@ -259,6 +260,47 @@ const authorExitLogs = [
   ...eventLogs(2),
   ...eventLogs(2),
   consumed(THESIS, 30_000),
+  success(THESIS),
+];
+
+// The backer sells a fifth of their position, and a crank later settles that part.
+const partSoldEvent = eventIx("PositionPartSold", {
+  take,
+  position: backerPosition,
+  owner: backer,
+  side: SIDE.back,
+  seq: 0,
+  bps: 2_000,
+  stakeSold: new BN(5_000_000),
+  remainingStake: new BN(20_000_000),
+  escrowReturned: new BN(0),
+  soldAt: new BN(1_790_000_100),
+}, 2);
+const partSoldLogs = [
+  invoke(THESIS, 1),
+  "Program log: Instruction: SellPart",
+  invoke(SYSTEM, 2),
+  success(SYSTEM),
+  ...eventLogs(2),
+  consumed(THESIS, 25_000),
+  success(THESIS),
+];
+const partSettledEvent = eventIx("PartSettled", {
+  take,
+  position: backerPosition,
+  owner: backer,
+  side: SIDE.back,
+  seq: 0,
+  stake: new BN(5_000_000),
+  returnBps: new BN(800),
+  pnl: new BN(400_000),
+  scored: true,
+}, 2);
+const partSettledLogs = [
+  invoke(THESIS, 1),
+  "Program log: Instruction: SettlePart",
+  ...eventLogs(2),
+  consumed(THESIS, 18_000),
   success(THESIS),
 ];
 
@@ -284,6 +326,7 @@ const settleLogs = [
     scored: true,
     exited: false,
     escrowReturned: new BN(0),
+    stake: new BN(25_000_000),
   }),
   consumed(THESIS, 30_000),
   success(THESIS),
@@ -369,6 +412,20 @@ function blockDataset() {
             instructions: [{ program: THESIS, data: ixData("exit_position", 0), accounts: [0, 1, 2] }],
             inner: [{ index: 0, instructions: [{ program: SYSTEM, data: "3Bxs4h24hBtQy9rw", stackHeight: 2 }, ...authorExitEvents] }],
             logs: authorExitLogs,
+          }),
+          blockTx({
+            label: "backer-part-sale",
+            accountKeys: [b58(backer), b58(take), b58(backerPosition), SYSTEM, THESIS],
+            instructions: [{ program: THESIS, data: ixData("sell_part", 2), accounts: [0, 1, 2] }],
+            inner: [{ index: 0, instructions: [{ program: SYSTEM, data: "3Bxs4h24hBtQy9rw", stackHeight: 2 }, partSoldEvent] }],
+            logs: partSoldLogs,
+          }),
+          blockTx({
+            label: "part-settle",
+            accountKeys: [b58(crank), b58(take), b58(backerPosition), THESIS],
+            instructions: [{ program: THESIS, data: ixData("settle_part", 0), accounts: [0, 1, 2] }],
+            inner: [{ index: 0, instructions: [partSettledEvent] }],
+            logs: partSettledLogs,
           }),
           blockTx({
             label: "settle",

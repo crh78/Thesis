@@ -28,8 +28,12 @@ export const SEEDS = {
   position: Buffer.from("position"),
   badge: Buffer.from("badge"),
   exit: Buffer.from("exit"),
+  partSale: Buffer.from("part_sale"),
   ticket: Buffer.from("ticket"),
 } as const;
+
+/** Most partial sales (`sell_part`) a position can have waiting to settle at once. */
+export const MAX_OPEN_PARTS = 8;
 
 /** Jupiter's swap aggregator (v6), whose route instructions buy spot legs. */
 export const JUPITER_AGGREGATOR_PROGRAM_ID = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
@@ -111,6 +115,10 @@ export const THESIS_COMPUTE_UNITS = {
   // The author's sale (it closes the take: one more event), and a closed 10-leg take settling on
   // its sale prices: the worst cases.
   exitPosition: 37_300,
+  // A partial sale, its prices (10-leg ceiling) and its settlement (test_compute.rs).
+  sellPart: 30_500,
+  recordPartPrices: 18_700,
+  settlePart: 20_300,
   settleTake: 19_700,
   settlePosition: 22_900,
   mintBadge: 90_000,

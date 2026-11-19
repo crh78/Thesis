@@ -23,6 +23,7 @@ export type TakeAccount = IdlAccounts<Thesis>["take"];
 export type PositionAccount = IdlAccounts<Thesis>["position"];
 export type ProfileAccount = IdlAccounts<Thesis>["profile"];
 export type ExitAccount = IdlAccounts<Thesis>["exit"];
+export type PartSaleAccount = IdlAccounts<Thesis>["partSale"];
 
 export type ThesisEvents = IdlEvents<Thesis>;
 

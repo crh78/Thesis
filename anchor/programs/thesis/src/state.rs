@@ -220,6 +220,16 @@ pub struct Position {
     /// settles. Prediction legs are paper-filled at Gemini's prices.
     pub escrowed: u64,
     pub bump: u8,
+    /// Cost basis still held, in USDC base units: `stake` at open, lowered by each partial sale
+    /// (`sell_part`). The final settlement scores on this.
+    pub remaining: u64,
+    /// Partial sales made so far; the next one's seq (its `PartSale` PDA).
+    pub parts: u16,
+    /// Partial sales settled so far. They settle in order (seq = `parts_settled`), and the
+    /// position settles only once every one has (`parts_settled == parts`).
+    pub parts_settled: u16,
+    /// P&L realized by settled partial sales, in USDC base units (scored or not).
+    pub realized_pnl: i64,
 }
 
 impl Position {
@@ -249,6 +259,39 @@ pub struct Exit {
 
 impl Exit {
     /// Account size for an exit on a take with `legs` legs.
+    pub fn space(legs: usize) -> usize {
+        8 + Self::INIT_SPACE - (MAX_LEGS - legs) * 8
+    }
+}
+
+/// Part of a position its owner sold before the horizon (`sell_part`): a fraction of what was
+/// left. It scores on its own sale prices (`record_part_prices`), entry to sale, on `stake`, and
+/// settles on its own (`settle_part`, in seq order) while the rest of the position runs on.
+/// At `[PART_SALE_SEED, position, seq u16 LE]`. Closed when it settles; rent to `rent_payer`.
+#[account]
+#[derive(InitSpace)]
+pub struct PartSale {
+    pub position: Pubkey,
+    pub seq: u16,
+    /// The fraction of the position's remaining stake sold, in bps (1 to 9,999).
+    pub bps: u16,
+    /// The cost basis sold, USDC base units.
+    pub stake: u64,
+    /// The escrowed prediction and card share returned to the owner at the sale.
+    pub escrow_returned: u64,
+    pub sold_at: i64,
+    /// Gets the rent back when the part settles.
+    pub rent_payer: Pubkey,
+    /// Bit i set = leg i's sale price is recorded.
+    pub price_set: u16,
+    /// One sale price per leg of the take, 8 decimals, at or after `sold_at`.
+    #[max_len(MAX_LEGS)]
+    pub prices: Vec<u64>,
+    pub bump: u8,
+}
+
+impl PartSale {
+    /// Account size for a partial sale on a take with `legs` legs.
     pub fn space(legs: usize) -> usize {
         8 + Self::INIT_SPACE - (MAX_LEGS - legs) * 8
     }

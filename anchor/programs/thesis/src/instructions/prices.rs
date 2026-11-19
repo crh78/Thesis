@@ -5,7 +5,9 @@ use crate::{
     error::ThesisError,
     events::*,
     state::*,
-    utils::{check_return_fits, position_return_raw, priced_legs_mask, sale_return_raw},
+    utils::{
+        check_return_fits, part_return_raw, position_return_raw, priced_legs_mask, sale_return_raw,
+    },
 };
 
 /// One leg's price, signed for by the settler.
@@ -55,6 +57,21 @@ pub struct RecordSalePrices<'info> {
     pub exit: Account<'info, Exit>,
 }
 
+/// The settler records sale prices for a partial sale (`sell_part`), at or after that sale. Like
+/// the other prices, each leg is set once and can arrive over several calls.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct RecordPartPrices<'info> {
+    pub settler: Signer<'info>,
+    #[account(has_one = settler)]
+    pub config: Account<'info, Config>,
+    pub take: Account<'info, Take>,
+    #[account(has_one = take)]
+    pub position: Account<'info, Position>,
+    #[account(mut, has_one = position)]
+    pub part_sale: Account<'info, PartSale>,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 #[cfg_attr(test, derive(Debug))]
 enum Moment {
@@ -102,6 +119,39 @@ pub fn handle_record_sale_prices(
     emit_cpi!(SalePricesRecorded {
         take: take.key(),
         position: ctx.accounts.position.key(),
+        legs: checked.legs,
+        source_hash: args.source_hash,
+    });
+    Ok(())
+}
+
+pub fn handle_record_part_prices(
+    ctx: Context<RecordPartPrices>,
+    args: RecordPricesArgs,
+) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let take = &ctx.accounts.take;
+    let part = &mut ctx.accounts.part_sale;
+    let checked = check_prices(
+        take,
+        ctx.accounts.position.legs_mask,
+        part.price_set,
+        &args.prices,
+        part.sold_at,
+        ctx.accounts.config.params.max_price_delay_secs,
+        now,
+        Moment::Sale,
+    )?;
+    for &(i, price) in &checked.prices {
+        part.prices[i] = price;
+    }
+    part.price_set |= checked.legs;
+    let position = &ctx.accounts.position;
+    check_return_fits(part_return_raw(&take.legs, position, part), part.stake)?;
+    emit_cpi!(PartPricesRecorded {
+        take: take.key(),
+        position: position.key(),
+        seq: part.seq,
         legs: checked.legs,
         source_hash: args.source_hash,
     });

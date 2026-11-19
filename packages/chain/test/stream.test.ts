@@ -26,6 +26,9 @@ const EXPECTED = [
   { instructions: ["back"], events: ["positionOpened"] },
   // The author's sale closes the take.
   { instructions: ["exit_position"], events: ["positionExited", "takeClosed"] },
+  // A partial sale, then its settlement.
+  { instructions: ["sell_part"], events: ["positionPartSold"] },
+  { instructions: ["settle_part"], events: ["partSettled"] },
   {
     instructions: ["settle_take", "settle_position", "mint_badge"],
     events: ["takeSettled", "positionSettled", "badgeMinted"],
@@ -57,7 +60,7 @@ for (const name of Object.keys(FIXTURES)) {
     assert.equal(payload.programId, THESIS_PROGRAM_ID.toBase58());
     assert.equal(payload.batchStart, 380_000_000);
 
-    // The transfer and the failed `back` are dropped; the four Thesis transactions stay.
+    // The transfer and the failed `back` are dropped; the six Thesis transactions stay.
     const txs = decodeThesisStream(program, payload);
     assert.deepEqual(
       txs.map((t) => ({ instructions: t.instructions, events: t.events.map((e) => e.name) })),
@@ -65,7 +68,7 @@ for (const name of Object.keys(FIXTURES)) {
     );
     assert.deepEqual(
       txs.map((t) => t.slot),
-      [380_000_000, 380_000_001, 380_000_001, 380_000_001],
+      [380_000_000, 380_000_001, 380_000_001, 380_000_001, 380_000_001, 380_000_001],
     );
     assert.ok(txs.every((t) => t.blockTime && t.signature.length > 80 && !t.logsTruncated));
 
@@ -75,9 +78,14 @@ for (const name of Object.keys(FIXTURES)) {
     const closed = txs[2].events[1].data as { author: PublicKey; closedAt: BN };
     assert.ok(closed.author.equals(KEYS.author));
     assert.equal(closed.closedAt.toNumber(), 1_790_000_000);
-    const settled = txs[3].events[1].data as { owner: PublicKey; pnl: BN };
+    const part = txs[3].events[0].data as { seq: number; bps: number; stakeSold: BN; remainingStake: BN };
+    assert.deepEqual([part.seq, part.bps, part.stakeSold.toNumber(), part.remainingStake.toNumber()], [0, 2_000, 5_000_000, 20_000_000]);
+    const partSettled = txs[4].events[0].data as { seq: number; pnl: BN };
+    assert.deepEqual([partSettled.seq, partSettled.pnl.toNumber()], [0, 400_000]);
+    const settled = txs[5].events[1].data as { owner: PublicKey; pnl: BN; stake: BN };
     assert.ok(settled.owner.equals(KEYS.backer));
     assert.equal(settled.pnl.toNumber(), 3_125_000);
+    assert.equal(settled.stake.toNumber(), 25_000_000);
   });
 }
 
@@ -95,8 +103,8 @@ test("the payload's events are the transactions' own", () => {
     full,
   );
   // Self-CPI events (create_take, the wrapped back) come in `events`; the old style in the logs.
-  assert.deepEqual(payload.transactions.map((t) => t.events?.length ?? 0), [2, 1, 2, 0]);
-  assert.equal(parseThesisEvents(program, payload.transactions[3].logs).length, 3);
+  assert.deepEqual(payload.transactions.map((t) => t.events?.length ?? 0), [2, 1, 2, 1, 1, 0]);
+  assert.equal(parseThesisEvents(program, payload.transactions[5].logs).length, 3);
   assert.ok(!payload.transactions[1].logs.some((l) => l.includes("swap noise")));
 });
 

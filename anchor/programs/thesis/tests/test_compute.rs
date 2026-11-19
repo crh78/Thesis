@@ -42,6 +42,9 @@ const CEILINGS: &[(&str, u64)] = &[
     ("exit_position (author)", 37_300),
     ("record_sale_prices", 11_800),
     ("record_sale_prices (10 legs)", 18_000),
+    ("sell_part", 30_500),
+    ("record_part_prices (10 legs)", 18_700),
+    ("settle_part (10 legs)", 20_300),
     ("settle_position (sold)", 21_500),
     ("settle_take", 12_800),
     ("settle_take (closed)", 19_700),
@@ -52,7 +55,7 @@ const CEILINGS: &[(&str, u64)] = &[
 
 const RUNS: usize = 24;
 
-type Sizes = [(&'static str, (usize, u64)); 6];
+type Sizes = [(&'static str, (usize, u64)); 7];
 
 fn run_once(seed: u8) -> (Vec<(&'static str, u64)>, Sizes) {
     let mut env = Env::new();
@@ -180,6 +183,22 @@ fn run_once(seed: u8) -> (Vec<(&'static str, u64)>, Sizes) {
     ];
     let meta = env.record_sale(&take, &sold, sale).expect("sale");
     used.push(("record_sale_prices", meta.compute_units_consumed));
+    // A partial sale of the 10-leg back, its prices and its settlement, before the rest is sold.
+    let meta = env
+        .sell_part(&backer, &wide, &wide_sold, 2_500)
+        .expect("sell_part");
+    used.push(("sell_part", meta.compute_units_consumed));
+    let part_prices = (0..10u8)
+        .map(|i| price(i, usd(104.0 + f64::from(i)), NOW + DAY))
+        .collect();
+    let meta = env
+        .record_part(&wide, &wide_sold, 0, part_prices)
+        .expect("part prices (10 legs)");
+    used.push(("record_part_prices (10 legs)", meta.compute_units_consumed));
+    let meta = env
+        .settle_part(&wide, &wide_sold, &backer.pubkey(), 0)
+        .expect("settle_part");
+    used.push(("settle_part (10 legs)", meta.compute_units_consumed));
     env.exit_position(&backer, &wide, &wide_sold)
         .expect("exit_position (10 legs)");
     let wide_sale = (0..10u8)
@@ -251,6 +270,13 @@ fn run_once(seed: u8) -> (Vec<(&'static str, u64)>, Sizes) {
         env.svm.minimum_balance_for_rent_exemption(exit_len),
     );
 
+    // A partial sale on a 3-leg take: open until it settles.
+    let part_len = PartSale::space(3);
+    let part = (
+        part_len,
+        env.svm.minimum_balance_for_rent_exemption(part_len),
+    );
+
     // A trade ticket: open only while a trade runs, refunded by its receipt.
     let ticket_len = 8 + TradeTicket::INIT_SPACE;
     let ticket = (
@@ -265,6 +291,7 @@ fn run_once(seed: u8) -> (Vec<(&'static str, u64)>, Sizes) {
         ("profile", profile),
         ("badge mint", badge),
         ("exit", exit),
+        ("part sale", part),
     ];
     (used, sizes)
 }

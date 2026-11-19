@@ -28,6 +28,14 @@ pub const BADGE_SEED: &[u8] = b"badge";
 #[constant]
 pub const EXIT_SEED: &[u8] = b"exit";
 
+/// A partial sale, at `[PART_SALE_SEED, position, seq u16 LE]`.
+#[constant]
+pub const PART_SALE_SEED: &[u8] = b"part_sale";
+
+/// Most partial sales a position can have waiting to settle at once.
+#[constant]
+pub const MAX_OPEN_PARTS: u16 = 8;
+
 /// A trade ticket, at `[TICKET_SEED, position]`: the proof-of-trade record for the position a
 /// trade is about to open.
 #[constant]

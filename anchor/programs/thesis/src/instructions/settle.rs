@@ -6,7 +6,7 @@ use crate::{
     error::ThesisError,
     events::*,
     state::*,
-    utils::{position_return_bps, sale_return_bps, transfer_from_vault},
+    utils::{part_return_bps, position_return_bps, sale_return_bps, transfer_from_vault},
 };
 
 /// Badge thresholds tracked on the author's profile, in bps.
@@ -116,6 +116,10 @@ pub fn handle_settle_take(ctx: Context<SettleTake>) -> Result<()> {
 /// still waits for the take, whose headline result it sets.
 ///
 /// A position whose prices never arrived (past the grace period) settles at 0% and unscored.
+///
+/// After partial sales (`sell_part`) it waits for every one to settle (`settle_part`), then
+/// scores what's left (`remaining`); it counts as a win when its partial sales' P&L plus this
+/// one's is above 0.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct SettlePosition<'info> {
@@ -169,6 +173,11 @@ pub fn handle_settle_position(ctx: Context<SettlePosition>) -> Result<()> {
     };
     let take = &ctx.accounts.take;
     let position = &ctx.accounts.position;
+    // Partial sales settle first: their P&L feeds the position's win.
+    require!(
+        position.parts_settled == position.parts,
+        ThesisError::PartsNotSettled
+    );
     let is_author_buy_in = position.id == AUTHOR_POSITION_ID && position.owner == take.author;
     if exit.is_none() || is_author_buy_in {
         require!(
@@ -191,9 +200,15 @@ pub fn handle_settle_position(ctx: Context<SettlePosition>) -> Result<()> {
             (0, false)
         }
     };
-    let pnl =
-        i64::try_from((position.stake as i128) * (return_bps as i128) / BPS_DENOMINATOR as i128)
-            .map_err(|_| error!(ThesisError::MathOverflow))?;
+    // Scored on what's left after any partial sales (each scored its own part).
+    let stake = position.remaining;
+    let pnl = i64::try_from((stake as i128) * (return_bps as i128) / BPS_DENOMINATOR as i128)
+        .map_err(|_| error!(ThesisError::MathOverflow))?;
+    // A win counts the whole position: its partial sales' P&L plus this one.
+    let total_pnl = position
+        .realized_pnl
+        .checked_add(pnl)
+        .ok_or(ThesisError::MathOverflow)?;
 
     let profile = &mut ctx.accounts.owner_profile;
     profile.positions_settled += 1;
@@ -201,13 +216,13 @@ pub fn handle_settle_position(ctx: Context<SettlePosition>) -> Result<()> {
         profile.scored_positions += 1;
         profile.scored_stake = profile
             .scored_stake
-            .checked_add(position.stake)
+            .checked_add(stake)
             .ok_or(ThesisError::MathOverflow)?;
         profile.scored_pnl = profile
             .scored_pnl
             .checked_add(pnl)
             .ok_or(ThesisError::MathOverflow)?;
-        profile.wins += (pnl > 0) as u32;
+        profile.wins += (total_pnl > 0) as u32;
     }
 
     let take_key = ctx.accounts.take.key();
@@ -249,6 +264,93 @@ pub fn handle_settle_position(ctx: Context<SettlePosition>) -> Result<()> {
         scored,
         exited,
         escrow_returned,
+        stake,
+    });
+    Ok(())
+}
+
+/// Settles one partial sale (`sell_part`): folds its P&L, entry to its sale, on the cost basis it
+/// sold, into the owner's profile and the position's `realized_pnl`, then closes it and refunds
+/// its rent to whoever paid it. Anyone can call it. A position's partial sales settle in order
+/// (seq = `parts_settled`), each as soon as its prices are in, before the position itself.
+///
+/// It doesn't wait for the take, even for the author's buy-in: the take's headline result is the
+/// basket's return to the author's final sale, which a partial sale doesn't set.
+///
+/// A part whose prices never arrived (past the grace period after its sale) settles at 0% and
+/// unscored.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct SettlePart<'info> {
+    pub config: Account<'info, Config>,
+    pub take: Account<'info, Take>,
+    #[account(mut, has_one = take @ ThesisError::AccountMismatch)]
+    pub position: Account<'info, Position>,
+    #[account(mut, constraint = owner_profile.owner == position.owner @ ThesisError::AccountMismatch)]
+    pub owner_profile: Account<'info, Profile>,
+    #[account(
+        mut,
+        has_one = position @ ThesisError::AccountMismatch,
+        has_one = rent_payer @ ThesisError::AccountMismatch,
+        close = rent_payer
+    )]
+    pub part_sale: Account<'info, PartSale>,
+    #[account(mut)]
+    pub rent_payer: SystemAccount<'info>,
+}
+
+pub fn handle_settle_part(ctx: Context<SettlePart>) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let take = &ctx.accounts.take;
+    let position = &ctx.accounts.position;
+    let part = &ctx.accounts.part_sale;
+    require!(
+        part.seq == position.parts_settled,
+        ThesisError::PartsNotSettled
+    );
+    let (return_bps, scored) = match part_return_bps(&take.legs, position, part) {
+        Some(r) => (r, position.scored),
+        None => {
+            require!(
+                grace_passed(part.sold_at, &ctx.accounts.config, now)?,
+                ThesisError::PriceMissing
+            );
+            (0, false)
+        }
+    };
+    let pnl = i64::try_from((part.stake as i128) * (return_bps as i128) / BPS_DENOMINATOR as i128)
+        .map_err(|_| error!(ThesisError::MathOverflow))?;
+
+    if scored {
+        let profile = &mut ctx.accounts.owner_profile;
+        profile.scored_stake = profile
+            .scored_stake
+            .checked_add(part.stake)
+            .ok_or(ThesisError::MathOverflow)?;
+        profile.scored_pnl = profile
+            .scored_pnl
+            .checked_add(pnl)
+            .ok_or(ThesisError::MathOverflow)?;
+    }
+
+    let (seq, stake) = (part.seq, part.stake);
+    let position = &mut ctx.accounts.position;
+    position.realized_pnl = position
+        .realized_pnl
+        .checked_add(pnl)
+        .ok_or(ThesisError::MathOverflow)?;
+    position.parts_settled += 1;
+
+    emit_cpi!(PartSettled {
+        take: ctx.accounts.take.key(),
+        position: position.key(),
+        owner: position.owner,
+        side: position.side,
+        seq,
+        stake,
+        return_bps,
+        pnl,
+        scored,
     });
     Ok(())
 }

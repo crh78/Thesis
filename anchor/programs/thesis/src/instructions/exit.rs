@@ -3,7 +3,8 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::{constants::*, error::ThesisError, events::*, state::*, utils::transfer_from_vault};
 
-/// The owner sells a whole position before the take's horizon. Goes in the same transaction as
+/// The owner sells a whole position (what's left of it after any partial sales, `sell_part`)
+/// before the take's horizon. Goes in the same transaction as
 /// the owner's own swaps back to USDC (and Jupiter Lend withdrawals). Thesis never holds the
 /// tokens, so this records the decision: the position then scores on the settler's prices at or
 /// after this moment instead of at the horizon, and settles as soon as those prices land.
@@ -106,6 +107,7 @@ pub fn handle_exit_position(ctx: Context<ExitPosition>) -> Result<()> {
         side: position.side,
         exited_at: now,
         escrow_returned,
+        stake: position.remaining,
     });
     if closes_take {
         emit_cpi!(TakeClosed {

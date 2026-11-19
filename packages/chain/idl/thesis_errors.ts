@@ -47,7 +47,12 @@ export const ThesisErrorCode = {
   ReturnOutOfRange: 6044,
   FadeNeedsPredictionLegs: 6045,
   InvalidBadgeUriBase: 6046,
-  AuthorCannotFade: 6047
+  AuthorCannotFade: 6047,
+  RemainderBelowMinimum: 6048,
+  InvalidSaleFraction: 6049,
+  TooManyOpenSales: 6050,
+  PartsNotSettled: 6051,
+  AlreadySold: 6052
 };
 
 export type ThesisErrorName = keyof typeof ThesisErrorCode;

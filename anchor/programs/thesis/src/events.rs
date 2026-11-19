@@ -99,6 +99,8 @@ pub struct PositionExited {
     pub exited_at: i64,
     /// The escrowed prediction share, returned to the owner at the sale.
     pub escrow_returned: u64,
+    /// The cost basis sold: what was left after any partial sales.
+    pub stake: u64,
 }
 
 #[event]
@@ -129,6 +131,47 @@ pub struct PositionSettled {
     pub exited: bool,
     /// Escrow returned to the owner.
     pub escrow_returned: u64,
+    /// The cost basis this settlement scored: what was left after any partial sales.
+    pub stake: u64,
+}
+
+/// The owner sold part of a position before the horizon (`sell_part`). The part scores on its
+/// own sale prices and settles on its own (`PartSettled`); the rest runs on.
+#[event]
+pub struct PositionPartSold {
+    pub take: Pubkey,
+    pub position: Pubkey,
+    pub owner: Pubkey,
+    pub side: Side,
+    pub seq: u16,
+    pub bps: u16,
+    pub stake_sold: u64,
+    pub remaining_stake: u64,
+    /// The sold fraction of the escrowed prediction and card share, returned to the owner.
+    pub escrow_returned: u64,
+    pub sold_at: i64,
+}
+
+#[event]
+pub struct PartPricesRecorded {
+    pub take: Pubkey,
+    pub position: Pubkey,
+    pub seq: u16,
+    pub legs: u16,
+    pub source_hash: [u8; 32],
+}
+
+#[event]
+pub struct PartSettled {
+    pub take: Pubkey,
+    pub position: Pubkey,
+    pub owner: Pubkey,
+    pub side: Side,
+    pub seq: u16,
+    pub stake: u64,
+    pub return_bps: i64,
+    pub pnl: i64,
+    pub scored: bool,
 }
 
 #[event]
