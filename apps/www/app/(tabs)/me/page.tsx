@@ -12,6 +12,7 @@ import CreatorFees from "@/components/CreatorFees";
 import EditProfile from "@/components/EditProfile";
 import { hasPhoenixCash, LiquidationLines, PhoenixCashCard } from "@/components/Phoenix";
 import { PostingRow } from "@/components/PostingRecovery";
+import { holdingWorth, SellAllSheet, SwipeRow } from "@/components/SellAll";
 import ShareButton from "@/components/ShareButton";
 import { dayLabel, money, pct, rpcNow, takeState, topicImage, type Profile, type Take } from "@/lib/data";
 import { fork, holdings, markTraded, TRADED_AT_KEY, TRADED_EVENT, useForkWallet, type CreatorFees as Fees, type History, type Incomplete, type PhoenixCash, type Portfolio, type PortfolioPosition, type WalletSummary } from "@/lib/fork";
@@ -19,6 +20,7 @@ import StoppedTrade from "@/components/StoppedTrade";
 import { X_LOGIN } from "@/lib/flags";
 import { MY_TAKES_EVENT } from "@/lib/posting";
 import { useSession } from "@/lib/session";
+import { pendingTrade, watchSubmission } from "@/lib/trade";
 
 type Tab = "positions" | "takes" | "badges";
 
@@ -34,6 +36,17 @@ function byAuthor(p: PortfolioPosition): string | null {
   if (!p.authorHandle) return p.takeStatus === "closed" ? "the author sold" : null;
   return p.takeStatus === "closed" ? `@${p.authorHandle} sold` : `@${p.authorHandle}`;
 }
+/** A holding on Me: one take and side. */
+const holdingId = (p: { takeId: string; side: string }) => `${p.takeId}|${p.side}`;
+
+/** "$30 of $40 left · realized +$1.20": what's still held after partial sales, and what they made. */
+function soldPart(p: PortfolioPosition): string | null {
+  const parts: string[] = [];
+  if (p.soldStakeUsd && p.remainingStakeUsd != null) parts.push(`${money(p.remainingStakeUsd)} of ${money(p.stakeUsd)} left`);
+  if (p.realizedPnlUsd != null) parts.push(`realized ${money(p.realizedPnlUsd, true)}`);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 const RANGES = ["1D", "1W", "1M", "All"] as const;
 const CAPTION: Record<string, string> = { "1D": "today", "1W": "past week", "1M": "past month", All: "all time" };
 
@@ -67,6 +80,17 @@ export default function MePage() {
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // "Sell all?" for the holding swiped left (or whose arrow was tapped), and the holdings whose
+  // sale was sent and is still confirming ("Selling…").
+  const [selling, setSelling] = useState<PortfolioPosition | null>(null);
+  const [sending, setSending] = useState<Set<string>>(new Set());
+  const markSending = useCallback((id: string, on: boolean) => {
+    setSending((s) => {
+      const next = new Set(s);
+      if (on) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
   // Bumped by every trade, sale or post (markTraded), even one made while Me stays open.
   const [traded, setTraded] = useState(0);
   useEffect(() => {
@@ -120,6 +144,16 @@ export default function MePage() {
   }, [address]);
   useEffect(() => { loadStopped(); }, [loadStopped, traded]);
 
+  // A sale still confirming from before a reload (or from a take's page): its holding shows
+  // "Selling…" until it ends.
+  useEffect(() => {
+    const p = address ? pendingTrade.get(address) : null;
+    if (!p || p.kind !== "sell" || !p.side) return;
+    const id = holdingId({ takeId: p.takeId, side: p.side });
+    markSending(id, true);
+    watchSubmission(p.buildId).then(() => { markSending(id, false); markTraded(); });
+  }, [address, markSending]);
+
   // Once per wallet (it signs a message), and again after a claim.
   const walletReady = !!wallet;
   const loadFees = useCallback(async () => {
@@ -154,7 +188,7 @@ export default function MePage() {
   const balance = summary?.usdc ?? 0;
   const held = holdings((portfolio?.positions ?? []).filter((p) => !p.exited));
   // Without a history yet (or if it can't load), a flat line at what you have now: cash plus positions.
-  const now = balance + held.reduce((s, p) => s + (p.valueUsd ?? p.stakeUsd), 0);
+  const now = balance + held.reduce((s, p) => s + holdingWorth(p), 0);
   const h = history[range];
   let points = (h?.points ?? []).map((p) => p.value);
   if (points.length < 2) {
@@ -276,23 +310,32 @@ export default function MePage() {
       <div className="me-list">
         {tab === "positions" ? (
           held.length ? held.map((p) => {
-            const ret = p.valueUsd != null && p.costUsd != null && p.costUsd > 0 ? (p.valueUsd / p.costUsd - 1) * 100 : null;
-            const detail = p.pendingNote ?? (p.returnBps != null ? `score ${pct(p.returnBps / 100)}` : "pricing…");
+            // What's still held cost its share of what was paid (stake plus fee) after partial sales.
+            const cost = p.costUsd != null && p.remainingStakeUsd != null && p.stakeUsd > 0 ? (p.costUsd * p.remainingStakeUsd) / p.stakeUsd : p.costUsd;
+            const ret = p.valueUsd != null && cost != null && cost > 0 ? (p.valueUsd / cost - 1) * 100 : null;
+            const isSending = sending.has(holdingId(p));
+            // A sale on its way (sent here) or landed and waiting for its prices (pendingSales).
+            const detail = isSending || p.pendingSales?.length ? "Selling…" : p.pendingNote ?? (p.returnBps != null ? `score ${pct(p.returnBps / 100)}` : "pricing…");
+            const worth = holdingWorth(p);
             return (
-              <Link key={p.address} href={`/t/${p.takeId}`} className="item">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img className="tile" src={topicImage(p.topic)} alt="" />
-                <div className="item-main">
-                  <div className="item-claim">{p.claim}</div>
-                  <div className="item-meta"><b className={p.side === "fade" ? "down" : "up"}>{p.side === "fade" ? "Faded" : "Traded"}</b> · {[byAuthor(p), detail].filter(Boolean).join(" · ")}</div>
-                  {/* Leveraged legs and fade shorts: where each is liquidated (the take page adds the leverage). */}
-                  <LiquidationLines risks={p.phoenix} />
-                </div>
-                <div className="item-num">
-                  <div className="mono">{money(p.valueUsd ?? p.stakeUsd)}</div>
-                  {ret != null ? <div className={`mono small ${ret < 0 ? "down" : "up"}`}>{pct(ret)}</div> : null}
-                </div>
-              </Link>
+              <SwipeRow key={p.address} onSell={() => setSelling(p)} disabled={!p.canExit || isSending}
+                arrowLabel={`Sell all of your ${money(worth)} position in ${p.claim}`}>
+                <Link href={`/t/${p.takeId}`} className="item">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className="tile" src={topicImage(p.topic)} alt="" />
+                  <div className="item-main">
+                    <div className="item-claim">{p.claim}</div>
+                    <div className="item-meta"><b className={p.side === "fade" ? "down" : "up"}>{p.side === "fade" ? "Faded" : "Traded"}</b> · {[byAuthor(p), detail].filter(Boolean).join(" · ")}</div>
+                    {soldPart(p) ? <div className="item-meta">{soldPart(p)}</div> : null}
+                    {/* Leveraged legs and fade shorts: where each is liquidated (the take page adds the leverage). */}
+                    <LiquidationLines risks={p.phoenix} />
+                  </div>
+                  <div className="item-num">
+                    <div className="mono">{money(worth)}</div>
+                    {ret != null ? <div className={`mono small ${ret < 0 ? "down" : "up"}`}>{pct(ret)}</div> : null}
+                  </div>
+                </Link>
+              </SwipeRow>
             );
           }) : <p className="muted me-empty">Trade or fade a take and it shows up here.</p>
         ) : null}
@@ -337,6 +380,14 @@ export default function MePage() {
 
       {sheet === "add" && address ? (
         <AddCash address={address} summary={summary} onClose={() => setSheet(null)} onDone={(s) => { setSummary(s); loadFork(); }} />
+      ) : null}
+      {selling ? (
+        <SellAllSheet
+          holding={selling}
+          onClose={() => setSelling(null)}
+          onPlaced={(t) => t.side && markSending(holdingId({ takeId: t.takeId, side: t.side }), true)}
+          onSettled={(t) => { if (t.side) markSending(holdingId({ takeId: t.takeId, side: t.side }), false); loadPhoenix(); }}
+        />
       ) : null}
       {editing ? <EditProfile bio={profile?.bio ?? ""} onClose={() => setEditing(false)} onSaved={loadSocial} /> : null}
       {sheet === "cash" ? (
