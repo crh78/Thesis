@@ -263,6 +263,15 @@ export function stoppedTrade(e: unknown): { trade: Incomplete | null; retry: boo
 }
 
 /**
+ * A submit the fork refused for slippage before anything went out (`requote: true`; the API had
+ * already sent the same signed bytes once more after copying the pools again): nothing left the
+ * wallet, and a build with fresh quotes, signed again, is expected to go through.
+ */
+export const requoted = (e: unknown) => e instanceof ForkError && e.data?.requote === true;
+/** What a trade says when its rebuild after a `requote` was refused too (the API's text is the raw program error). */
+export const REQUOTE_FAILED = "Prices moved while that was sent, and nothing left your balance. Try again in a moment.";
+
+/**
  * How a retry or sweep ended: `complete` when the trade went through after all (`trade_complete`);
  * `partial` when the sweep still had something left after its last round.
  */
