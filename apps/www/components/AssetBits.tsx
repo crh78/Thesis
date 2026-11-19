@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { isDeleted, DELETED_NAME, pct, topicImage } from "@/lib/data";
+import LOGOS from "@/lib/logos.json";
 import type { FeedTake } from "./TakeRow";
 
 export type Asset = {
@@ -44,7 +45,7 @@ const SITES: Record<string, string> = {
 };
 
 /** Cash, predictions, cards and metals get a symbol, not a logo (as the app). */
-function symbol(kind: string, key: string | null): { glyph: string; tint: string } | null {
+export function symbol(kind: string, key: string | null): { glyph: string; tint: string } | null {
   const k = kind.toLowerCase();
   if (k === "yield" || k.startsWith("earns") || k === "cash") return { glyph: "$", tint: "var(--up)" };
   if (k.startsWith("prediction")) return { glyph: "%", tint: "#8C6BF0" };
@@ -54,17 +55,21 @@ function symbol(kind: string, key: string | null): { glyph: string; tint: string
   return null;
 }
 
-/** The logo by ticker from the same public image endpoints the app uses (nothing about you is sent), else a monogram. */
-function logoUrl(key: string | null, kind: string): string | null {
+const CACHED = LOGOS as Record<string, string>;
+
+/** The logo by ticker: the app's own copy for stocks and ETFs (`pnpm logos:cache`), else the same
+ * public image endpoints the iOS app uses (nothing about you is sent), else null (a monogram). */
+export function logoUrl(key: string | null, kind: string): string | null {
   const t = key?.toUpperCase();
   if (!t || !/^[A-Z0-9.]{1,12}$/.test(t)) return null;
+  if (CACHED[t] && !kind.toLowerCase().startsWith("pre")) return `/logos/${CACHED[t]}`;
   if (SITES[t]) return `https://www.google.com/s2/favicons?domain=${SITES[t]}&sz=128`;
   if (kind.toLowerCase().startsWith("pre")) return null;
   return CRYPTO.has(t) ? `https://assets.coincap.io/assets/icons/${t.toLowerCase()}@2x.png` : `https://financialmodelingprep.com/image-stock/${t}.png`;
 }
 
 /** True when a logo's visible pixels are almost all near-white (it would vanish on a white tile). */
-function isLightLogo(img: HTMLImageElement): boolean {
+export function isLightLogo(img: HTMLImageElement): boolean {
   try {
     const n = 24;
     const c = document.createElement("canvas");
@@ -93,9 +98,9 @@ export function AssetLogo({ assetKey, name, kind, size = 44 }: { assetKey: strin
   const style = { width: size, height: size, fontSize: size * 0.36 };
   if (sym) return <span className="alogo" style={{ ...style, color: sym.tint, background: `color-mix(in srgb, ${sym.tint} 18%, transparent)` }} aria-hidden>{sym.glyph}</span>;
   if (url && !failed) {
-    // Stock logos (FMP, which sends CORS headers) can be white on transparent, invisible on the white
-    // tile (Roblox): those get the dark tile. Other hosts load without crossOrigin, as before.
-    const fmp = url.startsWith("https://financialmodelingprep.com/");
+    // Stock logos (ours, or FMP's, which sends CORS headers) can be white on transparent, invisible on
+    // the white tile (Roblox): those get the dark tile. Other hosts load without crossOrigin, as before.
+    const fmp = url.startsWith("/logos/") || url.startsWith("https://financialmodelingprep.com/");
     return (
       <span className={`alogo alogo-img${light ? " light-logo" : ""}`} style={style} aria-hidden>
         {/* eslint-disable-next-line @next/next/no-img-element */}
