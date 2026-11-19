@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { THESIS_PROGRAM_ID, exitAddress, type ExitAccount, type PositionAccount, type TakeAccount } from "@thesis/chain";
+import { THESIS_PROGRAM_ID, exitAddress, partSaleAddress, type ExitAccount, type PartSaleAccount, type PositionAccount, type TakeAccount } from "@thesis/chain";
 import { OpenSet, SupabaseOpenPositions, type ChainReader, type OpenPositionsSource } from "../src/settler/open-set.ts";
 
 const key = () => Keypair.generate().publicKey;
@@ -14,6 +14,7 @@ function fakeChain() {
   const positions = new Map<string, PositionAccount>();
   const takes = new Map<string, TakeAccount>();
   const exits = new Map<string, ExitAccount>();
+  const parts = new Map<string, PartSaleAccount>();
   const calls = { scans: 0, reads: 0 };
   const byKeys = <T>(m: Map<string, T>) => async (keys: PublicKey[]) => {
     calls.reads++;
@@ -27,11 +28,13 @@ function fakeChain() {
     },
     allTakes: all(takes),
     allExits: all(exits),
+    allPartSales: all(parts),
     positions: byKeys(positions),
     takes: byKeys(takes),
     exits: byKeys(exits),
+    partSales: byKeys(parts),
   };
-  return { positions, takes, exits, calls, reader };
+  return { positions, takes, exits, parts, calls, reader };
 }
 
 function fakeSource(rows: { position: string; take: string }[]): OpenPositionsSource & { fail: boolean } {
@@ -192,4 +195,23 @@ test("chain_positions is read page by page, open rows on one network only", asyn
   assert.match(urls[0], /settled_at=is\.null/);
   assert.match(urls[0], / 0-999$/);
   assert.match(urls[1], / 1000-1999$/);
+});
+
+test("a position's unsettled partial sales load by address, in seq order; the scan reads them all", async () => {
+  const chain = fakeChain();
+  const t = key();
+  const p = key();
+  chain.takes.set(t.toBase58(), take());
+  // Three partial sales, the first already settled (its account closed).
+  chain.positions.set(p.toBase58(), { take: t, owner: key(), parts: 3, partsSettled: 1 } as unknown as PositionAccount);
+  for (const seq of [2, 1]) chain.parts.set(partSaleAddress(p, seq).toBase58(), { position: p, seq } as unknown as PartSaleAccount);
+  let now = 0;
+  const set = new OpenSet({ chain: chain.reader, programId: THESIS_PROGRAM_ID, source: fakeSource([{ position: p.toBase58(), take: t.toBase58() }]), now: () => now });
+  const scanned = await set.load(true);
+  assert.deepEqual(scanned.parts.get(p.toBase58())?.map((x) => x.account.seq), [1, 2]);
+  now = 60_000;
+  const read = await set.load(true);
+  assert.ok(!set.fullScan);
+  assert.deepEqual(read.parts.get(p.toBase58())?.map((x) => x.account.seq), [1, 2]);
+  assert.ok(read.parts.get(p.toBase58())?.[0].publicKey.equals(partSaleAddress(p, 1)));
 });

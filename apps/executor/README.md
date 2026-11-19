@@ -24,10 +24,11 @@ It reads positions and takes from the chain 100 at a time (`getMultipleAccounts`
 
 Every tick (20 s by default) it:
 
-1. **Signs entry prices** for positions that lack them, **sale prices** for positions their owners sold (at or after the sale, the same way as exits), and **exit prices** once a take's horizon has passed (`record_entry_prices` / `record_sale_prices` / `record_exit_prices`). A sold position takes no horizon prices, except the author's buy-in, which still sets the take's headline.
+1. **Signs entry prices** for positions that lack them, **sale prices** for positions their owners sold (at or after the sale, the same way as exits), and **exit prices** once a take's horizon has passed (`record_entry_prices` / `record_sale_prices` / `record_exit_prices`). A sold position takes no horizon prices, except the author's buy-in, which still sets the take's headline. Each partial sale (`sell_part`) gets its own sale prices at or after it, on the entry's basis (`record_part_prices`; its audit document has `moment: "part"` and `partSeq`).
 2. **Settles takes** whose author prices are in, or whose grace period (`max_price_delay_secs`) has passed.
-3. **Settles positions**, which closes them (and a sold position's exit account) and refunds their rent to whoever paid it: a sold position as soon as its sale prices are in, any other once its take has settled.
-4. **Mints badges** an author has earned but doesn't hold yet.
+3. **Settles partial sales** (`settle_part`), each position's in seq order, as soon as each one's prices are in (or at 0%, unscored, once its grace period has passed). They don't wait for the take.
+4. **Settles positions**, which closes them (and a sold position's exit account) and refunds their rent to whoever paid it: a sold position as soon as its sale prices are in, any other once its take has settled; never while a partial sale of it waits to settle.
+5. **Mints badges** an author has earned but doesn't hold yet.
 
 Only step 1 needs the settler's signature; the settler key pays for the rest. Instructions are packed into as few transactions as fit, each with a compute limit from `THESIS_COMPUTE_UNITS` rather than the 200k default.
 
