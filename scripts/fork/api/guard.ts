@@ -510,10 +510,11 @@ export type JupiterUse = {
   winnerMisses: number;
   /**
    * The shared routing (api/routing.ts): "hit" reused another build's, "wait" waited for one in
-   * flight, "miss" routed its own. Unset when the trade has no traded legs.
+   * flight, "scaled" rewrote one made at another stake moments ago, "miss" routed its own. Unset
+   * when the trade has no traded legs.
    */
-  template?: "hit" | "wait" | "miss";
-  /** Swap legs built from another wallet's template (no Jupiter call each). */
+  template?: "hit" | "wait" | "scaled" | "miss";
+  /** Swap legs built from another wallet's (or another stake's) template (no Jupiter call each). */
   templatedLegs: number;
   /** The first call the budget refused (lanes 2 and 3, or a full queue): routing answers 503 busy with it. */
   refused?: ApiError;

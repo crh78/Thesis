@@ -175,7 +175,7 @@ const laneOf = (prebuild?: boolean): Lane => (prebuild ? LANE.prebuild : LANE.ta
 
 /**
  * What a build's Jupiter use goes in its timings as: the wait for the budget as a step, the rest
- * as notes. A shared routing ("hit", "wait") was quoted up to TEMPLATE_TTL_MS before this build:
+ * as notes. A shared routing ("hit", "wait", "scaled") was quoted up to TEMPLATE_TTL_MS before this build:
  * its quotedAt says so, so a refresh doesn't keep those quotes past their age.
  */
 function noteUse(t: Timings, use: JupiterUse) {
@@ -185,7 +185,7 @@ function noteUse(t: Timings, use: JupiterUse) {
   if (use.template) t.note("template", `${use.template}${use.templatedLegs ? `, ${use.templatedLegs} legs` : ""}`);
   if (use.rateLimited) t.note("429s", use.rateLimited);
   if (use.refused) t.note("refused", use.refused.code);
-  if (use.template === "hit" || use.template === "wait") t.quotedAt = Math.min(t.quotedAt ?? Date.now(), Date.now() - TEMPLATE_TTL_MS);
+  if (use.template === "hit" || use.template === "wait" || use.template === "scaled") t.quotedAt = Math.min(t.quotedAt ?? Date.now(), Date.now() - TEMPLATE_TTL_MS);
 }
 
 /** The signed transactions' bytes, hashed: what tells a repeat of a submit from a different one. */

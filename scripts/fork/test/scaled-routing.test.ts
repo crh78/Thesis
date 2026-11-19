@@ -1,0 +1,175 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { Keypair, PublicKey } from "@solana/web3.js";
+import { ASSOCIATED_TOKEN_PROGRAM, JUPITER_V6_PROGRAM, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, USDC_MINT, associatedTokenAddress, legDiff, routeAmounts, type JupiterBuy } from "@thesis/venues/jupiter";
+import { emptyState } from "../../../packages/venues/bank/src/state.ts";
+import { JupiterBudget } from "../api/guard.ts";
+import type { MappedLeg } from "../api/legs.ts";
+import { Router, TEMPLATE_TTL_MS } from "../api/routing.ts";
+
+// Scaled routing (api/routing.ts, packages/venues/jupiter scale.ts): after one build of a trade,
+// builds at other stakes nearby rewrite its swap instructions instead of calling Jupiter.
+
+// A four-leg take: four stocks, one issuer token each, 25% each.
+const STOCKS = ["NVDA", "AAPL", "TSLA", "MSFT"].map((code, i) => ({ code, key: `equity:US:${code}`, mint: Keypair.fromSeed(new Uint8Array(32).fill(i + 1)).publicKey.toBase58() }));
+
+function bank() {
+  const s = emptyState();
+  for (const { code, key, mint } of STOCKS) {
+    s.underlyings[key] = { key, idHex: "00".repeat(32), cls: "equity", code, name: code, themes: [], mints: [mint], perps: [], pythFeedId: null, refPriceUsd: 180, refPriceSource: null, refPriceAt: null } as any;
+    s.tokens[mint] = {
+      mint, symbol: `${code}x`, issuer: "xStocks", issuerTag: null, decimals: 8, transferFeeBps: null, paused: false, defaultFrozen: false, permanentDelegate: false,
+      scaledUi: null, ratio: { comparable: true, underlyingPerUiToken: 1 }, usPersons: "no", jupiterPooledUsd: 1_000_000, probe: null, price: null,
+      liquidity: { ratioSuspect: false },
+    } as any;
+  }
+  return s;
+}
+
+const legs: MappedLeg[] = STOCKS.map(({ code, key }, index) => ({ index, name: code, key, how: "swap", spec: { weightBps: 2_500, leverage: 1, fadeVia: { none: {} } } as any, blocked: null }));
+
+/** Jupiter v6 `route` data: discriminator, a one-step route plan (Whirlpool, 100%), then the amounts. */
+function routeData(inAmount: bigint, quotedOut: bigint, slippageBps: number) {
+  const tail = Buffer.alloc(19);
+  tail.writeBigUInt64LE(inAmount, 0);
+  tail.writeBigUInt64LE(quotedOut, 8);
+  tail.writeUInt16LE(slippageBps, 16);
+  return Buffer.concat([Buffer.from("e517cb977ae3ad2a", "hex"), Buffer.from([1, 0, 0, 0, 17, 1, 100, 0, 1]), tail]).toString("base64");
+}
+
+/**
+ * A Jupiter that quotes any amount at a fixed price (`impact`: the quote's priceImpactPct) and
+ * answers swap-instructions with a `route` instruction for whoever asks, as the real one does.
+ */
+function jupiter(t: { mock: { method: Function } }, o: { impact?: string; data?: string } = {}) {
+  const calls: string[] = [];
+  t.mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    calls.push(url);
+    if (url.includes("/swap/v1/quote?")) {
+      const q = new URL(url).searchParams;
+      const amount = BigInt(q.get("amount")!);
+      const out = (amount * 11n) / 20n;
+      return new Response(JSON.stringify({
+        inputMint: USDC_MINT, outputMint: q.get("outputMint"), inAmount: String(amount), outAmount: String(out), otherAmountThreshold: String(out - (out * 100n) / 10_000n),
+        swapMode: "ExactIn", slippageBps: 100, platformFee: null, priceImpactPct: o.impact ?? "0", routePlan: [{ swapInfo: { label: "Whirlpool", inputMint: USDC_MINT, outputMint: q.get("outputMint"), inAmount: String(amount), outAmount: String(out) }, percent: 100 }],
+      }));
+    }
+    const body = JSON.parse(String(init!.body));
+    const user = new PublicKey(body.userPublicKey);
+    const quote = body.quoteResponse;
+    const out = associatedTokenAddress(user, quote.outputMint, TOKEN_2022_PROGRAM);
+    const acct = (pubkey: string, isSigner = false, isWritable = false) => ({ pubkey, isSigner, isWritable });
+    return new Response(JSON.stringify({
+      setupInstructions: [{ programId: ASSOCIATED_TOKEN_PROGRAM, accounts: [acct(user.toBase58(), true, true), acct(out, false, true), acct(user.toBase58()), acct(quote.outputMint), acct("11111111111111111111111111111111"), acct(TOKEN_2022_PROGRAM)], data: "AQ==" }],
+      swapInstruction: {
+        programId: JUPITER_V6_PROGRAM,
+        accounts: [acct(user.toBase58(), true), acct(associatedTokenAddress(user, USDC_MINT, TOKEN_PROGRAM), false, true), acct(out, false, true), acct(Keypair.fromSeed(new Uint8Array(32).fill(99)).publicKey.toBase58(), false, true)],
+        data: o.data ?? routeData(BigInt(quote.inAmount), BigInt(quote.outAmount), quote.slippageBps),
+      },
+      cleanupInstruction: null,
+      addressLookupTableAddresses: [],
+    }));
+  });
+  return calls;
+}
+
+/** A budget roomy enough that these tests count calls, not wait for the bucket. */
+const routerWith = () =>
+  new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null } as any, { budget: new JupiterBudget({ perMinute: 6_000, burst: 1_000, reserve: 0 }, () => Date.now()), readMints: null });
+const swaps = (r: { venue: unknown[] }) => r.venue as unknown as JupiterBuy[];
+const swapIx = (leg: JupiterBuy) => leg.instructions.find((ix) => ix.programId.toBase58() === JUPITER_V6_PROGRAM)!;
+
+test("a four-leg trade's second build at another amount makes no Jupiter call", async (t) => {
+  const calls = jupiter(t);
+  const router = routerWith();
+  const [a, payer] = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+  const first = await router.venueLegs(legs, a, 20, payer, undefined, { lane: 2 });
+  assert.deepEqual([first.jupiter.template, first.jupiter.quotes, first.jupiter.instructions], ["miss", 4, 4]);
+  assert.equal(calls.length, 8);
+  const second = await router.venueLegs(legs, a, 50, payer, undefined, { lane: 2 });
+  assert.deepEqual([second.jupiter.template, second.jupiter.calls, second.jupiter.templatedLegs], ["scaled", 0, 4]);
+  assert.equal(calls.length, 8, "no Jupiter call");
+  for (const [i, leg] of swaps(second).entries()) {
+    assert.equal(leg.inUsdc, 12_500_000n, "exactly the leg's part of the new stake");
+    assert.equal(leg.outAmount, 6_875_000n, "the expected output in proportion");
+    assert.equal(routeAmounts({ programId: JUPITER_V6_PROGRAM, accounts: [], data: swapIx(leg).data.toString("base64") })!.inAmount, 12_500_000n);
+    assert.equal(second.venue[i].output.account.toBase58(), associatedTokenAddress(a, STOCKS[i].mint, TOKEN_2022_PROGRAM), "proof of trade: the wallet's own account");
+  }
+  // Byte for byte what a fresh build at $50 makes (this Jupiter's price doesn't move with size).
+  const fresh = await routerWith().venueLegs(legs, a, 50, payer);
+  for (const [i, leg] of swaps(second).entries()) assert.equal(legDiff(leg, swaps(fresh)[i]), null);
+  assert.deepEqual(router.jupiterStats().templates, { size: 1, hits: 0, waits: 0, scaled: 1, misses: 1, templatedLegs: 4 });
+});
+
+test("another wallet scales the trade too, to its own accounts", async (t) => {
+  const calls = jupiter(t);
+  const router = routerWith();
+  const [a, b, payer] = [Keypair.generate().publicKey, Keypair.generate().publicKey, Keypair.generate().publicKey];
+  await router.venueLegs(legs, a, 20, payer);
+  const other = await router.venueLegs(legs, b, 10, payer);
+  assert.deepEqual([other.jupiter.template, other.jupiter.calls], ["scaled", 0]);
+  assert.equal(calls.length, 8);
+  const fresh = await routerWith().venueLegs(legs, b, 10, payer);
+  for (const [i, leg] of swaps(other).entries()) {
+    assert.equal(legDiff(leg, swaps(fresh)[i]), null);
+    assert.ok(!swapIx(leg).keys.some((k) => k.pubkey.equals(a)));
+  }
+});
+
+test("only within 0.4x-2.5x of a routing quoted in the last 20 seconds", async (t) => {
+  const calls = jupiter(t);
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const router = routerWith();
+  const user = () => Keypair.generate().publicKey;
+  await router.venueLegs(legs, user(), 20);
+  assert.equal((await router.venueLegs(legs, user(), 100)).jupiter.template, "miss", "5x: quoted afresh");
+  assert.equal((await router.venueLegs(legs, user(), 7)).jupiter.template, "miss", "0.35x: quoted afresh");
+  assert.equal(calls.length, 24);
+  // Either routing serves amounts near it: $50 from $20 or $100, $8 from $7 or $20.
+  for (const usd of [50, 8, 40, 250]) assert.equal((await router.venueLegs(legs, user(), usd)).jupiter.template, "scaled", `$${usd}`);
+  assert.equal(calls.length, 24);
+  t.mock.timers.tick(TEMPLATE_TTL_MS);
+  assert.equal((await router.venueLegs(legs, user(), 30)).jupiter.template, "miss", "past 20 s: quoted afresh");
+});
+
+test("a quote that moved the price 0.1% or more isn't scaled", async (t) => {
+  const calls = jupiter(t, { impact: "0.0015" });
+  const router = routerWith();
+  await router.venueLegs(legs, Keypair.generate().publicKey, 20);
+  assert.equal((await router.venueLegs(legs, Keypair.generate().publicKey, 25)).jupiter.template, "miss");
+  assert.equal(calls.length, 16);
+});
+
+test("a swap instruction scale.ts can't read isn't scaled", async (t) => {
+  const calls = jupiter(t, { data: "AA==" });
+  const router = routerWith();
+  await router.venueLegs(legs, Keypair.generate().publicKey, 20);
+  assert.equal((await router.venueLegs(legs, Keypair.generate().publicKey, 25)).jupiter.template, "miss");
+  assert.equal(calls.length, 16);
+});
+
+test("a wallet asking again after a scaled answer (a retry) quotes afresh, and the scaled-from routing goes", async (t) => {
+  const calls = jupiter(t);
+  const router = routerWith();
+  const [a, b, c] = [Keypair.generate().publicKey, Keypair.generate().publicKey, Keypair.generate().publicKey];
+  await router.venueLegs(legs, a, 20);
+  assert.equal((await router.venueLegs(legs, b, 50)).jupiter.template, "scaled");
+  const retry = await router.venueLegs(legs, b, 50);
+  assert.deepEqual([retry.jupiter.template, retry.jupiter.quotes, retry.jupiter.instructions], ["miss", 4, 4]);
+  assert.equal(calls.length, 16);
+  // The $20 routing is gone; the fresh $50 one serves others.
+  assert.equal((await router.venueLegs(legs, c, 50)).jupiter.template, "hit");
+  const near = await router.venueLegs(legs, c, 22);
+  assert.equal(near.jupiter.template, "scaled");
+  assert.equal(swaps(near)[0].inUsdc, 5_500_000n);
+  assert.equal(calls.length, 16);
+});
+
+test("a build while the first routing is in flight waits for it and scales it", async (t) => {
+  const calls = jupiter(t);
+  const router = routerWith();
+  const [x, y] = await Promise.all([router.venueLegs(legs, Keypair.generate().publicKey, 20), router.venueLegs(legs, Keypair.generate().publicKey, 30)]);
+  assert.deepEqual([x.jupiter.template, y.jupiter.template, y.jupiter.calls], ["miss", "scaled", 0]);
+  assert.equal(calls.length, 8);
+  assert.equal(swaps(y)[0].inUsdc, 7_500_000n);
+});
