@@ -15,6 +15,8 @@
   --glass-on: rgba(255, 255, 255, 0.1);
   --glow: rgba(130, 150, 255, 0.13);
   --gold: #f2d38a;
+  --note-blue: #9cc2ff;
+  --note-amber: #f5b85a;
   --up-soft: rgba(166, 227, 184, 0.12);
   /* The app's column: a phone's width. Desktop shows it centered with the QR beside it. */
   --col: 520px;
@@ -36,6 +38,8 @@
     --glass-on: rgba(15, 20, 25, 0.07);
     --glow: rgba(130, 150, 255, 0.1);
     --gold: #8a6a12;
+    --note-blue: #2f63c4;
+    --note-amber: #a5620b;
     --up-soft: rgba(30, 122, 67, 0.08);
     color-scheme: light;
   }
@@ -451,7 +455,12 @@ button.menu-item:hover { background: var(--glass-on); }
 .bell { position: relative; width: 34px; height: 34px; }
 .bell-dot { position: absolute; top: 6px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--down); }
 .nrow { display: grid; grid-template-columns: 34px 1fr 10px; gap: 12px; align-items: start; padding: 12px 0; border-bottom: 1px solid var(--hairline); }
-.nglyph { width: 34px; height: 34px; border-radius: 50%; background: var(--tile); display: grid; place-items: center; font-size: 15px; }
+.nglyph { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--text); background: color-mix(in srgb, currentColor 15%, transparent); }
+.ntone-up { color: var(--up); }
+.ntone-down { color: var(--down); }
+.ntone-gold { color: var(--gold); }
+.ntone-blue { color: var(--note-blue); }
+.ntone-amber { color: var(--note-amber); }
 .nmain { display: grid; gap: 3px; min-width: 0; font-size: 15px; }
 .nbody { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ndot { width: 8px; height: 8px; border-radius: 50%; background: var(--up); margin-top: 8px; }
