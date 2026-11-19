@@ -10,6 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { THESIS_PROGRAM_ID, USDC_DECIMALS, USDC_MINT_MAINNET } from "@thesis/chain";
+import { ACTIVE_TRADER_BUFFER, GLOBAL_TRADER_INDEX, PERP_ASSET_MAP, syncMakers } from "@thesis/venues/phoenix";
 
 export const REPO_ROOT = resolve(import.meta.dirname, "../..");
 export const DATA_DIR = join(REPO_ROOT, ".data/fork");
@@ -132,20 +133,58 @@ export function thesisLookupTable(): PublicKey | null {
  *
  * `freshMs`: accounts this process reset less than that long ago are left as they are (`fresh`),
  * and when none needed a reset the clock isn't touched either. 0 (the default): every account.
+ *
+ * `phoenixMakers`: when the accounts include Phoenix's PerpAssetMap (a Phoenix order or close is
+ * about to go out), also put mainnet's traders back to their mainnet state in Phoenix's active
+ * trader buffer (`syncPhoenixMakers`). Only a caller that holds the Phoenix lock asks for it
+ * (api/phoenix-lock.ts): the sync rewrites that whole account.
  */
-export async function refreshMarkets(accounts: PublicKey[], o: { freshMs?: number } = {}): Promise<{ reset: number; skipped: number; fresh: number }> {
+export async function refreshMarkets(accounts: PublicKey[], o: { freshMs?: number; phoenixMakers?: boolean } = {}): Promise<{ reset: number; skipped: number; fresh: number }> {
   const now = Date.now();
   const all = [...new Set(accounts.map(String))];
   const unique = all.filter((k) => !o.freshMs || (resetAt.get(k) ?? -Infinity) <= now - o.freshMs);
-  if (o.freshMs && !unique.length) return { reset: 0, skipped: 0, fresh: all.length };
+  const makers = o.phoenixMakers && all.includes(PERP_ASSET_MAP.toBase58()) ? syncPhoenixMakers() : null;
+  if (o.freshMs && !unique.length) {
+    await makers;
+    return { reset: 0, skipped: 0, fresh: all.length };
+  }
   // Some accounts can't be reset (programs, sysvars); those don't go stale anyway.
   const results = await Promise.allSettled(unique.map((k) => rpc("surfnet_resetAccount", [k])));
   // Ones that can't be reset count as fresh too: they're not market state.
   for (const k of unique) resetAt.set(k, now);
   if (resetAt.size > RESETS_KEPT) for (const [k, at] of resetAt) if (at <= now - 60_000) resetAt.delete(k);
   const failed = results.filter((r) => r.status === "rejected").length;
+  await makers;
   await syncClock();
   return { reset: unique.length - failed, skipped: failed, fresh: all.length - unique.length };
+}
+
+/** Mainnet, for reading what Surfpool would copy: the fork's datasource, else the public RPC. */
+const mainnet = () => new Connection(process.env.FORK_DATASOURCE_RPC_URL || "https://api.mainnet-beta.solana.com", "confirmed");
+
+/**
+ * Puts every trader that exists on mainnet back to its mainnet state in Phoenix's active trader
+ * buffer (packages/venues/phoenix makers.ts): fork fills never pile up against the makers, so a thin
+ * market like CoreWeave doesn't panic after a few fork trades. Our users' accounts (fork-only
+ * traders) keep their positions. One mainnet read (the buffer and the trader index, ~110 KB) and
+ * one write, only when something differs. Never throws: a sync that can't run (mainnet
+ * unreachable, a layout that doesn't check out) is logged and the trade goes out as before.
+ */
+export async function syncPhoenixMakers(log: (m: string) => void = console.log): Promise<void> {
+  const keys = [new PublicKey(ACTIVE_TRADER_BUFFER), new PublicKey(GLOBAL_TRADER_INDEX)];
+  try {
+    const [[mAtb, mGti], [fAtb, fGti]] = await Promise.all([
+      mainnet().getMultipleAccountsInfo(keys),
+      connection().getMultipleAccountsInfo(keys, "processed"),
+    ]);
+    if (!mAtb || !mGti || !fAtb || !fGti) return log("Phoenix makers: not synced (a trader account is missing)");
+    const out = syncMakers({ atb: fAtb.data, gti: fGti.data }, { atb: mAtb.data, gti: mGti.data });
+    if (!out) return;
+    await rpc("surfnet_setAccount", [ACTIVE_TRADER_BUFFER, { lamports: fAtb.lamports, owner: fAtb.owner.toBase58(), data: out.data.toString("hex") }]);
+    log(`Phoenix makers synced to mainnet: ${out.synced} entries${out.cleared ? `, ${out.cleared} set flat` : ""}${out.missing ? `, ${out.missing} not on the fork` : ""} (${out.forkOnly} fork-only kept)`);
+  } catch (e) {
+    log(`Phoenix makers: not synced (${e instanceof Error ? e.message : e})`);
+  }
 }
 
 /** Account → when this process last reset it from mainnet (refreshMarkets' `freshMs`). */

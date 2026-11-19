@@ -30,6 +30,7 @@
     "fork:cards-e2e": "node scripts/fork/cards-e2e.ts",
     "fork:phoenix-e2e": "node scripts/fork/phoenix-e2e.ts",
     "fork:phoenix-api-e2e": "node scripts/fork/phoenix-api-e2e.ts",
+    "fork:phoenix-makers-e2e": "node scripts/fork/phoenix-makers-e2e.ts",
     "fork:friend": "node scripts/fork/friend.ts",
     "fork:latency-bench": "node scripts/fork/latency-bench.ts"
   },
