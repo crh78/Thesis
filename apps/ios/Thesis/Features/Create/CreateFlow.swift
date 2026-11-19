@@ -370,10 +370,10 @@ struct BuildingView: View {
 
     private let phases: [(title: String, sub: String, orb: OrbState)] = [
         ("Reading your take", "Working out what has to be true for you to be right.", .working),
-        ("Searching for matches", "Stocks, predictions and other picks tied to your idea.", .searching),
+        ("Searching for matches", "Assets tied to your idea.", .searching),
         ("Checking the fit", "How closely each pick tracks your take, and how easy it is to buy.", .solving)
     ]
-    private let labels = ["Reading your take", "Finding stocks and predictions that match", "Checking how closely each one fits"]
+    private let labels = ["Reading your take", "Finding assets that match", "Checking how closely each one fits"]
 
     private var done: Bool { step >= phases.count && built }
     private var noExposure: String? { draft.noExposureReason }
