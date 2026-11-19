@@ -21,6 +21,7 @@ import {
   escrowVaultAddress,
   exitAddress,
   feeVaultAddress,
+  partSaleAddress,
   positionAddress,
   profileAddress,
   programDataAddress,
@@ -423,6 +424,68 @@ export async function exitPositionIx(
       ownerUsdc: ata(mint, p.owner),
       usdcMint: mint,
       tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .instruction();
+}
+
+/**
+ * Records that the owner sold `bps` (1 to 9,999) of what's left of a position, before the horizon,
+ * as partial sale `seq` (the position's `parts`), and pays that fraction of its escrowed prediction
+ * and card share back to the owner's USDC account. Goes in the same transaction as the owner's
+ * swaps of that fraction back to USDC. What's left must stay at least the config's minimum stake
+ * (`partSale` in math.ts checks it). `payer` pays the part's rent and gets it back when it settles.
+ */
+export async function sellPartIx(
+  program: ThesisProgram,
+  p: { owner: PublicKey; take: PublicKey; position: PublicKey; seq: number; bps: number; payer?: PublicKey; usdcMint?: PublicKey },
+): Promise<TransactionInstruction> {
+  const mint = usdc(p.usdcMint);
+  return program.methods
+    .sellPart(p.bps)
+    .accountsPartial({
+      owner: p.owner,
+      payer: p.payer ?? p.owner,
+      take: p.take,
+      position: p.position,
+      partSale: partSaleAddress(p.position, p.seq, program.programId),
+      systemProgram: SystemProgram.programId,
+      config: configAddress(program.programId),
+      escrowVault: escrowVaultAddress(program.programId),
+      ownerUsdc: ata(mint, p.owner),
+      usdcMint: mint,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .instruction();
+}
+
+/** Sale prices for partial sale `seq` of a position, at or after that sale. */
+export async function recordPartPricesIx(
+  program: ThesisProgram,
+  p: RecordPricesParams & { seq: number },
+): Promise<TransactionInstruction> {
+  return program.methods
+    .recordPartPrices({ prices: p.prices, sourceHash: p.sourceHash })
+    .accountsPartial({ ...recordPricesAccounts(program, p), partSale: partSaleAddress(p.position, p.seq, program.programId) })
+    .instruction();
+}
+
+/**
+ * Settles partial sale `seq` (they settle in order, before the position) and closes it; its rent
+ * goes back to `rentPayer` (read it from the part's account).
+ */
+export async function settlePartIx(
+  program: ThesisProgram,
+  p: { take: PublicKey; position: PublicKey; owner: PublicKey; seq: number; rentPayer: PublicKey },
+): Promise<TransactionInstruction> {
+  return program.methods
+    .settlePart()
+    .accountsPartial({
+      config: configAddress(program.programId),
+      take: p.take,
+      position: p.position,
+      ownerProfile: profileAddress(p.owner, program.programId),
+      partSale: partSaleAddress(p.position, p.seq, program.programId),
+      rentPayer: p.rentPayer,
     })
     .instruction();
 }

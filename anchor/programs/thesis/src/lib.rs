@@ -110,6 +110,10 @@ pub mod thesis {
         instructions::exit::handle_exit_position(ctx)
     }
 
+    pub fn sell_part(ctx: Context<SellPart>, bps: u16) -> Result<()> {
+        instructions::part::handle_sell_part(ctx, bps)
+    }
+
     pub fn claim_creator_fees(ctx: Context<ClaimCreatorFees>) -> Result<()> {
         instructions::position::handle_claim_creator_fees(ctx)
     }
@@ -131,6 +135,13 @@ pub mod thesis {
         instructions::prices::handle_record_sale_prices(ctx, args)
     }
 
+    pub fn record_part_prices(
+        ctx: Context<RecordPartPrices>,
+        args: RecordPricesArgs,
+    ) -> Result<()> {
+        instructions::prices::handle_record_part_prices(ctx, args)
+    }
+
     // Settlement
 
     pub fn settle_take(ctx: Context<SettleTake>) -> Result<()> {
@@ -139,6 +150,10 @@ pub mod thesis {
 
     pub fn settle_position(ctx: Context<SettlePosition>) -> Result<()> {
         instructions::settle::handle_settle_position(ctx)
+    }
+
+    pub fn settle_part(ctx: Context<SettlePart>) -> Result<()> {
+        instructions::settle::handle_settle_part(ctx)
     }
 
     pub fn mint_badge(ctx: Context<MintBadge>, kind: BadgeKind) -> Result<()> {

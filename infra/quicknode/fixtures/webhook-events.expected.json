@@ -98,7 +98,8 @@
       "owner": "BRfeVhakULdf41zG4hj2rLTV3Ych8ZY5gma3sPRLyhwi",
       "side": "back",
       "exitedAt": "1790000000",
-      "escrowReturned": "0"
+      "escrowReturned": "0",
+      "stake": "10000000"
     }
   },
   {
@@ -111,6 +112,43 @@
       "take": "3fo9CmA9Cn6G3NJ9Co4FtkG8PjWNfcDEjuxZKb96jDpL",
       "author": "BRfeVhakULdf41zG4hj2rLTV3Ych8ZY5gma3sPRLyhwi",
       "closedAt": "1790000000"
+    }
+  },
+  {
+    "signature": "5vcsfH9nTmrTA8nknDToVCuJDZm8b83Fst3m9smHg1Vn9Z8qvbvupanu8RLTT2YvB4iDSXeB6C8iwPwK5RE4in7r",
+    "ordinal": 0,
+    "slot": 380000001,
+    "block_time": 1800000001,
+    "name": "positionPartSold",
+    "data": {
+      "take": "3fo9CmA9Cn6G3NJ9Co4FtkG8PjWNfcDEjuxZKb96jDpL",
+      "position": "Fbyi5JTiXs775ELSVkUzxhqLBFCrUeHk9dcC7BQd47aZ",
+      "owner": "BB3Ss6kNAsHn64ynexWEX9HZbPoK44LJH37Gx6fAiQSE",
+      "side": "back",
+      "seq": 0,
+      "bps": 2000,
+      "stakeSold": "5000000",
+      "remainingStake": "20000000",
+      "escrowReturned": "0",
+      "soldAt": "1790000100"
+    }
+  },
+  {
+    "signature": "53TznopqRhqkG4hdGGBhYkj1r9rQjntkNt8HYVgu8GSbrBc9nG82DaF4MNZZBduh4DS5dRwSubaeydqvMcRZ1V2w",
+    "ordinal": 0,
+    "slot": 380000001,
+    "block_time": 1800000001,
+    "name": "partSettled",
+    "data": {
+      "take": "3fo9CmA9Cn6G3NJ9Co4FtkG8PjWNfcDEjuxZKb96jDpL",
+      "position": "Fbyi5JTiXs775ELSVkUzxhqLBFCrUeHk9dcC7BQd47aZ",
+      "owner": "BB3Ss6kNAsHn64ynexWEX9HZbPoK44LJH37Gx6fAiQSE",
+      "side": "back",
+      "seq": 0,
+      "stake": "5000000",
+      "returnBps": "800",
+      "pnl": "400000",
+      "scored": true
     }
   },
   {
@@ -140,7 +178,8 @@
       "pnl": "3125000",
       "scored": true,
       "exited": false,
-      "escrowReturned": "0"
+      "escrowReturned": "0",
+      "stake": "25000000"
     }
   },
   {

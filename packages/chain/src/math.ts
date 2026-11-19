@@ -73,3 +73,36 @@ export function positionReturnBps(
   }
   return total === 0n ? 0 : Number(weighted / total);
 }
+
+/**
+ * How a partial sale of `bps` (1 to 9,999) of a position's remaining stake splits it, mirroring
+ * `part_sale_split` in the program: the cost basis sold rounds down, and must be at least one base
+ * unit. `allowed` also applies the program's other rule, that what's left stays at least
+ * `minStake` (otherwise only selling all, `exit_position`, is possible). Null for a `bps` the
+ * program refuses outright.
+ */
+export function partSale(
+  remaining: bigint,
+  bps: number,
+  minStake?: bigint,
+): { sold: bigint; left: bigint; allowed: boolean } | null {
+  if (!Number.isInteger(bps) || bps < 1 || bps >= Number(BPS_DENOMINATOR)) return null;
+  const sold = (remaining * BigInt(bps)) / BPS_DENOMINATOR;
+  if (sold <= 0n) return null;
+  const left = remaining - sold;
+  return { sold, left, allowed: minStake == null || left >= minStake };
+}
+
+/**
+ * The largest partial sale allowed now, in bps of the remaining stake, or null when only selling
+ * all is (what's left would drop below `minStake` at any fraction). Mirrors the program's floor.
+ */
+export function maxPartialBps(remaining: bigint, minStake: bigint): number | null {
+  if (remaining <= minStake) return null;
+  // The largest bps with remaining − floor(remaining × bps / 10⁴) ≥ minStake.
+  let bps = Number(((remaining - minStake) * BPS_DENOMINATOR) / remaining);
+  bps = Math.min(bps, Number(BPS_DENOMINATOR) - 1);
+  while (bps > 0 && !partSale(remaining, bps, minStake)?.allowed) bps--;
+  while (bps + 1 < Number(BPS_DENOMINATOR) && partSale(remaining, bps + 1, minStake)?.allowed) bps++;
+  return bps > 0 && partSale(remaining, bps, minStake)?.allowed ? bps : null;
+}

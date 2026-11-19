@@ -100,4 +100,14 @@ pub enum ThesisError {
     InvalidBadgeUriBase,
     #[msg("A take's author can't fade it")]
     AuthorCannotFade,
+    #[msg("What's left after a partial sale must be at least the minimum stake; sell all instead")]
+    RemainderBelowMinimum,
+    #[msg("A partial sale sells 1 to 9,999 bps of what's left, and at least one base unit")]
+    InvalidSaleFraction,
+    #[msg("This position already has the most partial sales waiting to settle")]
+    TooManyOpenSales,
+    #[msg("Partial sales settle in order, and before the position itself")]
+    PartsNotSettled,
+    #[msg("This position is already sold")]
+    AlreadySold,
 }

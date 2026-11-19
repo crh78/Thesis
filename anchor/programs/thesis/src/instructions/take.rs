@@ -207,6 +207,10 @@ pub fn handle_create_take<'info>(
         exited: false,
         escrowed,
         bump: ctx.bumps.author_position,
+        remaining: args.stake,
+        parts: 0,
+        parts_settled: 0,
+        realized_pnl: 0,
     });
 
     emit_cpi!(TakeCreated {

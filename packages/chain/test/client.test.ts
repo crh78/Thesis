@@ -32,6 +32,12 @@ import {
   positionAddress,
   recordEntryPricesIx,
   recordExitPricesIx,
+  recordPartPricesIx,
+  sellPartIx,
+  settlePartIx,
+  partSaleAddress,
+  partSale,
+  maxPartialBps,
   settlePositionIx,
   settleTakeIx,
   splitFee,
@@ -193,6 +199,16 @@ test("every instruction builds against the IDL", async () => {
     acceptAdminIx(program, { newAdmin: backer }),
     updateAllowlistIx(program, { allowlistAdmin: appPayer, tradePrograms: DEFAULT_TRADE_PROGRAMS }),
     acceptAllowlistAdminIx(program, { newAllowlistAdmin: backer }),
+    sellPartIx(program, { owner: backer, take, position, seq: 2, bps: 2_500, payer: appPayer }),
+    recordPartPricesIx(program, {
+      settler: appPayer,
+      take,
+      position,
+      seq: 2,
+      prices: [{ leg: 0, price: new BN(10_000_000_000), publishedAt: new BN(1_800_000_060) }],
+      sourceHash: Array(32).fill(3),
+    }),
+    settlePartIx(program, { take, position, owner: backer, seq: 2, rentPayer: appPayer }),
   ]);
   for (const ix of ixs) assert.ok(ix.programId.equals(THESIS_PROGRAM_ID));
 
@@ -200,6 +216,39 @@ test("every instruction builds against the IDL", async () => {
   for (const ix of [entry, exit]) {
     assert.ok(ix.keys.some((k) => k.pubkey.equals(appPayer) && k.isSigner), "settler signs");
     assert.ok(ix.keys.some((k) => k.pubkey.equals(position) && k.isWritable));
+  }
+});
+
+test("partial sales: each seq has its own account, and the math mirrors the program", async () => {
+  const take = takeAddress(author, 1n);
+  const position = positionAddress(take, backer, 42n);
+  const part = partSaleAddress(position, 2);
+  assert.ok(!part.equals(partSaleAddress(position, 3)));
+  assert.ok(!part.equals(partSaleAddress(positionAddress(take, backer, 43n), 2)));
+  const [sell, settle] = await Promise.all([
+    sellPartIx(program, { owner: backer, take, position, seq: 2, bps: 2_500, payer: appPayer }),
+    settlePartIx(program, { take, position, owner: backer, seq: 2, rentPayer: appPayer }),
+  ]);
+  assert.ok(sell.keys.some((k) => k.pubkey.equals(part) && k.isWritable));
+  assert.ok(sell.keys.some((k) => k.pubkey.equals(backer) && k.isSigner));
+  assert.ok(settle.keys.some((k) => k.pubkey.equals(part) && k.isWritable));
+
+  const min = 10_000_000n;
+  assert.equal(partSale(40_000_000n, 0), null);
+  assert.equal(partSale(40_000_000n, 10_000), null);
+  assert.deepEqual(partSale(40_000_000n, 2_500, min), { sold: 10_000_000n, left: 30_000_000n, allowed: true });
+  assert.deepEqual(partSale(20_000_000n, 5_000, min), { sold: 10_000_000n, left: 10_000_000n, allowed: true });
+  assert.equal(partSale(20_000_000n, 5_001, min)?.allowed, false);
+  // A $10 position can only sell all; $15 up to a third; $20 half.
+  assert.equal(maxPartialBps(10_000_000n, min), null);
+  assert.equal(maxPartialBps(15_000_000n, min), 3_333);
+  assert.equal(maxPartialBps(20_000_000n, min), 5_000);
+  assert.equal(maxPartialBps(1_000_000_000n, min), 9_900);
+  for (const r of [10_000_001n, 10_500_000n, 33_333_333n, 123_456_789n]) {
+    const m = maxPartialBps(r, min);
+    if (m == null) continue;
+    assert.equal(partSale(r, m, min)?.allowed, true);
+    assert.notEqual(partSale(r, m + 1, min)?.allowed, true);
   }
 });
 

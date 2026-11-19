@@ -68,6 +68,16 @@ export function exitAddress(position: PublicKey, programId = THESIS_PROGRAM_ID):
 }
 
 /**
+ * Where partial sale `seq` of a position lives (`sell_part`: its stake, sale time and sale
+ * prices). Seqs count up from 0 (the position's `parts`); each closes once it settles.
+ */
+export function partSaleAddress(position: PublicKey, seq: number, programId = THESIS_PROGRAM_ID): PublicKey {
+  const buf = Buffer.alloc(2);
+  buf.writeUInt16LE(seq);
+  return pda([SEEDS.partSale, position.toBuffer(), buf], programId);
+}
+
+/**
  * A trade's proof-of-trade ticket, for the position it will open (for a take, the author's buy-in
  * position). Exists only while the trade runs: `begin_trade` creates it, the receipt closes it.
  */

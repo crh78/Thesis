@@ -1260,6 +1260,63 @@
       ]
     },
     {
+      "name": "record_part_prices",
+      "discriminator": [
+        66,
+        7,
+        54,
+        41,
+        115,
+        193,
+        21,
+        194
+      ],
+      "accounts": [
+        {
+          "name": "settler",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "take",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position",
+          "relations": [
+            "part_sale"
+          ]
+        },
+        {
+          "name": "part_sale",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "RecordPricesArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "record_sale_prices",
       "discriminator": [
         154,
@@ -1315,6 +1372,166 @@
           }
         }
       ]
+    },
+    {
+      "name": "sell_part",
+      "discriminator": [
+        205,
+        244,
+        4,
+        66,
+        161,
+        93,
+        222,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the part's rent and gets it back when the part settles."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "take",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "part_sale",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  95,
+                  115,
+                  97,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "position"
+              },
+              {
+                "kind": "account",
+                "path": "position.parts",
+                "account": "Position"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "escrow_vault",
+          "writable": true
+        },
+        {
+          "name": "owner_usdc",
+          "docs": [
+            "The owner's USDC account, where the escrow goes back."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "settle_part",
+      "discriminator": [
+        222,
+        208,
+        14,
+        156,
+        151,
+        224,
+        7,
+        96
+      ],
+      "accounts": [
+        {
+          "name": "config"
+        },
+        {
+          "name": "take",
+          "relations": [
+            "position"
+          ]
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "relations": [
+            "part_sale"
+          ]
+        },
+        {
+          "name": "owner_profile",
+          "writable": true
+        },
+        {
+          "name": "part_sale",
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true,
+          "relations": [
+            "part_sale"
+          ]
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "settle_position",
@@ -1665,6 +1882,19 @@
       ]
     },
     {
+      "name": "PartSale",
+      "discriminator": [
+        59,
+        158,
+        22,
+        41,
+        152,
+        48,
+        69,
+        154
+      ]
+    },
+    {
       "name": "Position",
       "discriminator": [
         170,
@@ -1797,6 +2027,32 @@
       ]
     },
     {
+      "name": "PartPricesRecorded",
+      "discriminator": [
+        88,
+        50,
+        252,
+        181,
+        101,
+        183,
+        225,
+        144
+      ]
+    },
+    {
+      "name": "PartSettled",
+      "discriminator": [
+        106,
+        228,
+        62,
+        163,
+        83,
+        183,
+        171,
+        40
+      ]
+    },
+    {
       "name": "PositionExited",
       "discriminator": [
         157,
@@ -1820,6 +2076,19 @@
         117,
         101,
         121
+      ]
+    },
+    {
+      "name": "PositionPartSold",
+      "discriminator": [
+        230,
+        59,
+        150,
+        96,
+        171,
+        249,
+        117,
+        218
       ]
     },
     {
@@ -2141,6 +2410,31 @@
       "code": 6047,
       "name": "AuthorCannotFade",
       "msg": "A take's author can't fade it"
+    },
+    {
+      "code": 6048,
+      "name": "RemainderBelowMinimum",
+      "msg": "What's left after a partial sale must be at least the minimum stake; sell all instead"
+    },
+    {
+      "code": 6049,
+      "name": "InvalidSaleFraction",
+      "msg": "A partial sale sells 1 to 9,999 bps of what's left, and at least one base unit"
+    },
+    {
+      "code": 6050,
+      "name": "TooManyOpenSales",
+      "msg": "This position already has the most partial sales waiting to settle"
+    },
+    {
+      "code": 6051,
+      "name": "PartsNotSettled",
+      "msg": "Partial sales settle in order, and before the position itself"
+    },
+    {
+      "code": 6052,
+      "name": "AlreadySold",
+      "msg": "This position is already sold"
     }
   ],
   "types": [
@@ -2846,6 +3140,161 @@
       }
     },
     {
+      "name": "PartPricesRecorded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "take",
+            "type": "pubkey"
+          },
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "seq",
+            "type": "u16"
+          },
+          {
+            "name": "legs",
+            "type": "u16"
+          },
+          {
+            "name": "source_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PartSale",
+      "docs": [
+        "Part of a position its owner sold before the horizon (`sell_part`): a fraction of what was",
+        "left. It scores on its own sale prices (`record_part_prices`), entry to sale, on `stake`, and",
+        "settles on its own (`settle_part`, in seq order) while the rest of the position runs on.",
+        "At `[PART_SALE_SEED, position, seq u16 LE]`. Closed when it settles; rent to `rent_payer`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "seq",
+            "type": "u16"
+          },
+          {
+            "name": "bps",
+            "docs": [
+              "The fraction of the position's remaining stake sold, in bps (1 to 9,999)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "stake",
+            "docs": [
+              "The cost basis sold, USDC base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "escrow_returned",
+            "docs": [
+              "The escrowed prediction and card share returned to the owner at the sale."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sold_at",
+            "type": "i64"
+          },
+          {
+            "name": "rent_payer",
+            "docs": [
+              "Gets the rent back when the part settles."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "price_set",
+            "docs": [
+              "Bit i set = leg i's sale price is recorded."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "prices",
+            "docs": [
+              "One sale price per leg of the take, 8 decimals, at or after `sold_at`."
+            ],
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PartSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "take",
+            "type": "pubkey"
+          },
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": {
+              "defined": {
+                "name": "Side"
+              }
+            }
+          },
+          {
+            "name": "seq",
+            "type": "u16"
+          },
+          {
+            "name": "stake",
+            "type": "u64"
+          },
+          {
+            "name": "return_bps",
+            "type": "i64"
+          },
+          {
+            "name": "pnl",
+            "type": "i64"
+          },
+          {
+            "name": "scored",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
       "name": "Position",
       "docs": [
         "One back or fade. Temporary: settling it folds the result into the owner's profile,",
@@ -2951,6 +3400,36 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "remaining",
+            "docs": [
+              "Cost basis still held, in USDC base units: `stake` at open, lowered by each partial sale",
+              "(`sell_part`). The final settlement scores on this."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "parts",
+            "docs": [
+              "Partial sales made so far; the next one's seq (its `PartSale` PDA)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "parts_settled",
+            "docs": [
+              "Partial sales settled so far. They settle in order (seq = `parts_settled`), and the",
+              "position settles only once every one has (`parts_settled == parts`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "realized_pnl",
+            "docs": [
+              "P&L realized by settled partial sales, in USDC base units (scored or not)."
+            ],
+            "type": "i64"
           }
         ]
       }
@@ -2991,6 +3470,13 @@
             "name": "escrow_returned",
             "docs": [
               "The escrowed prediction share, returned to the owner at the sale."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stake",
+            "docs": [
+              "The cost basis sold: what was left after any partial sales."
             ],
             "type": "u64"
           }
@@ -3053,6 +3539,65 @@
       }
     },
     {
+      "name": "PositionPartSold",
+      "docs": [
+        "The owner sold part of a position before the horizon (`sell_part`). The part scores on its",
+        "own sale prices and settles on its own (`PartSettled`); the rest runs on."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "take",
+            "type": "pubkey"
+          },
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": {
+              "defined": {
+                "name": "Side"
+              }
+            }
+          },
+          {
+            "name": "seq",
+            "type": "u16"
+          },
+          {
+            "name": "bps",
+            "type": "u16"
+          },
+          {
+            "name": "stake_sold",
+            "type": "u64"
+          },
+          {
+            "name": "remaining_stake",
+            "type": "u64"
+          },
+          {
+            "name": "escrow_returned",
+            "docs": [
+              "The sold fraction of the escrowed prediction and card share, returned to the owner."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sold_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "PositionSettled",
       "type": {
         "kind": "struct",
@@ -3100,6 +3645,13 @@
             "name": "escrow_returned",
             "docs": [
               "Escrow returned to the owner."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stake",
+            "docs": [
+              "The cost basis this settlement scored: what was left after any partial sales."
             ],
             "type": "u64"
           }
@@ -3860,6 +4412,22 @@
       ],
       "type": "u16",
       "value": "100"
+    },
+    {
+      "name": "MAX_OPEN_PARTS",
+      "docs": [
+        "Most partial sales a position can have waiting to settle at once."
+      ],
+      "type": "u16",
+      "value": "8"
+    },
+    {
+      "name": "PART_SALE_SEED",
+      "docs": [
+        "A partial sale, at `[PART_SALE_SEED, position, seq u16 LE]`."
+      ],
+      "type": "bytes",
+      "value": "[112, 97, 114, 116, 95, 115, 97, 108, 101]"
     },
     {
       "name": "POSITION_SEED",

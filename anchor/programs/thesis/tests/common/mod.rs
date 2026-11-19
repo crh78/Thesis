@@ -135,6 +135,10 @@ pub fn exit_pda(position: &Pubkey) -> Pubkey {
     pda(&[EXIT_SEED, position.as_ref()])
 }
 
+pub fn part_sale_pda(position: &Pubkey, seq: u16) -> Pubkey {
+    pda(&[PART_SALE_SEED, position.as_ref(), &seq.to_le_bytes()])
+}
+
 pub fn ticket_pda(owner: &Pubkey, position: &Pubkey) -> Pubkey {
     pda(&[TICKET_SEED, owner.as_ref(), position.as_ref()])
 }
@@ -1129,6 +1133,133 @@ impl Env {
         let settler = self.settler.insecure_clone();
         let ix = self.record_sale_prices_ix(&settler.pubkey(), take, position, prices);
         self.send(&[ix], &[&settler])
+    }
+
+    pub fn sell_part_ix(
+        &self,
+        owner: &Pubkey,
+        payer: &Pubkey,
+        take: &Pubkey,
+        position: &Pubkey,
+        seq: u16,
+        bps: u16,
+    ) -> Instruction {
+        Instruction::new_with_bytes(
+            ::thesis::id(),
+            &::thesis::instruction::SellPart { bps }.data(),
+            ::thesis::accounts::SellPart {
+                event_authority: event_authority_pda(),
+                program: ::thesis::id(),
+                owner: *owner,
+                payer: *payer,
+                take: *take,
+                position: *position,
+                part_sale: part_sale_pda(position, seq),
+                system_program: system_program::ID,
+                config: config_pda(),
+                escrow_vault: escrow_vault_pda(),
+                owner_usdc: *self.usdc_of.get(owner).expect("a user made by Env::user"),
+                usdc_mint: self.mint,
+                token_program: token_program(),
+            }
+            .to_account_metas(None),
+        )
+    }
+
+    /// Sells `bps` of what's left of a position, with the app's fee payer paying the part's rent.
+    /// Its seq is the position's next one.
+    pub fn sell_part(
+        &mut self,
+        owner: &User,
+        take: &Pubkey,
+        position: &Pubkey,
+        bps: u16,
+    ) -> TxResult {
+        let seq = self.fetch::<Position>(position).parts;
+        let payer = self.app_payer.insecure_clone();
+        let ix = self.sell_part_ix(&owner.pubkey(), &payer.pubkey(), take, position, seq, bps);
+        self.send(&[ix], &[&payer, &owner.key])
+    }
+
+    pub fn record_part_prices_ix(
+        &self,
+        settler: &Pubkey,
+        take: &Pubkey,
+        position: &Pubkey,
+        seq: u16,
+        prices: Vec<LegPrice>,
+    ) -> Instruction {
+        Instruction::new_with_bytes(
+            ::thesis::id(),
+            &::thesis::instruction::RecordPartPrices {
+                args: RecordPricesArgs {
+                    prices,
+                    source_hash: [5; 32],
+                },
+            }
+            .data(),
+            ::thesis::accounts::RecordPartPrices {
+                event_authority: event_authority_pda(),
+                program: ::thesis::id(),
+                settler: *settler,
+                config: config_pda(),
+                take: *take,
+                position: *position,
+                part_sale: part_sale_pda(position, seq),
+            }
+            .to_account_metas(None),
+        )
+    }
+
+    /// Records a partial sale's prices, signed by the configured settler.
+    pub fn record_part(
+        &mut self,
+        take: &Pubkey,
+        position: &Pubkey,
+        seq: u16,
+        prices: Vec<LegPrice>,
+    ) -> TxResult {
+        let settler = self.settler.insecure_clone();
+        let ix = self.record_part_prices_ix(&settler.pubkey(), take, position, seq, prices);
+        self.send(&[ix], &[&settler])
+    }
+
+    pub fn settle_part_ix(
+        &self,
+        take: &Pubkey,
+        position: &Pubkey,
+        owner: &Pubkey,
+        seq: u16,
+        rent_payer: &Pubkey,
+    ) -> Instruction {
+        Instruction::new_with_bytes(
+            ::thesis::id(),
+            &::thesis::instruction::SettlePart {}.data(),
+            ::thesis::accounts::SettlePart {
+                event_authority: event_authority_pda(),
+                program: ::thesis::id(),
+                config: config_pda(),
+                take: *take,
+                position: *position,
+                owner_profile: profile_pda(owner),
+                part_sale: part_sale_pda(position, seq),
+                rent_payer: *rent_payer,
+            }
+            .to_account_metas(None),
+        )
+    }
+
+    /// Settles partial sale `seq`, its rent back to the app's fee payer (who paid it in `sell_part`).
+    pub fn settle_part(
+        &mut self,
+        take: &Pubkey,
+        position: &Pubkey,
+        owner: &Pubkey,
+        seq: u16,
+    ) -> TxResult {
+        let payer = self.app_payer.pubkey();
+        let ix = self.settle_part_ix(take, position, owner, seq, &payer);
+        self.crank(ix)
     }
 
     /// Sends one instruction paid for and signed by the admin (any funded key works for cranks).

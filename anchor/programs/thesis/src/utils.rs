@@ -237,6 +237,30 @@ pub fn sale_return_raw(legs: &[LegSpec], position: &Position, exit: &Exit) -> Op
     return_bps(legs, position, exit.price_set, |i| exit.prices[i])
 }
 
+/// A partial sale's return in bps, entry to that sale. `None` while a price is missing.
+pub fn part_return_bps(legs: &[LegSpec], position: &Position, part: &PartSale) -> Option<i64> {
+    part_return_raw(legs, position, part).and_then(|r| i64::try_from(r).ok())
+}
+
+/// The part's return before it's narrowed to `i64`; `None` while a price is missing.
+pub fn part_return_raw(legs: &[LegSpec], position: &Position, part: &PartSale) -> Option<i128> {
+    return_bps(legs, position, part.price_set, |i| part.prices[i])
+}
+
+/// How a partial sale of `bps` (1 to 9,999) splits a position's remaining stake: the cost basis
+/// sold, rounded down, and what's left. The sold part must be at least one base unit.
+/// `partSale` in packages/chain mirrors this.
+pub fn part_sale_split(remaining: u64, bps: u16) -> Result<(u64, u64)> {
+    require!(
+        bps >= 1 && (bps as u64) < BPS_DENOMINATOR,
+        ThesisError::InvalidSaleFraction
+    );
+    let sold = u64::try_from((remaining as u128) * (bps as u128) / BPS_DENOMINATOR as u128)
+        .map_err(|_| error!(ThesisError::MathOverflow))?;
+    require!(sold > 0, ThesisError::InvalidSaleFraction);
+    Ok((sold, remaining - sold))
+}
+
 /// Refuses prices that would make a complete return, or its P&L on `stake`, too large to
 /// record (security review L-1). Without this, such a return reads as "price missing" and the
 /// position settles at 0%, unscored, after the grace period; now the settler's call fails with
@@ -416,6 +440,10 @@ mod props {
             exited: false,
             escrowed: 0,
             bump: 0,
+            remaining: 10_000_000,
+            parts: 0,
+            parts_settled: 0,
+            realized_pnl: 0,
         };
         (specs, p)
     }
@@ -568,6 +596,24 @@ mod props {
                 bump: 0,
             };
             prop_assert_eq!(sale_return_bps(&specs, &p, &exit), position_return_bps(&specs, &p));
+        }
+    }
+
+    proptest! {
+        /// A partial sale sells the floor of its fraction, at least a base unit, and the sold part
+        /// plus what's left is the remaining stake, exactly.
+        #[test]
+        fn part_sales_split_the_remaining_stake(remaining in any::<u64>(), bps in any::<u16>()) {
+            let floor = remaining as u128 * bps as u128 / 10_000;
+            match part_sale_split(remaining, bps) {
+                Ok((sold, left)) => {
+                    prop_assert!((1..10_000).contains(&bps));
+                    prop_assert_eq!(sold as u128, floor);
+                    prop_assert!(sold > 0);
+                    prop_assert_eq!(sold as u128 + left as u128, remaining as u128);
+                }
+                Err(_) => prop_assert!(bps == 0 || bps >= 10_000 || floor == 0),
+            }
         }
     }
 }
