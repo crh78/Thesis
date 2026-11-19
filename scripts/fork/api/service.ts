@@ -2533,14 +2533,20 @@ export class ForkService {
     const refreshed = await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs }));
     // lib.ts says how many it left (`fresh`); a fork that doesn't say may have left any of them.
     const left = (refreshed as { fresh?: unknown } | undefined)?.fresh;
-    return resendIfStale(() => (accept ? this.#sendAccepted(txs, t, accept) : this.#sendConfirmed(txs, t)), {
-      stale: freshMs > 0 && market.length > 0 && (typeof left === "number" ? left > 0 : true),
-      reset: () => {
-        t.note("resent", "markets reset");
-        return t.time("refresh", () => this.#o.fork.refreshMarkets(market));
-      },
-      log: this.#log,
-    });
+    try {
+      return await resendIfStale(() => (accept ? this.#sendAccepted(txs, t, accept) : this.#sendConfirmed(txs, t)), {
+        stale: freshMs > 0 && market.length > 0 && (typeof left === "number" ? left > 0 : true),
+        reset: () => {
+          t.note("resent", "markets reset");
+          return t.time("refresh", () => this.#o.fork.refreshMarkets(market));
+        },
+        log: this.#log,
+      });
+    } finally {
+      // This trade moved those pools on the fork (no arbitrage brings them back): the next build
+      // copies them from mainnet again instead of pricing against the fork's own last trade.
+      this.#o.fork.forgetFresh?.(market);
+    }
   }
 
   /** #send's default way: one at a time, each preflighted at "confirmed" and confirmed before the next. */
