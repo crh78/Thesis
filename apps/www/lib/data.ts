@@ -49,7 +49,12 @@ export type TakeLeg = {
   weight: number;
   why?: string | null;
   ret?: number;
+  /** How a fade takes the other side of this leg (a Phoenix short, a prediction's other side), or null. */
+  fade_how?: string | null;
 };
+
+/** Whether a fade can take any of this take's legs (unknown legs count as maybe: the take page checks). */
+export const fadeable = (t: Pick<Take, "legs">) => !t.legs?.length || t.legs.some((l) => l.fade_how !== null);
 
 export type Take = {
   id: string;
