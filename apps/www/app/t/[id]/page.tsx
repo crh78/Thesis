@@ -6,8 +6,9 @@ import Avatar from "@/components/Avatar";
 import Basket from "@/components/Basket";
 import Comments from "@/components/Comments";
 import { ShareIcon } from "@/components/Icons";
+import PnlShare from "@/components/PnlShare";
 import TradeDock from "@/components/TradeDock";
-import { authorName, calledIt, closedReason, getReceipt, getTake, isDeleted, pct, stateLabel, takeReturn, takeState } from "@/lib/data";
+import { assetKeys, authorName, calledIt, closedReason, getReceipt, getTake, isDeleted, pct, stateLabel, takeReturn, takeState } from "@/lib/data";
 
 export const revalidate = 15;
 
@@ -43,6 +44,8 @@ export default async function TakePage({ params }: Props) {
   const ret = takeReturn(take, receipt);
   // Open until the author sells their buy-in; then closed, with its result final.
   const state = takeState(take, receipt);
+  // Each pick's ticker, for its logo in the basket (none if the catalog read fails).
+  const keys = await assetKeys(take.legs.map((l) => l.asset_id ?? "")).catch(() => ({}));
   const handle = isDeleted(take.author) ? null : take.author.handle;
 
   return (
@@ -76,15 +79,15 @@ export default async function TakePage({ params }: Props) {
       ) : null}
 
       <div className={`big ${ret >= 0 ? "up" : "down"}`}>{pct(ret)}</div>
-      {calledIt(ret) ? (
-        <div className="tags">
-          <Link className="tag tag-up" href={`/c/${take.id}`} aria-label="Called it: share">Called it <ShareIcon className="tag-icon" /></Link>
-        </div>
-      ) : null}
+      {/* Called it (the take's card), and for anyone holding it, their own P&L to share. */}
+      <div className="tags">
+        {calledIt(ret) ? <Link className="tag tag-up" href={`/c/${take.id}`} aria-label="Called it: share">Called it <ShareIcon className="tag-icon" /></Link> : null}
+        <PnlShare takeId={take.id} />
+      </div>
 
       <div className="section">
         <h2>Basket <span className="caps">weight</span></h2>
-        <Basket legs={take.legs} receipt={receipt?.legs} />
+        <Basket legs={take.legs} receipt={receipt?.legs} keys={keys} />
       </div>
 
       <TradeDock takeId={take.id} author={authorName(take.author)} handle={handle} receipt={receipt} closed={state.open ? null : closedReason(state, handle)} />

@@ -6,11 +6,13 @@ import { useState } from "react";
 import { centsInput, depositLeft, fork, type Activity, type WalletSummary } from "@/lib/fork";
 import { money, shortDate } from "@/lib/data";
 
-function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+/** `action`: a button by the close button (Add cash's History, the history's way back). */
+function Sheet({ title, onClose, action, children }: { title: string; onClose: () => void; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="sheet-wrap" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="sheet" role="dialog" aria-label={title}>
         <button className="x" aria-label="Close" onClick={onClose}>×</button>
+        {action}
         <h3>{title}</h3>
         {children}
       </div>
@@ -57,7 +59,11 @@ export function AddCash({ address, summary, onClose, onDone }: { address: string
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<WalletSummary | null>(null);
+  // History: the wallet's cash activity, in this sheet.
+  const [history, setHistory] = useState(false);
   const tooMuch = amount > left + 0.004;
+  const latest = done ?? summary;
+  const historyButton = <button className="pill small sheet-action" onClick={() => setHistory(true)}>History</button>;
 
   async function go() {
     setError(null);
@@ -73,9 +79,16 @@ export function AddCash({ address, summary, onClose, onDone }: { address: string
     }
   }
 
+  if (history) {
+    return (
+      <CashActivity balance={latest?.usdc ?? 0} activity={latest?.activity ?? []} onClose={onClose}
+        onBack={() => setHistory(false)} />
+    );
+  }
+
   if (done) {
     return (
-      <Sheet title={`${money(amount, true)} added`} onClose={onClose}>
+      <Sheet title={`${money(amount, true)} added`} onClose={onClose} action={historyButton}>
         <div className="row"><span className="muted">New balance</span><span className="mono">{money(done.usdc)}</span></div>
         <CapLine summary={done} />
         <button className="obtn filled" style={{ marginTop: 16 }} onClick={onClose}>Done</button>
@@ -85,7 +98,7 @@ export function AddCash({ address, summary, onClose, onDone }: { address: string
 
   if (left < 1) {
     return (
-      <Sheet title="Add cash" onClose={onClose}>
+      <Sheet title="Add cash" onClose={onClose} action={historyButton}>
         <CapLine summary={summary} />
         <p className="muted">You&apos;ve added the most you can. Selling a position puts its cash back in your balance.</p>
         <button className="obtn filled" style={{ marginTop: 8 }} onClick={onClose}>OK</button>
@@ -94,7 +107,7 @@ export function AddCash({ address, summary, onClose, onDone }: { address: string
   }
 
   return (
-    <Sheet title="Add cash" onClose={onClose}>
+    <Sheet title="Add cash" onClose={onClose} action={historyButton}>
       <CapLine summary={summary} />
       <div className="amount">
         <span>$</span>
@@ -118,10 +131,11 @@ export function AddCash({ address, summary, onClose, onDone }: { address: string
 
 const ACTIVITY: Record<string, string> = { deposit: "Added cash", withdrawal: "Withdrew", back: "Traded", fade: "Faded", exit: "Sold", sale: "Sold", fee: "Fee", claim: "Creator fees" };
 
-/** `children`: shown under the balance (cash waiting on Phoenix, with "Cash out"). */
-export function CashActivity({ balance, activity, onClose, children }: { balance: number; activity: Activity[]; onClose: () => void; children?: React.ReactNode }) {
+/** `children`: shown under the balance (cash waiting on Phoenix, with "Cash out"). `onBack`: opened
+ * from Add cash, with a way back to it. */
+export function CashActivity({ balance, activity, onClose, onBack, children }: { balance: number; activity: Activity[]; onClose: () => void; onBack?: () => void; children?: React.ReactNode }) {
   return (
-    <Sheet title="Cash" onClose={onClose}>
+    <Sheet title="Cash" onClose={onClose} action={onBack ? <button className="pill small sheet-action" onClick={onBack}>Add cash</button> : undefined}>
       <div className="muted small">Cash balance</div>
       <div className="big" style={{ marginTop: 4 }}>{money(balance)}</div>
       {children}

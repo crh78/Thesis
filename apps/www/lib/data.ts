@@ -285,6 +285,43 @@ export async function getReceipt(id: string): Promise<Receipt | null> {
 }
 const RECEIPT_TIMEOUT_MS = 5000;
 
+/**
+ * Your return on one side of a take, from your open positions on it: what's held now over what it
+ * cost (each position's cost scaled to the part still held after partial sales), in percent; null
+ * without a price or an open position.
+ */
+export function holdingReturn(positions: Position[], side: "back" | "fade"): number | null {
+  const open = positions.filter((p) => !p.exited && p.side === side);
+  if (!open.length || open.some((p) => p.valueUsd == null)) return null;
+  const cost = open.reduce((s, p) => s + (p.remainingStakeUsd != null && p.stakeUsd > 0 ? (p.costUsd * p.remainingStakeUsd) / p.stakeUsd : p.costUsd), 0);
+  const value = open.reduce((s, p) => s + (p.valueUsd ?? 0), 0);
+  return cost > 0 ? (value / cost - 1) * 100 : null;
+}
+
+/** Someone's own position in a take, for their P&L card (/c/<id>?by=<handle>&side=…). */
+export type Holder = { person: Pick<Person, "handle" | "display_name" | "avatar_url">; side: "back" | "fade"; ret: number };
+
+/**
+ * `handle`'s open position on `side` of take `id`, read from the chain through the fork API (by the
+ * wallet on their public profile), so a shared P&L card shows what they really hold. Null when they
+ * hold nothing open there, or it can't be read.
+ */
+export async function getHolder(id: string, handle: string, side: "back" | "fade"): Promise<Holder | null> {
+  if (!UUID.test(id) || !/^[a-z0-9_]{1,30}$/i.test(handle)) return null;
+  const pr = await fetch(`${supabaseUrl()}/rest/v1/profiles?select=handle,display_name,avatar_url,solana_address&handle=eq.${encodeURIComponent(handle.toLowerCase())}`, {
+    headers: { apikey: supabaseKey() }, next: { revalidate: 60 },
+  }).catch(() => null);
+  const person = pr?.ok ? ((await pr.json().catch(() => [])) as (Holder["person"] & { solana_address: string | null })[])[0] : null;
+  if (!person?.solana_address) return null;
+  const r = await fetch(`${forkApiUrl()}/takes/${id}?viewer=${encodeURIComponent(person.solana_address)}`, {
+    headers: { "x-thesis-service-key": forkServiceKey() }, next: { revalidate: 15 }, signal: AbortSignal.timeout(RECEIPT_TIMEOUT_MS),
+  }).catch(() => null);
+  const receipt = r?.ok ? ((await r.json().catch(() => null)) as Receipt | null) : null;
+  const ret = receipt ? holdingReturn(receipt.viewerPositions ?? [], side) : null;
+  if (ret == null) return null;
+  return { person: { handle: person.handle, display_name: person.display_name, avatar_url: person.avatar_url }, side, ret };
+}
+
 const FACE_COLORS = ["#FFD5DC", "#C0AEDE", "#B6E3F4", "#D1D4F9", "#FFDFBF", "#C8ECD4", "#FFFFFF"];
 
 /** `face:<name>:<color>`, `asset:<name>`, or a photo URL, as the app stores them. */
@@ -388,8 +425,10 @@ export async function assetKeys(ids: string[]): Promise<Record<string, string>> 
   const unique = [...new Set(ids)].filter(Boolean);
   if (!unique.length) return {};
   const list = unique.map((id) => `"${id.replace(/["\\]/g, "")}"`).join(",");
+  // The catalog rarely changes: a server render keeps the answer for an hour.
   const r = await fetch(`${supabaseUrl()}/rest/v1/securities?select=id,underlying,symbol&id=in.(${encodeURIComponent(list)})`, {
     headers: { apikey: supabaseKey() },
+    next: { revalidate: 3600 },
   });
   if (!r.ok) throw new Error("securities: " + r.status);
   const rows = (await r.json()) as { id: string; underlying: string | null; symbol: string }[];

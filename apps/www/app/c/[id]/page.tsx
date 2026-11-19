@@ -1,16 +1,18 @@
 // "Called it": a brag card for a take that's up, in a few looks you swipe through like filters.
+// With ?by=<handle>&side=back|fade, a holder's P&L card instead: their face and their own return,
+// read from their position on the chain (getHolder), so the link can't claim a number.
 import type { Metadata } from "next";
 import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import { notFound } from "next/navigation";
 import CalledStudio from "@/components/CalledStudio";
-import { cardData, themeOf } from "@/lib/called";
-import { getReceipt, getTake, supabaseUrl } from "@/lib/data";
+import { asHolder, cardData, themeOf, type CardData } from "@/lib/called";
+import { getHolder, getReceipt, getTake, supabaseUrl, type Receipt, type Take } from "@/lib/data";
 import "./called.css";
 
 export const revalidate = 15;
 
-type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ theme?: string; card?: string }> };
+type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ theme?: string; card?: string; by?: string; side?: string }> };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -21,37 +23,49 @@ function cardImage(take: string, card: string | undefined): string | null {
     : null;
 }
 
+/** The card's data: the take's, or a holder's P&L when the link names one who holds it. */
+async function card(id: string, take: Take, receipt: Receipt | null, by?: string, side?: string): Promise<CardData> {
+  const d = cardData(take, receipt);
+  const h = by ? await getHolder(id, by, side === "fade" ? "fade" : "back") : null;
+  return h ? asHolder(d, h) : d;
+}
+
+/** "&by=jake&side=fade" for a holder's card, else "". */
+const holderQuery = (d: CardData) => (d.holder && d.handle ? `by=${d.handle}&side=${d.holder.side}` : "");
+
 export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
-  const [{ id }, { theme, card }] = await Promise.all([params, searchParams]);
+  const [{ id }, { theme, card: cardId, by, side }] = await Promise.all([params, searchParams]);
   const [take, receipt] = await Promise.all([getTake(id), getReceipt(id)]);
   if (!take) return { title: "Thesis" };
-  const picture = cardImage(id, card);
-  const d = cardData(take, receipt);
+  const picture = cardImage(id, cardId);
+  const d = await card(id, take, receipt, by, side);
   const who = d.handle ? `@${d.handle}` : d.name;
-  const title = d.called ? `${who} called it: ${d.claim}` : `${who}: ${d.claim}`;
+  const title = d.holder
+    ? `${who} is ${d.pct} on ${d.holder.author && d.holder.author !== d.handle ? `@${d.holder.author}'s take` : "their take"}: ${d.claim}`
+    : d.called ? `${who} called it: ${d.claim}` : `${who}: ${d.claim}`;
   const description = `${d.pct} since ${d.posted}. On Thesis.`;
   const t = themeOf(theme);
   // The app's own picture of the card (9:16) when the link has one, else the drawn preview.
   const image = picture
     ? { url: picture, width: 1080, height: 1920, alt: title }
-    : { url: `/c/${id}/og?theme=${t}`, width: 1200, height: 630, alt: title };
+    : { url: `/c/${id}/og?theme=${t}${holderQuery(d) ? `&${holderQuery(d)}` : ""}`, width: 1200, height: 630, alt: title };
   return {
     title,
     description,
     openGraph: {
       title, description, type: "article", images: [image],
-      url: picture ? `/c/${id}?card=${card}` : `/c/${id}${t === "glow" ? "" : `?theme=${t}`}`,
+      url: picture ? `/c/${id}?card=${cardId}` : `/c/${id}?${[t === "glow" ? "" : `theme=${t}`, holderQuery(d)].filter(Boolean).join("&")}`.replace(/\?$/, ""),
     },
     twitter: { card: "summary_large_image", title, description, images: [image.url] },
   };
 }
 
 export default async function CalledItPage({ params, searchParams }: Props) {
-  const [{ id }, { theme, card }] = await Promise.all([params, searchParams]);
+  const [{ id }, { theme, card: cardId, by, side }] = await Promise.all([params, searchParams]);
   const [take, receipt] = await Promise.all([getTake(id), getReceipt(id)]);
   if (!take) notFound();
-  const d = cardData(take, receipt);
-  const picture = cardImage(id, card);
+  const d = await card(id, take, receipt, by, side);
+  const picture = cardImage(id, cardId);
 
   // A card someone shared from the app: show that exact picture, then the way in.
   if (picture) {
