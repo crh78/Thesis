@@ -31,8 +31,11 @@
 //      Most builds are one model call.
 //   3. It answers with picks by number and name, from what search showed it. The harness checks
 //      every pick (shown, number and name agree, one per underlying, the risk's kinds, a copy only
-//      what it copies, weights sum to 100). If the model is slow or fails, the names the take or
-//      source spell out go in instead (picker: "rules").
+//      what it copies, weights sum to 100) and drops one the model says falls if the take is right
+//      (gains_if_right; a bearish post's $cashtags aren't copied as buys). When nothing listed is in
+//      the take (nuclear, utilities, airlines today), it answers no_clean_exposure rather than a
+//      stand-in. If the model is slow or fails, the names the take or source spell out go in
+//      instead (picker: "rules").
 //
 // Cards (cards.ts): at medium and high risk the model also gets a `cards`
 // tool, a live Collector Crypt search. A take about cards (isCardTake) may be
@@ -108,7 +111,7 @@ const finalize = (ps: Pick[], cardTake = false) => {
   const house = (xs: Pick[]) =>
     applyHouseRules(xs, (p) => ({ kind: p.s.kind, key: key(p.s), weight: p.weight, leverage: p.leverage }), (p, weight, leverage) => ({ ...p, weight, leverage }));
   let out = capCards(house(ps), cardTake);
-  for (let round = 0; round < 4 && out.length > 1 && out.some((p) => p.s.kind === "perp" && p.weight > MAX_PERP_WEIGHT); round++) out = capCards(house(out), cardTake);
+  for (let round = 0; round < 4 && out.length > 1 && out.some((p) => p.s.kind === "perp" && p.leverage > 1 && p.weight > MAX_PERP_WEIGHT); round++) out = capCards(house(out), cardTake);
   return out;
 };
 
@@ -459,8 +462,8 @@ const RISK_KINDS: Record<string, (kind: string) => boolean> = {
 };
 
 const RISK_RULES: Record<string, string> = {
-  low: "Low risk: up to 4 picks. Spread out, prefer big well-known companies and broad ETFs. Include exactly one cash pick at 20-30%.",
-  medium: "Medium risk: up to 5 picks of stocks/ETFs/commodities, fewer when fewer fit directly. Add one prediction market (10-20%) only if one asks about this take.",
+  low: "Low risk: up to 4 picks (a perp at leverage 1 only for a name with no stock listed). Spread out, prefer big well-known companies and broad ETFs. Include exactly one cash pick at 20-30%.",
+  medium: "Medium risk: up to 5 picks of stocks/ETFs/commodities (a perp at leverage 1 only for a name with no stock listed), fewer when fewer fit directly. Add one prediction market (10-20%) only if one asks about this take.",
   high: "High risk: up to 4 picks, concentrated in the purest names. You may use one perp (max 30%, or the whole basket when it's the only pick) on a name the take is about, in place of that name's stock: never both. " +
     "Choose its leverage, from 2 up to its max (at most 5x): more for a name that IS the take, less for a looser fit. " +
     "The take may be held up to a year, and a leveraged bet held longer is likelier to be liquidated on the way.",
@@ -468,27 +471,32 @@ const RISK_RULES: Record<string, string> = {
 
 type Picked = {
   verdict: "basket" | "no_clean_exposure";
+  bearish?: boolean;
   summary: string;
   reason: string;
-  picks: { n: number; name: string; weight: number; side: "yes" | "no"; why: string; leverage: number }[];
+  picks: { n: number; name: string; weight: number; side: "yes" | "no"; gains_if_right?: boolean; why: string; leverage: number }[];
 };
 
 const PICK_SCHEMA = {
-  type: "object", additionalProperties: false, required: ["verdict", "summary", "reason", "picks"],
+  type: "object", additionalProperties: false, required: ["verdict", "bearish", "summary", "reason", "picks"],
   properties: {
     verdict: { type: "string", enum: ["basket", "no_clean_exposure"] },
+    /** The take (or the post it copies) expects what it names to fall: its $cashtags aren't buys. */
+    bearish: { type: "boolean" },
     summary: { type: "string" },
     reason: { type: "string" },
     picks: {
       type: "array",
       items: {
-        type: "object", additionalProperties: false, required: ["n", "name", "weight", "side", "why", "leverage"],
+        type: "object", additionalProperties: false, required: ["n", "name", "weight", "side", "gains_if_right", "why", "leverage"],
         properties: {
           n: { type: "integer" },
           /** As shown (for a prediction, the outcome): checked against n. */
           name: { type: "string" },
           weight: { type: "number" },
           side: { type: "string", enum: ["yes", "no"] },
+          /** Does this pick (on its side) go up if the take comes true? A new basket drops the ones that don't. */
+          gains_if_right: { type: "boolean" },
           why: { type: "string" },
           leverage: { type: "integer" },
         },
@@ -509,6 +517,19 @@ const BUILD_SYSTEM = [
   "(suppliers, picks and shovels). Two direct picks beat five loose ones: never add a pick whose why has to stretch,",
   "and never one that moves against the take. Skip anything only loosely related, and never stand in a lookalike for a company",
   "that isn't listed (no generic AI name for a take about one AI company).",
+  "Every pick must be IN what the take is about: that company, that sector's own companies, that commodity, that country.",
+  "A side project, a customer or a different sector doesn't count (Lockheed isn't nuclear power, SpaceX isn't robotaxis,",
+  "a cinema chain isn't doughnuts, oil isn't copper or natural gas), and neither does a broad index for a narrower take",
+  "(the S&P 500 isn't a utilities, airline, bank or Brazil bet). The S&P 500 and Nasdaq are for takes on the US market or",
+  "economy as a whole. When nothing listed is in it, the answer is no_clean_exposure: an honest \"nothing fits yet\" beats",
+  "a basket that doesn't move with the take.",
+  "Direction: every pick must gain if the take is right. A bearish take (a company, sector or the economy slumps, is in",
+  "trouble, loses customers, crashes, is a bubble) never gets that company, its rivals or the broad market bought as a",
+  "stand-in: use no on a market about it or an inverse fund on it (an inverse Nasdaq fund for a tech or market crash).",
+  "With neither, no_clean_exposure. A company whose own product causes the slump can go in (a GLP-1 drug maker when",
+  "food sales fall).",
+  "A perp is how you hold a company the take is about when it has no stock listed (Eli Lilly, Netflix): at low and",
+  "medium risk too, at leverage 1.",
   "If there's a source (an X post, an article, a fund's or trader's holdings or trades), it's what the take copies:",
   "hold what the source names, at the weights it gives or implies. When the source lists picks, don't pad with names",
   "it doesn't hold (fewer picks is fine, risk_rules' counts don't apply); add others only when the source states a",
@@ -530,13 +551,19 @@ const BUILD_SYSTEM = [
   "side: yes for everything; for a prediction market, yes or no, whichever the take implies. Everything is bought: to",
   "bet against something, use no on its market or an inverse fund, never its stock, and never call a pick a short.",
   "leverage: 1 for everything except a perp.",
+  "bearish: true when the take, or the post it copies, expects the companies or things it names to fall (\"foot",
+  "traffic at $MCD is falling\"); a post's $cashtags are then what it's against, never what to hold.",
+  "gains_if_right: true only when that pick, on its side, goes up if the take comes true. A pick that would fall (a",
+  "restaurant's stock on \"restaurants are in trouble\") is false, and false picks are thrown out: leave them out.",
   "Cards (only when you have the cards tool): a collectible card is a pick when it moves with the take: the take is",
   "about collectibles, or a card tied to it (a Pok\u00e9mon card on a Nintendo take, a player's rookie card on their",
   "season). Search cards for it; how many cards and how much of the basket follows `cards` in the input.",
-  "no_clean_exposure only when the take states no market view at all (a greeting, a feeling) or nothing listed or",
-  "found moves with it. A broad view still gets a basket: \"buy the dip\" the S&P 500 fund, a country's boom that",
-  "country's companies or fund, a commodity theme its miners or the commodity. Then reason = one short sentence why,",
-  "empty picks; otherwise reason = \"\".",
+  "no_clean_exposure when the take states no market view at all (a greeting, a feeling) or nothing listed or",
+  "found is in it and moves with it. A broad view still gets a basket when something listed is in it: \"buy the dip\" the",
+  "S&P 500 fund, a country's boom that country's companies or fund, a commodity theme its miners or the commodity. Then",
+  "reason = one short sentence why, empty picks; otherwise reason = \"\".",
+  "A prediction market goes in only when its question is this take's own question: a take on a company's sales never",
+  "gets a market on a deal, a stake or a lawsuit about that company.",
   "summary: max 18 words, what has to be true for the take to pay off. why: max 12 words, how the pick ties to THIS",
   "take, and true of that pick (never call an asset something it isn't: gold isn't copper, Roblox isn't robotics).",
   "Plain words for a non-investor; never mention tokens, chains, USDC or wallets.",
@@ -633,8 +660,9 @@ async function rowsFor(out: Picked, shown: Shown, have: Security[] = []): Promis
 /**
  * The model's picks, checked: only numbers it was shown, one per company, positive weights.
  * `whys`: the current basket's lines by asset id, kept when the model leaves a kept pick's empty.
- * `allowed`: what this basket can hold (a perp only at high risk, cash only at low, a copy only
- * what it copies); `keep` ids are always allowed.
+ * `allowed`: what this basket can hold (a perp at high risk, or below it only at 1x for a name
+ * with no stock listed; cash only at low; a copy only what it copies); `keep` ids are always
+ * allowed.
  */
 function fromModel(out: Picked, shown: Shown, rows: Map<string, Security>, cap = 5, whys = new Map<string, string>(), allowed: (s: Security) => boolean = () => true, keep = new Set<string>()): Pick[] {
   const used = new Set<string>();
@@ -1050,14 +1078,23 @@ Deno.serve(async (req) => {
     source && source.kind !== "article" ? named(index, source.text, usPerson, 24, source.kind === "post") : Promise.resolve([] as Security[]),
   ]);
   lap("pick");
-  const copyKeys = copied.length >= 2 ? new Set(copied.map(key)) : null;
+  // A post against what it tags ("$MCD $WEN traffic is falling") isn't copied as buys of them.
+  const againstTags = source?.kind === "post" && agent?.out?.bearish === true;
+  const copyKeys = copied.length >= 2 && !againstTags ? new Set(copied.map(key)) : null;
+  // Holdings are positions someone holds: copied as they are. Anything else drops a pick that falls
+  // if the take is right.
+  const holdingsCopy = !!copyKeys && source?.kind === "holdings";
   // A perp only on a name the take (or its source) names: "same bet at 2x", never filler.
   const takeWords = new Set(tokenize(words, true));
   const spotKeys = new Set(listed.rows.filter((r) => SPOT.has(r.kind)).map((r) => r.underlying ?? r.symbol));
   // A perp on a name the take names, or one with no stock to buy instead (IREN: the perp is the only way to hold it).
-  const perpNamed = (s: Security) => !spotKeys.has(key(s)) ||
-    tokenize(`${displayName(s.name)} ${s.underlying ?? ""}`).some((w) => w !== "perp" && takeWords.has(w));
-  const allowed = (s: Security) => RISK_KINDS[risk](s.kind) && (!copyKeys || copyKeys.has(key(s)) || s.kind === "yield");
+  const takeNames = (s: Security) => tokenize(`${displayName(s.name)} ${s.underlying ?? ""}`).some((w) => w !== "perp" && takeWords.has(w));
+  const perpNamed = (s: Security) => !spotKeys.has(key(s)) || takeNames(s);
+  // Below high risk, a perp only when it's the one way to hold a name (Eli Lilly, Netflix: no stock
+  // listed), at 1x, the same bet its stock would be. Without this the model's main pick was dropped
+  // and its filler (cash, an off-topic market) became the whole basket.
+  const onlyWay = (s: Security) => s.kind === "perp" && risk !== "high" && !spotKeys.has(key(s));
+  const allowed = (s: Security) => (RISK_KINDS[risk](s.kind) || onlyWay(s)) && (!copyKeys || copyKeys.has(key(s)) || s.kind === "yield");
   const debug = admin ? debugOf(agent, shown, copied) : {};
   const noExposure = (reason: string, summary = claim) =>
     json(200, { verdict: "no_clean_exposure", summary, reason, legs: [], note: null, ms, ...debug });
@@ -1069,11 +1106,29 @@ Deno.serve(async (req) => {
   if (out?.verdict === "no_clean_exposure" && !must.length && !copyKeys) {
     return noExposure(out.reason || "Nothing you can buy tracks this closely enough yet.", out.summary || claim);
   }
+  // A pick the model itself says falls when the take is right moves against it (a long on a bearish
+  // take). Copied holdings are exempt. If that leaves nothing, nothing fits.
+  if (out?.verdict === "basket" && !holdingsCopy && out.picks.length && out.picks.every((p) => p.gains_if_right === false) && !must.length) {
+    return noExposure("Nothing you can buy goes up if this is right.", out.summary || claim);
+  }
   if (out?.verdict === "basket") {
-    picks = fromModel(out, shown, await rowsFor(out, shown, [...must, ...found.values()]), copyKeys ? MAX_LEGS : 5, undefined, allowed, new Set(must.map((s) => s.id)));
+    const kept = holdingsCopy ? out : { ...out, picks: out.picks.filter((p) => p.gains_if_right !== false) };
+    picks = fromModel(kept, shown, await rowsFor(out, shown, [...must, ...found.values()]), copyKeys ? MAX_LEGS : 5, undefined, allowed, new Set(must.map((s) => s.id)));
     const held = new Set(picks.filter((p) => p.s.kind !== "perp").map((p) => key(p.s)));
-    picks = normalize(capCards(picks.filter((p) => p.s.kind !== "perp" || held.has(key(p.s)) || perpNamed(p.s) || must.some((m) => m.id === p.s.id)), cardTake));
+    picks = normalize(capCards(picks.filter((p) => p.s.kind !== "perp" || held.has(key(p.s)) || perpNamed(p.s) || must.some((m) => m.id === p.s.id)), cardTake))
+      .map((p) => (p.s.kind === "perp" && risk !== "high" ? { ...p, leverage: 1 } : p));
     summary = out.summary || claim;
+    // Nothing but cash left (the picks that were the take didn't hold up): that's not a basket for it.
+    const aboutCash = ["cash", "yield", "saving", "stablecoin", "usdc"].some((w) => takeWords.has(w));
+    if (picks.length && picks.every((p) => p.s.kind === "yield") && !must.length && !aboutCash) {
+      return noExposure("Nothing you can buy tracks this closely enough yet.", summary);
+    }
+  }
+  // The model answered, but none of its picks held up: the names the take spells out would be
+  // bought whatever the take says about them ("restaurants are in trouble" bought McDonald's), so
+  // that's no basket. The rules fallback is for when the model is slow or fails.
+  if (!picks.length && out?.verdict === "basket" && !copyKeys && !must.length) {
+    return noExposure("Nothing you can buy tracks this closely enough yet.", out.summary || claim);
   }
   if (!picks.length) {
     picker = "rules";

@@ -2,9 +2,10 @@
 // fallback, an edit, a switch of risk):
 //   - One pick per name: the program rejects two legs on the same asset, so a perp on a name the
 //     basket already holds as a stock is dropped (the stock stays).
-//   - A perp weighs at most 30% when the basket has picks that aren't perps; the excess goes to
-//     them, in proportion. A basket of perps only (one or several) keeps its weights (chosen after
-//     live builds).
+//   - A leveraged perp (above 1x) weighs at most 30% when the basket has picks that aren't perps;
+//     the excess goes to them, in proportion. A basket of perps only (one or several) keeps its weights (chosen
+//     after live builds). A 1x perp is the same bet as the stock (how a name with no stock listed is
+//     held, Eli Lilly at low risk), so it isn't capped.
 //   - Leverage stays the model's choice, at most 5x (and the market's own max, applied where the
 //     pick is made). Takes have no horizon: they run until the author sells, a year at most.
 
@@ -40,11 +41,12 @@ export function applyHouseRules<T>(picks: T[], view:(p: T) => RuleView, update: 
   if (!kept.length) return kept;
   const views = kept.map(view);
   let weights = normalizeWeights(views.map((v) => v.weight));
+  const capped = views.map((v) => v.kind === "perp" && v.leverage > 1);
   const othersTotal = weights.reduce((a, w, i) => a + (views[i].kind === "perp" ? 0 : w), 0);
-  const over = weights.reduce((a, w, i) => a + (views[i].kind === "perp" ? Math.max(0, w - MAX_PERP_WEIGHT) : 0), 0);
+  const over = weights.reduce((a, w, i) => a + (capped[i] ? Math.max(0, w - MAX_PERP_WEIGHT) : 0), 0);
   if (over > 0 && othersTotal > 0) {
     weights = normalizeWeights(weights.map((w, i) =>
-      views[i].kind === "perp" ? Math.min(w, MAX_PERP_WEIGHT) : w + over * (w / othersTotal)));
+      capped[i] ? Math.min(w, MAX_PERP_WEIGHT) : w + over * (w / othersTotal)));
   }
   return kept.map((p, i) => update(p, weights[i], views[i].kind === "perp" ? Math.min(views[i].leverage, MAX_LEVERAGE) : views[i].leverage));
 }
