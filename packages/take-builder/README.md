@@ -7,7 +7,7 @@ The builder runs as the `take-builder` Supabase edge function (`supabase/functio
 House rules (`supabase/functions/take-builder/rules.ts`):
 - a perp pick's leverage is the model's choice, from the risk the user picked and how directly the name is the take, at most 5x and the market's own max; 2x when no model chose it (the rules fallback, a switch to high risk, an add by name);
 - a perp is at most 30% when the basket holds other picks; one pick per name;
-- Collector Crypt cards (live search) at medium and high risk only: a take about cards can be all cards, any other take gets at most one card at 20%, never alone;
+- Collector Crypt cards (live search) at medium and high risk only: a take about cards can be all cards, any other take gets at most three cards, each at most 20%, never only cards;
 - only assets the catalog rates "tradeable". Everyone gets the whole catalog for now (`US_RESTRICTIONS=on` brings back the US rule).
 
 Each pick says whether a fade can short it (`canShort`), which the apps use to show Fade only when a leg can be faded.

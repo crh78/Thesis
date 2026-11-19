@@ -280,7 +280,7 @@ A sale's build is Phoenix closes, then one swap per token, then one redeem per v
 Swaps back to USDC reuse kept routes like a back's ([Quotes and routes](#quotes-and-routes)): each token's sell route (the token in, USDC out) is kept for `FORK_API_ROUTE_TTL_MS` and repriced at the token's price now, `in_amount` exactly the tokens to sell, with the same 1% slippage, shortfall and 3% move limits. A sale can scale a kept route down to 0.01x of its size, from quotes up to 2% price impact (a smaller sale only does better than the quote).
 
 - A sale whose tokens all have kept sell routes costs one price read or none; any other token is quoted afresh (in the build's own turn) and its route kept.
-- After a back or publish lands, each token it bought with no sell route gets one quote back to USDC in the route checks' lane. That lane is refused whenever the budget is short, as it usually is right after the back's own calls, so refused tokens are tried again 15, 30 and 60 s later. A first sale within about 15 s of a back can still quote afresh.
+- After a back or publish lands, each token it bought with no sell route gets one quote back to USDC in the route checks' lane, waiting its turn behind taps and prebuilds (`seedSells`) until every token is seeded or two minutes pass. On the VM's Developer-plan budget that's about a second; only a sale in that moment quotes afresh.
 - A sale that fails to send drops its tokens' kept sell routes, so selling again quotes them afresh. Every token a sale quotes afresh although a route was kept, or none was, is logged with why (`sell route for X not repriced: …`, once a minute per token and reason).
 - Sales use the build's Jupiter lane (a prebuild's fails fast with `503 busy`).
 
