@@ -115,7 +115,7 @@ Shared code is in `functions/_shared/` (`privy.ts` token checks, `catalog.ts` th
 
 ## Seed
 
-`seed/demo.sql`: demo callers (Jake, Priya, …) and their takes, so a new account has a feed. `seed/demo_trades.sql`: ledger trades and fades from the demo callers on the demo takes, so take pages can name who traded; run after `demo.sql`. Both are safe to re-run.
+`seed/demo.sql`: demo callers (Dev, Johnny, Nina, Priya and Danny) and their takes, so a new account has a feed. `seed/demo_cast.sql` moves a database seeded with the earlier cast (Jake, Lena, Mo, Kai) to this one. `seed/demo_trades.sql`: ledger trades and fades from the demo callers on the demo takes, so take pages can name who traded; run after `demo.sql`. Both are safe to re-run.
 
 ## Deploying
 
