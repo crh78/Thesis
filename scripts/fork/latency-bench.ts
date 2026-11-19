@@ -62,7 +62,8 @@ async function bench(): Promise<void> {
   const serviceKey = randomBytes(24).toString("hex");
   const guard = new Guard({ auth: "enforce", readLimit: "enforce", serviceKeys: new Map([["bench", serviceKey]]), proxyKey: null, privy: null, busyFile: null });
   const service = await startForkService((m) => console.log(`  [api] ${m}`), { takes: async (id) => (id === TAKE.id ? TAKE : null) });
-  const server = forkApiServer(service, () => {}, { guard });
+  // Only the server's errors (an internal error's stack goes to the log, not the answer).
+  const server = forkApiServer(service, (m) => { if (m.startsWith("error:")) console.log(`  [api] ${m}`); }, { guard });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
@@ -73,14 +74,25 @@ async function bench(): Promise<void> {
     (client[name] ??= []).push(ms);
     for (const [step, d] of Object.entries(timing ?? {})) ((serverSteps[name] ??= {})[step] ??= []).push(d);
   };
+  /** Prebuilds the Jupiter budget turned away (503 busy) and retried after Retry-After, as the apps do. */
+  let busyRetries = 0;
   const call = async (method: string, path: string, body?: unknown, name?: string) => {
-    const started = performance.now();
-    const r = await fetch(base + path, {
-      method,
-      headers: { "content-type": "application/json", "x-thesis-service-key": serviceKey },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const json = (await r.json()) as any;
+    let started = performance.now();
+    let r: Response;
+    let json: any;
+    for (let attempt = 0; ; attempt++) {
+      started = performance.now();
+      r = await fetch(base + path, {
+        method,
+        headers: { "content-type": "application/json", "x-thesis-service-key": serviceKey },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      json = (await r.json()) as any;
+      const prebuild = Boolean((body as { prebuild?: boolean } | undefined)?.prebuild);
+      if (!(prebuild && r.status === 503 && json?.error === "busy" && attempt < 4)) break;
+      busyRetries++;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(15, Number(r.headers.get("retry-after")) || 5) * 1_000));
+    }
     const ms = performance.now() - started;
     if (name && r.ok) record(name, ms, parseServerTiming(r.headers.get("server-timing")));
     return { status: r.status, json, ms };
@@ -157,6 +169,7 @@ async function bench(): Promise<void> {
     console.log(row(name, xs));
     for (const [step, ds] of Object.entries(serverSteps[name] ?? {})) console.log(row(`  ${step}`, ds));
   }
+  if (busyRetries) console.log(`\n${busyRetries} prebuild(s) answered 503 busy and were retried after Retry-After (timed from the try that worked).`);
 }
 
 if (import.meta.main) await main(bench);

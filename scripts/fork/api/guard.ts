@@ -517,6 +517,8 @@ export type JupiterUse = {
   templatedLegs: number;
   /** The first call the budget refused (lanes 2 and 3, or a full queue): routing answers 503 busy with it. */
   refused?: ApiError;
+  /** A prebuild's first call, once let in (JupiterBudget.run): the build's later calls go in a tap's turn. */
+  first?: Promise<void>;
 };
 
 export const newUse = (lane: Lane = 1): JupiterUse => ({ lane, calls: 0, quotes: 0, instructions: 0, waitedMs: 0, rateLimited: 0, winnerHits: 0, winnerMisses: 0, templatedLegs: 0 });
@@ -650,8 +652,29 @@ export class JupiterBudget {
 
   /** Runs one Jupiter request in `lane`'s turn, counted in `use`. */
   async run<T>(lane: Lane, work: () => Promise<T>, use?: JupiterUse): Promise<T> {
+    // A prebuild that has already made a call finishes like a tap: refusing its second call at the
+    // reserve would waste the first and fail the build (a sale's legs need several), and the next
+    // try would do the same. One build's worth of calls, so taps lose little.
+    // The build's first call holds `first`; calls made alongside it (a sale's legs are quoted in
+    // parallel) wait on it, then go in a tap's turn, or fail with it if it was refused.
+    let turn: Lane = lane;
+    let release: (() => void) | undefined;
+    let fail: ((e: unknown) => void) | undefined;
+    if (lane === 2 && use) {
+      if (use.first) {
+        await use.first;
+        turn = 1;
+      } else {
+        use.first = new Promise<void>((resolve, reject) => {
+          release = resolve;
+          fail = reject;
+        });
+        use.first.catch(() => {});
+      }
+    }
     const go = async () => {
-      const waited = await this.#take(lane);
+      const waited = await this.#take(turn);
+      release?.();
       this.stats.calls[lane]++;
       this.stats.waitedMs += waited;
       if (use) {
@@ -663,8 +686,9 @@ export class JupiterBudget {
     try {
       // Route checks skip the gate: they never wait, and they don't hold the asset bank's probes
       // back. Builds' calls take a slot (taps queue for one, prebuilds don't).
-      return lane === 3 ? await go() : await this.#gate.run(go, lane === 1);
+      return lane === 3 ? await go() : await this.#gate.run(go, turn === 1);
     } catch (e) {
+      fail?.(e);
       if (use && e instanceof ApiError && e.code === "busy") use.refused ??= e;
       throw e;
     }
@@ -687,6 +711,13 @@ export class JupiterBudget {
         this.stats.rateLimited++;
         if (use) use.rateLimited++;
         this.rateLimited(reset);
+        // Prebuilds and route checks don't wait out a 429 (max429WaitMs): answer busy with when to
+        // try again, not the venue's raw error (which would be a 500).
+        if (lane !== 1) {
+          const e = this.#refuse(lane, Math.max(1_000, this.#pausedUntil - this.#now()), "Jupiter answered 429");
+          if (use) use.refused ??= e;
+          throw e;
+        }
       } else if (remaining != null && remaining !== "" && Number(remaining) <= 0) {
         this.rateLimited(reset);
       }
@@ -712,11 +743,23 @@ export class JupiterBudget {
  * fork API can take most of Jupiter's 60 a minute.
  */
 export function budgetFromEnv(env: Record<string, string | undefined> = process.env): Partial<BudgetLimits> {
-  const raw = env.FORK_API_JUPITER_RPM?.trim();
-  if (!raw) return {};
-  const perMinute = Number(raw);
-  if (!Number.isInteger(perMinute) || perMinute < 1 || perMinute > 600) throw new Error(`FORK_API_JUPITER_RPM must be a whole number of requests a minute (1–600), not "${raw}"`);
-  return { perMinute };
+  const out: Partial<BudgetLimits> = {};
+  const whole = (name: string, min: number, max: number, what: string) => {
+    const raw = env[name]?.trim();
+    if (!raw) return undefined;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${name} must be a whole number of ${what} (${min}–${max}), not "${raw}"`);
+    return n;
+  };
+  const perMinute = whole("FORK_API_JUPITER_RPM", 1, 600, "requests a minute");
+  if (perMinute !== undefined) out.perMinute = perMinute;
+  // Jupiter's free tier is about one request a second: a smaller burst paces calls closer to it.
+  const burst = whole("FORK_API_JUPITER_BURST", 1, 60, "requests at once");
+  if (burst !== undefined) {
+    out.burst = burst;
+    out.reserve = Math.min(JUPITER_BUDGET.reserve, Math.max(0, burst - 2));
+  }
+  return out;
 }
 
 export const jupiterBudget = new JupiterBudget(budgetFromEnv());
