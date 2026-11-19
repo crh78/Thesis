@@ -1,0 +1,31 @@
+# Docker build context for infra/bots/Dockerfile (the chat bots). Only the bots and their
+# workspace packages ship; every other workspace keeps just its package.json, so pnpm's
+# frozen lockfile still matches.
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.example
+**/.data
+.git
+.claude
+.turbo
+anchor
+docs
+infra/badges
+infra/logos
+supabase
+apps/ios
+apps/www/*
+!apps/www/package.json
+apps/web/*
+!apps/web/package.json
+apps/executor/*
+!apps/executor/package.json
+scripts/fork/*
+!scripts/fork/package.json
+packages/chain/*
+!packages/chain/package.json
+packages/venues/*
+!packages/venues/package.json
+packages/take-builder/*
+!packages/take-builder/package.json
