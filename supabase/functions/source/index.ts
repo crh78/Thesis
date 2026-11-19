@@ -218,6 +218,10 @@ async function buildDraft(b: Record<string, unknown>) {
     body: JSON.stringify({
       claim, risk,
       ...(sourceText.length >= 3 ? { source: { text: sourceText, label: str(src!.label, 60) || null, kind: "post" } } : {}),
+      // A bot's draft is a public reply, and its asker isn't waiting on a composer: the builder
+      // thinks longer (reasoning medium, ~3 s instead of ~1.5) and gets a take's direction right
+      // more often ("$TSLA demand is collapsing" isn't a Tesla buy).
+      variant: { reasoning: "medium", timeoutMs: 20_000 },
     }),
     signal: AbortSignal.timeout(25_000),
   });

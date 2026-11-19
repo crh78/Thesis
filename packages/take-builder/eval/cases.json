@@ -678,5 +678,150 @@
   "cat": "edge",
   "claim": "AI is a bubble that pops next year",
   "risk": "medium"
+ },
+ {
+  "id": "101",
+  "cat": "x-mention",
+  "claim": "Nuclear wins the AI power race",
+  "risk": "medium"
+ },
+ {
+  "id": "102",
+  "cat": "x-mention",
+  "claim": "AI power demand is underrated, utilities are the play",
+  "risk": "medium"
+ },
+ {
+  "id": "103",
+  "cat": "x-mention",
+  "claim": "Uranium is the trade of the decade",
+  "risk": "high"
+ },
+ {
+  "id": "104",
+  "cat": "x-mention",
+  "claim": "Banks are going to rip as rates fall",
+  "risk": "medium"
+ },
+ {
+  "id": "105",
+  "cat": "x-mention",
+  "claim": "Weight loss drugs eat the food industry",
+  "risk": "medium"
+ },
+ {
+  "id": "106",
+  "cat": "x-mention",
+  "claim": "Oil goes to 100 this winter",
+  "risk": "high"
+ },
+ {
+  "id": "107",
+  "cat": "x-mention",
+  "claim": "Robotaxis are finally here",
+  "risk": "medium"
+ },
+ {
+  "id": "108",
+  "cat": "x-mention",
+  "claim": "Streaming wars are over and Netflix won",
+  "risk": "low"
+ },
+ {
+  "id": "109",
+  "cat": "x-mention",
+  "claim": "Defense spending keeps going up everywhere",
+  "risk": "medium"
+ },
+ {
+  "id": "110",
+  "cat": "x-mention",
+  "claim": "Housing crashes next year",
+  "risk": "medium"
+ },
+ {
+  "id": "111",
+  "cat": "x-mention",
+  "claim": "Copper shortage is coming",
+  "risk": "medium"
+ },
+ {
+  "id": "112",
+  "cat": "x-mention",
+  "claim": "Airlines are a screaming buy",
+  "risk": "medium"
+ },
+ {
+  "id": "113",
+  "cat": "x-mention",
+  "claim": "Solana flips Ethereum",
+  "risk": "high"
+ },
+ {
+  "id": "114",
+  "cat": "x-mention",
+  "claim": "Bitcoin miners pivot to AI data centers and win",
+  "risk": "high"
+ },
+ {
+  "id": "115",
+  "cat": "x-mention",
+  "claim": "Healthcare is the most hated sector and about to bounce",
+  "risk": "low"
+ },
+ {
+  "id": "116",
+  "cat": "x-post",
+  "claim": "make this a take",
+  "risk": "medium",
+  "source": {
+   "kind": "post",
+   "label": "@chipguy on X",
+   "text": "$NVDA is cooked. $AMD eats their lunch in inference next year."
+  }
+ },
+ {
+  "id": "117",
+  "cat": "x-post",
+  "claim": "make this a take",
+  "risk": "medium",
+  "source": {
+   "kind": "post",
+   "label": "@retailbull on X",
+   "text": "Loading up on $COIN and $HOOD. Retail is back and it's not close."
+  }
+ },
+ {
+  "id": "118",
+  "cat": "x-post",
+  "claim": "make this a take",
+  "risk": "medium",
+  "source": {
+   "kind": "post",
+   "label": "@evbear on X",
+   "text": "$TSLA and $RIVN demand is collapsing. EVs are done for this cycle."
+  }
+ },
+ {
+  "id": "119",
+  "cat": "x-post",
+  "claim": "make this a take",
+  "risk": "high",
+  "source": {
+   "kind": "post",
+   "label": "@macro on X",
+   "text": "Gold to 5k, $GLD and $SLV both rip as the dollar dies."
+  }
+ },
+ {
+  "id": "120",
+  "cat": "x-post",
+  "claim": "make this a take",
+  "risk": "medium",
+  "source": {
+   "kind": "post",
+   "label": "@aibear on X",
+   "text": "$NVDA $MSFT $META capex is insane. This ends like 2000."
+  }
  }
 ]

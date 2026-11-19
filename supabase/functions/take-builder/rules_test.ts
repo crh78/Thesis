@@ -21,6 +21,14 @@ Deno.test("a perp over 30% is capped and the excess goes to the other picks, in 
   assertEquals(out.map((p) => p.weight), [47, 23, 30]);
 });
 
+Deno.test("a 1x perp isn't capped: it's the same bet as the stock (a name with no stock listed)", () => {
+  const out = run([
+    { kind: "perp", key: "LLY", weight: 75, leverage: 1 },
+    { kind: "yield", key: "USDC", weight: 25, leverage: 1 },
+  ]);
+  assertEquals(out.map((p) => p.weight), [75, 25]);
+});
+
 Deno.test("a perp that's the only pick stays at 100%", () => {
   assertEquals(run([{ kind: "perp", key: "SOL", weight: 100, leverage: 3 }]).map((p) => p.weight), [100]);
 });

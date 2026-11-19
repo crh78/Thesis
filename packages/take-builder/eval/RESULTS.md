@@ -29,3 +29,23 @@ database (slowing gte too); run 5 matches names in memory.
 
 More search rounds over the same BM25 index score within noise of v10 at twice the latency;
 searching Postgres directly (no aliases, no listed catalog) scores lower and gives up more often.
+
+## Direction and fit (120 cases: the 100 + 20 X mentions and posts, 101-120; 1 blind judge each)
+
+Main bought what a bearish take is against ("$TSLA demand is collapsing": Tesla; "restaurants are in
+trouble": McDonald's, Wendy's), stood a broad index or an unrelated name in for a sector the catalog
+doesn't have (utilities: the S&P 500; nuclear: Lockheed), and dropped a perp below high risk even
+when it's the only way to hold a name (Eli Lilly: the basket became cash or an off-topic market).
+
+Fixed with: every pick IN what the take is about or no_clean_exposure; a `gains_if_right` per pick
+and a `bearish` flag (a bearish post's $cashtags aren't copied as buys); a 1x perp for a name with
+no stock at any risk, uncapped; no name-matching fallback once the model has answered.
+
+| Builder | vs main W-T-L | score (main) | X cases (main) | p50 / p90 |
+|---|---|---|---|---|
+| reasoning low (the app) | 44-62-14 | 6.93 (5.79) | 6.5 (3.7) | 1.5 / 2.3 s |
+| **reasoning medium (the bots, via `POST /source/drafts`)** | **52-62-6** | **7.44 (5.77)** | **7.2 (3.7)** | 2.8 / 5.1 s |
+
+Main's p50 / p90 on the same run: 1.8 / 3.0 s. Low still bought longs on a bearish post in some
+runs; medium didn't. Medium's losses: a low-risk basket without its cash, a prediction market
+diluted by the stock.
