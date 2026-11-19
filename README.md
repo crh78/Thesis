@@ -122,7 +122,6 @@ Anyone signs up on the web app, replies "@yourthesisxyz back $20" under a post o
 - **Privy session signers** and the spending-limit consent screen (`apps/www/app/limits`): per-trade and daily limits the user approves once and can revoke. The X agent, auto-copy and iMessage trading all use them. (Project owner.)
 - **The X reply agent trading for users** ("@yourthesisxyz back $20" or "fade $50" under any post): it reads the post, builds a basket, trades from the replier's Privy wallet within their limits, and replies with what it bought. The take is the replier's; others can back and fade it, and the replier earns the creator share. Needs the session signers, the X developer app's keys, X's written approval for an AI reply bot, and a hard monthly cap in the X console. (Project owner.)
 - **The owner's agent code** (`packages/agent`): `horizon` optional (`BasketArgs`, the `build_basket` tool schema and its 3-month default, the prompt, the `/source/drafts` body), sell intents with `bps` / `usd`, and a warning when a sale closes the author's take (`closesTake`). Then `apps/x` drops its `FIXED_HORIZON`. Also the Thesis MCP server.
-- **iOS:** the team's development builds need rebuilding from `main` against the fork host (`FORK_API_URL = https:/$()/<fork-host>`): each Mac that builds one needs an Apple ID signed in to Xcode (Settings → Accounts) and the phone connected. (Since the last builds: stopped-trade recovery, the 5-pick cap, "Finding assets that match", Collector Crypt's logo on card legs.)
 - **Speed:** checked with `pnpm fork:load-trades` (2026-11-19, 4–5 people at once, every leg type): every trade landed and 18 of 19 sales, with no Jupiter waits; Phoenix sends queue one at a time (up to ~2 s when all 5 tap together), and a wallet's first Phoenix trade registers its Phoenix accounts (2–5 s, during the sheet's prebuild in the apps).
 - **Dogfood** every screen at phone and desktop width and every trade path (back, fade, partial and full sale, cash-out, claims; spot, yield, perp, prediction and card legs) on web and iOS, including Phoenix on a phone (the liquidation alert hasn't fired on the fork, which can't move a price that far).
 - **Open the fork:** resets are allowed until it's public; from then, none ([resets](scripts/fork/README.md#resets)).
@@ -145,7 +144,7 @@ No users and no money in; a real program ID and real activity ([launch checklist
 
 ### Phase 3: real mainnet
 
-- The native iOS app on the App Store (the Apple Developer Program is paid then, not before).
+- The native iOS app on the App Store (the Apple Developer Program is paid then, not before). Until then the team's development builds aren't rebuilt (deferred 2026-11-19: the web app is the product for phase 1); the next one comes from `main` against the fork host (`FORK_API_URL = https:/$()/<fork-host>`), on a Mac with an Apple ID in Xcode, and picks up stopped-trade recovery, the 5-pick cap, "Finding assets that match" and Collector Crypt's logo on card legs.
 - Money in: USDC over CCTP, and an Apple Pay onramp. Withdrawals and an offramp.
 - The mainnet gate: the whole product (UI, backend, AI, iMessage) dogfooded on the fork first.
 - Security: a fuller outside review; the settler key in OCI Vault; the upgrade authority on a multisig, with a separate allowlist key.
@@ -156,7 +155,7 @@ No users and no money in; a real program ID and real activity ([launch checklist
 
 ### Account-owner setup
 
-- **X developer app: done (2026-11-19).** Pay-per-use credits ($40), a $10 monthly cap (raise it when the bot goes live), the app owned by @yourthesisxyz with read and write tokens, the account marked automated, and X's approval for an AI reply bot requested. Left: fill `apps/x/.env` (the API key and secret, the access token and secret, `OPENAI_API_KEY`, `THESIS_BOT_SECRET` = the Vault's `bot_secret`) and dry-run it (`X_DRY_RUN=1`).
+- **X developer app: done (2026-11-19).** Pay-per-use credits ($40), a $10 monthly cap (raise it when the bot goes live), the app owned by @yourthesisxyz with read and write tokens, the account marked automated, and X's approval for an AI reply bot requested. Left: the bot account's OAuth 1.0a access token and secret, `OPENAI_API_KEY` and `THESIS_BOT_SECRET` (the Vault's `bot_secret`) in `apps/x/.env` on the machine that runs the bot, then a dry run (`X_DRY_RUN=1`).
 - **Privy: done.** Sign-in with X and session signers are on.
 
 ### Open decisions
