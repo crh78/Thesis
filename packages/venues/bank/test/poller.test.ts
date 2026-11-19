@@ -181,3 +181,51 @@ test("poller: probes pause while trade builds are running, and pick up where the
   await poller.probes();
   assert.equal(Object.values(poller.state.tokens).filter((t) => t.probe).length, 16);
 });
+
+test("config: ASSET_BANK_DEXES lists the probes' venues; unset or empty means every venue", () => {
+  assert.equal(loadBankConfig(() => null).dexes, null, "mainnet: no restriction");
+  assert.equal(loadBankConfig((k) => (k === "ASSET_BANK_DEXES" ? " , " : null)).dexes, null);
+  const c = loadBankConfig((k) => (k === "ASSET_BANK_DEXES" ? "Whirlpool, Raydium CLMM,,Whirlpool" : null));
+  assert.deepEqual(c.dexes, ["Whirlpool", "Raydium CLMM"]);
+});
+
+test("selectStale: a probe taken through another venue list is due at once, first", () => {
+  const s = fixtureState();
+  const at = (minAgo: number) => new Date(NOW - minAgo * MIN).toISOString();
+  const routed = (minAgo: number, dexes?: string[]) => ({ at: at(minAgo), maxAccounts: 30, ...(dexes ? { dexes } : {}), quotes: [{ usd: 100, routed: true, outAmountRaw: "1", priceImpactPct: 0, hops: 1, venues: [], error: null }] });
+  const [a, b, c] = ["NVDAx", "NVDA", "SPYx"].map((x) => bySymbol(s, x));
+  const fork = ["Whirlpool", "Raydium CLMM"];
+  a.probe = routed(1); // fresh, but taken through every venue
+  b.probe = routed(20, fork); // stale anyway
+  c.probe = routed(1, ["Raydium CLMM", "Whirlpool"]); // fresh, same list in another order
+  const o = { ttlMs: 7.5 * MIN, unroutedTtlMs: 60 * MIN, limit: 10 };
+  assert.deepEqual(selectStale([a, b, c], NOW, { ...o, dexes: fork }).map((t) => t.symbol), ["NVDAx", "NVDA"]);
+  // The restriction lifted: the fork-only probes are due, the unrestricted one is fresh.
+  assert.deepEqual(selectStale([a, b, c], NOW, { ...o, dexes: null }).map((t) => t.symbol), ["SPYx", "NVDA"]);
+});
+
+test("poller: with ASSET_BANK_DEXES set, probes quote only through those venues and record them", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bank-"));
+  const config = loadBankConfig((k) => (k === "ASSET_BANK_JUPITER_RPM" ? "45" : k === "ASSET_BANK_DEXES" ? "Whirlpool,Raydium CLMM" : null));
+  const seen: (string[] | undefined)[] = [];
+  const state = fixtureState();
+  for (const t of Object.values(state.tokens)) t.jupiterPooledUsd = 1e6;
+  const jupiter = fakeJupiter({ quotes: [], prices: 0 });
+  const quote = jupiter.quote;
+  // A venue outside the list (ZeroFi) is NVDAx's only route: through the list, nothing routes.
+  const nvdax = bySymbol(state, "NVDAx").mint;
+  jupiter.quote = (async (mint, usd, o) => {
+    seen.push(o.dexes);
+    if (mint === nvdax && o.dexes?.length) return { quote: null, error: "NO_ROUTES_FOUND" };
+    return quote(mint, usd, o);
+  }) as JupiterClient["quote"];
+  const poller = new AssetBankPoller(state, { sink: new FileSink(join(dir, "bank.json")), config, jupiter, rpc: {} as any, clock: manualClock(NOW), log: () => {} });
+  await poller.probes();
+  assert.ok(seen.length > 0 && seen.every((d) => d?.join(",") === "Whirlpool,Raydium CLMM"));
+  const t = poller.state.tokens[nvdax];
+  assert.deepEqual(t.probe?.dexes, ["Whirlpool", "Raydium CLMM"]);
+  assert.equal(t.liquidity.class, "no-route");
+  assert.match(t.liquidity.reason, /through ASSET_BANK_DEXES/);
+  // Every token was re-probed, fresh or not: the old probes were taken through every venue.
+  assert.equal(Object.values(poller.state.tokens).filter((x) => x.probe?.dexes).length, 16);
+});

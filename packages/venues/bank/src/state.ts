@@ -52,7 +52,8 @@ export type TokenEntry = {
   mintReadAt: string | null;
   /** Jupiter Price v3: usd per UI token, and stockData.price (the underlying's own price) when Jupiter has it. */
   price: { usd: number; underlyingUsd: number | null; at: string } | null;
-  probe: { at: string; maxAccounts: number; quotes: ProbeQuote[] } | null;
+  /** `dexes`: the only venues the quotes could route through (ASSET_BANK_DEXES); absent: every venue. */
+  probe: { at: string; maxAccounts: number; dexes?: string[]; quotes: ProbeQuote[] } | null;
   liquidity: {
     class: TokenClass;
     reason: string;
@@ -195,7 +196,7 @@ export function classifyToken(t: TokenEntry, refUsd: number | null, o: ClassifyO
     out.ratioSuspect = true;
     return { ...out, class: "thin", reason: `$100 buys ${(-c100.premium).toFixed(1)}% more than the reference price allows: units-per-token ratio is suspect` };
   }
-  if (c100.cost === null) return { ...out, class: "no-route", reason: `no $100 route at maxAccounts=${t.probe.maxAccounts}${q100?.error ? ` (${q100.error})` : ""}` };
+  if (c100.cost === null) return { ...out, class: "no-route", reason: `no $100 route at maxAccounts=${t.probe.maxAccounts}${t.probe.dexes?.length ? " through ASSET_BANK_DEXES" : ""}${q100?.error ? ` (${q100.error})` : ""}` };
   if (c100.cost < o.tradeableCostPct) return { ...out, class: "tradeable", reason: `$100 buy costs ${c100.cost.toFixed(2)}%` };
   return { ...out, class: "thin", reason: `$100 buy costs ${c100.cost.toFixed(2)}%` };
 }
@@ -246,17 +247,26 @@ export function isProbeCandidate(t: TokenEntry, floorUsd: number): boolean {
   return routedBefore || (t.jupiterPooledUsd ?? 0) >= floorUsd;
 }
 
+/** The venue list a probe was taken with, as a comparable key ("" for every venue). */
+export const dexesKey = (dexes: string[] | null | undefined): string => [...(dexes ?? [])].sort().join(",");
+
+/** A probe taken with a different venue list than the poller's now: it says nothing about today's routes. */
+const otherDexes = (t: TokenEntry, dexes: string[] | null | undefined) => Boolean(t.probe) && dexesKey(t.probe!.dexes) !== dexesKey(dexes);
+
 /**
  * Picks up to `limit` stale tokens, never-probed first, then oldest first.
  * A token whose last $100 probe routed is stale after `ttlMs`; one that did not route
  * only after `unroutedTtlMs` (an hour by default), so dead pools cost little.
+ * A probe taken through a different venue list (`dexes`, ASSET_BANK_DEXES changed) is due at
+ * once and goes first, like a never-probed token.
  */
-export function selectStale(tokens: TokenEntry[], nowMs: number, o: { ttlMs: number; unroutedTtlMs: number; limit: number }): TokenEntry[] {
+export function selectStale(tokens: TokenEntry[], nowMs: number, o: { ttlMs: number; unroutedTtlMs: number; limit: number; dexes?: string[] | null }): TokenEntry[] {
   const due = tokens.filter((t) => {
-    if (!t.probe) return true;
+    if (!t.probe || otherDexes(t, o.dexes)) return true;
     const routed = t.probe.quotes.some((q) => q.usd === 100 && q.routed);
     return ageMs(t.probe.at, nowMs) >= (routed ? o.ttlMs : o.unroutedTtlMs);
   });
-  due.sort((a, b) => (ms(a.probe?.at) || 0) - (ms(b.probe?.at) || 0) || (b.jupiterPooledUsd ?? 0) - (a.jupiterPooledUsd ?? 0));
+  const since = (t: TokenEntry) => (otherDexes(t, o.dexes) ? 0 : ms(t.probe?.at) || 0);
+  due.sort((a, b) => since(a) - since(b) || (b.jupiterPooledUsd ?? 0) - (a.jupiterPooledUsd ?? 0));
   return due.slice(0, Math.max(0, o.limit));
 }

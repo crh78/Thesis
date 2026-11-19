@@ -29,7 +29,8 @@ export const WS_URL = process.env.FORK_WS_URL ?? `ws://${CLIENT_HOST}:${WS_PORT}
  * (HumidiFi, SolFi, TesseraV, Kipseli, Archer, Scorch, ... and new ones every month) price from
  * quotes their market maker pushes every slot, so on a fork they reject the swap (TesseraV:
  * 0xffff) or fill below the slippage limit (Jupiter 0x1771). An allowlist keeps new ones out
- * without chasing them. Mainnet routing uses every venue.
+ * without chasing them. Mainnet routing uses every venue. The asset bank's probes use the same
+ * list (ASSET_BANK_DEXES in infra/executor/executor.env.example; test/bank-dexes.test.ts).
  */
 export const FORK_DEXES = [
   "Whirlpool",

@@ -20,6 +20,12 @@ export type BankConfig = {
   quoteFloorUsd: number;
   maxAccounts: number;
   probeSizesUsd: [number, number];
+  /**
+   * The only Jupiter venues (DEX labels) liquidity probes may route through, or null for every
+   * venue. On the fork it is the fork API's FORK_DEXES list (`scripts/fork/lib.ts`), so the bank
+   * calls a token tradeable only when the fork's router can buy it too.
+   */
+  dexes: string[] | null;
   tradeableCostPct: number;
   maxDeviationPct: number;
   cardsMaxPages: number;
@@ -79,10 +85,18 @@ function num(name: string, dflt: number, get: (k: string) => string | null): num
   return n;
 }
 
+/** ASSET_BANK_DEXES: comma-separated Jupiter DEX labels ("Whirlpool,Raydium CLMM,..."). Unset or empty: every venue. */
+export const DEXES_ENV = "ASSET_BANK_DEXES";
+
+export function parseDexes(raw: string | null): string[] | null {
+  const list = [...new Set((raw ?? "").split(",").map((d) => d.trim()).filter(Boolean))];
+  return list.length ? list : null;
+}
+
 export function loadBankConfig(get: (k: string) => string | null = envVar): BankConfig {
   const out: Record<string, unknown> = {};
   for (const [k, [name, dflt, unit]] of Object.entries(CONFIG_ENV)) out[k] = num(name, dflt, get) * unit;
   const freshness: Record<string, number> = {};
   for (const [k, [name, dflt, unit]] of Object.entries(FRESHNESS_ENV)) freshness[k] = num(name, dflt, get) * unit;
-  return { ...(out as Omit<BankConfig, "probeSizesUsd" | "freshness">), probeSizesUsd: [100, 1000], freshness: freshness as BankConfig["freshness"] };
+  return { ...(out as Omit<BankConfig, "probeSizesUsd" | "dexes" | "freshness">), probeSizesUsd: [100, 1000], dexes: parseDexes(get(DEXES_ENV)), freshness: freshness as BankConfig["freshness"] };
 }

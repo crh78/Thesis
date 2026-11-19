@@ -20,10 +20,13 @@ The shared fork will be public once the product opens up. A reset (a fresh fork)
 - **No clock-moving suites without the maintainer's OK.** `fork:settler-e2e` jumps the clock days ahead (`surfnet_timeTravel`), after which swaps fail until the fork is reset; it refuses to start without `-- --move-clock`. Every other suite only adds throwaway wallets and test trades.
 - **Clean up the old fork's data after every reset**. Supabase keeps the old fork's rows, so pre-reset takes stay `live` with a Trade button that only gets `409 take_missing`. Once the fresh fork is up, with the maintainer's OK:
   1. **Back up** the rows you're about to delete.
-  2. **Delete** takes posted before the reset (with their legs, stats and comments), and the old fork's chain events, positions (`chain_positions` and their partial sales, `chain_position_parts`) and notifications.
-  3. **Check** the feeds show only takes posted since the reset, and every Trade button works.
+  2. **Delete** takes posted before the reset (with their legs, stats and comments), and the old fork's chain events, positions (`chain_positions` and their partial sales, `chain_position_parts`) and notifications. Deleting a take removes only the notifications that point at it: the daily positions digests (`daily_positions`), badges and liquidation warnings carry no take, so delete every fork-network notification from before the reset too, `<reset>` being when the fresh fork came up:
+     ```sql
+     delete from public.notifications where network = 'solana-mainnet-fork' and created_at < '<reset>';
+     ```
+  3. **Check** the feeds show only takes posted since the reset, every Trade button works, and nobody's inbox shows the old fork's digests or badges.
 
-  The cards reset did this first ([`docs/cards-reset.md`](../../docs/cards-reset.md)); reuse its backup and queries.
+  The cards reset did this first ([`docs/cards-reset.md`](../../docs/cards-reset.md), step 8).
 
 ## Quick start
 
@@ -83,7 +86,7 @@ Settings, all optional:
 
 `fork:up` also creates a fork-only **app fee payer** (`.data/fork/app-payer.json`) and the **Thesis lookup table** (`.data/fork/thesis-alt.json`; with `JUPITER_API_KEY` it adds Jupiter Lend's accounts, so a sale with a yield leg fits one transaction). Surfpool keeps state in memory (`--no-tui --no-deploy --airdrop-amount 0`, log in `.data/fork/surfpool.log`, Studio on 18488): after `fork:down`, a crash or a reboot the fork starts fresh.
 
-**Swaps on the fork:** Surfpool keeps its first copy of each account, so pools go stale within minutes. Call `refreshMarkets(leg.marketAccounts)` from `lib.ts` before sending; it re-fetches them and brings the clock to real time (`{ freshMs }` leaves accounts this process re-fetched that recently). Prop AMMs (HumidiFi, SolFi, TesseraV, ...) price from quotes pushed every slot and fail on stale copies, so fork routes use only `FORK_DEXES` (state-based AMMs and books). Mainnet uses every venue.
+**Swaps on the fork:** Surfpool keeps its first copy of each account, so pools go stale within minutes. Call `refreshMarkets(leg.marketAccounts)` from `lib.ts` before sending; it re-fetches them and brings the clock to real time (`{ freshMs }` leaves accounts this process re-fetched that recently). Prop AMMs (HumidiFi, SolFi, TesseraV, ...) price from quotes pushed every slot and fail on stale copies, so fork routes use only `FORK_DEXES` (state-based AMMs and books). Mainnet uses every venue. The asset bank's liquidity probes must use the same list (`ASSET_BANK_DEXES` in `/etc/thesis/executor.env`, the value in `infra/executor/executor.env.example`; `test/bank-dexes.test.ts` keeps the two equal), or the take builder offers tokens whose only route is a venue the fork can't use and the receipt can't buy them.
 
 ## How the program is deployed without its keypair
 
