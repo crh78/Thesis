@@ -55,6 +55,26 @@ export type LegRisk = {
 export const riskLevel = (distance: number | null): LegRisk["level"] =>
   distance === null ? "ok" : distance <= CLOSE_TO_LIQUIDATION ? "close" : distance <= NEAR_LIQUIDATION ? "near" : "ok";
 
+/** Released margin below this (USD) isn't worth an instruction. */
+export const MIN_RELEASE_USD = 0.01;
+
+/**
+ * What a partial close of `fraction` of a child's position frees, keeping its leverage: the child
+ * runs at notional / equity now (capped at the market's max, so the target never asks Phoenix
+ * for less margin than it allows), and once the close shrinks the notional, withdrawing down to
+ * that leverage frees about `fraction` of the equity (a bit less: the target rounds down). Null
+ * when nothing would be freed (no equity, a leverage above the market's max that the close alone
+ * doesn't bring under it, or dust).
+ */
+export function freedMargin(equityUsd: number, notionalUsd: number, fraction: number, maxLeverage: number): { targetLeverageBps: bigint; usd: number } | null {
+  if (!(equityUsd > 0) || !(notionalUsd > 0) || !(fraction > 0) || fraction >= 1) return null;
+  const leverage = Math.min(notionalUsd / equityUsd, maxLeverage > 0 ? maxLeverage : Infinity);
+  const bps = Math.floor(leverage * 10_000);
+  if (bps <= 0) return null;
+  const usd = equityUsd - (notionalUsd * (1 - fraction)) / (bps / 10_000);
+  return usd >= MIN_RELEASE_USD ? { targetLeverageBps: BigInt(bps), usd } : null;
+}
+
 /** How long a child chosen for a build stays reserved for it (a build lives 90 s). */
 const RESERVE_MS = 3 * 60_000;
 
@@ -302,26 +322,64 @@ export class PhoenixDesk {
     return out;
   }
 
-  /**
-   * Market orders closing every open Phoenix position of a position's legs (a sale), or with `bps`
-   * (a partial sale) that share of each one's lots, rounded toward zero: 422 `part_too_small` when
-   * that rounds a leg's order to nothing. A partial close leaves the child's collateral in place:
-   * the rest of the leg keeps it (lower leverage) until it's sold too, then the cash-out sweeps it.
-   */
-  async closeLegs(position: PublicKey, owner: PublicKey, names: Map<number, string>, bps?: number): Promise<VenueLeg[]> {
+  /** Market orders closing every open Phoenix position of a position's legs (a sale of all of it). */
+  async closeLegs(position: PublicKey, owner: PublicKey, names: Map<number, string>): Promise<VenueLeg[]> {
     const legs = this.legsOf(position);
     const traders = await this.#traders(owner, legs.map((l) => l.sub));
     const out: VenueLeg[] = [];
     for (const [i, l] of legs.entries()) {
       const p = traders[i]?.positions[0];
       if (!p) continue; // already closed (an earlier sale attempt, or liquidated)
-      const baseLots = bps === undefined ? p.baseLots : partLots(p.baseLots, bps);
-      if (baseLots === 0n) throw new ApiError(422, "part_too_small", `That's too small a part of ${names.get(l.leg) ?? l.symbol} to sell on Phoenix. Sell more.`);
       const mid = await this.venue.mid(l.symbol);
       if (!mid) throw new ApiError(422, "no_exit_route", `Phoenix has no price for ${l.symbol} right now.`);
-      out.push(await this.venue.closeLeg({ owner, sub: l.sub, symbol: l.symbol, baseLots, price: mid, label: names.get(l.leg) ?? l.symbol }));
+      out.push(await this.venue.closeLeg({ owner, sub: l.sub, symbol: l.symbol, baseLots: p.baseLots, price: mid, label: names.get(l.leg) ?? l.symbol }));
     }
     return out;
+  }
+
+  /**
+   * A partial sale's Phoenix legs: each child closes `bps` of its lots (rounded toward zero: 422
+   * `part_too_small` when that rounds a leg's order to nothing) and, in the same instruction set,
+   * moves the closed share's margin to the parent with Phoenix's `withdraw_to_target_leverage`
+   * at the leverage the child runs at now, so what's left keeps its leverage (`freedMargin`). The
+   * cash-out withdraws it from the parent once the sale lands (`phoenixCashOut`).
+   *
+   * `usd`: what the sale frees (the margin moved out), `notional`: the size closed at the mid
+   * (what the 1% slippage applies to), `released`: whether any margin moves (then the app should
+   * cash out). Null when a market has no price now.
+   */
+  async reduceLegs(position: PublicKey, owner: PublicKey, names: Map<number, string>, bps: number): Promise<{ legs: VenueLeg[]; usd: number; notional: number; released: boolean } | null> {
+    const legs = this.legsOf(position);
+    const traders = await this.#traders(owner, legs.map((l) => l.sub));
+    const out: VenueLeg[] = [];
+    let usd = 0;
+    let notional = 0;
+    let released = false;
+    for (const [i, l] of legs.entries()) {
+      const t = traders[i];
+      const p = t?.positions[0];
+      if (!t || !p) continue; // already closed (liquidated): nothing to reduce
+      const label = names.get(l.leg) ?? l.symbol;
+      const baseLots = partLots(p.baseLots, bps);
+      if (baseLots === 0n) throw new ApiError(422, "part_too_small", `That's too small a part of ${label} to sell on Phoenix. Sell more.`);
+      const [worth, m, mid] = await Promise.all([this.#worth(t, l.symbol), this.venue.market(l.symbol), this.venue.mid(l.symbol)]);
+      if (worth === null) return null;
+      if (!mid) throw new ApiError(422, "no_exit_route", `Phoenix has no price for ${l.symbol} right now.`);
+      const close = await this.venue.closeLeg({ owner, sub: l.sub, symbol: l.symbol, baseLots, price: mid, label });
+      const fraction = Number(baseLots) / Number(p.baseLots);
+      notional += worth.notional * fraction;
+      const freed = freedMargin(worth.usd, worth.notional, fraction, m.maxLeverage);
+      if (freed) {
+        // In the close's own venue leg, so both land in one transaction, after the close.
+        const release = await this.venue.releaseLeg({ owner, sub: l.sub, targetLeverageBps: freed.targetLeverageBps, label });
+        close.instructions.push(...release.instructions);
+        close.label = `${close.label}, release margin`;
+        usd += freed.usd;
+        released = true;
+      }
+      out.push(close);
+    }
+    return { legs: out, usd, notional, released };
   }
 
   /**
@@ -344,11 +402,18 @@ export class PhoenixDesk {
 
   /**
    * Cash a wallet can take out of Phoenix now: children with no position left and collateral in
-   * them (after a sale, a cash-out, or a liquidation's remainder). Positions still open on a
-   * Thesis position aren't counted.
+   * them (after a sale, a cash-out, or a liquidation's remainder), and the parent's collateral
+   * (the margin partial sales released, `reduceLegs`). A child still holding a position isn't
+   * touched: its margin backs what's left.
    */
   async sweepable(owner: PublicKey): Promise<{ sub: number; collateral: bigint }[]> {
-    return (await this.children(owner)).filter((c) => !c.trader.positions.length && c.trader.collateral > 0n).map((c) => ({ sub: c.sub, collateral: c.trader.collateral }));
+    const kids = await this.children(owner);
+    // Only wallets this service gave children can have released margin in their parent.
+    const parent = kids.length ? await this.trader(owner, PARENT_SUBACCOUNT) : null;
+    return [
+      ...(parent && !parent.positions.length && parent.collateral > 0n ? [{ sub: PARENT_SUBACCOUNT, collateral: parent.collateral }] : []),
+      ...kids.filter((c) => !c.trader.positions.length && c.trader.collateral > 0n).map((c) => ({ sub: c.sub, collateral: c.trader.collateral })),
+    ];
   }
 
   /**
@@ -368,7 +433,8 @@ export class PhoenixDesk {
   /** Withdraw legs for everything `sweepable`. */
   async sweepLegs(owner: PublicKey): Promise<VenueLeg[]> {
     const payer = this.#o.appPayer.publicKey;
-    return Promise.all((await this.sweepable(owner)).map((s) => this.venue.sweepLeg({ owner, payer, sub: s.sub, collateral: s.collateral, label: `Phoenix child ${s.sub}` })));
+    return Promise.all((await this.sweepable(owner)).map((s) =>
+      this.venue.sweepLeg({ owner, payer, sub: s.sub, collateral: s.collateral, label: s.sub === PARENT_SUBACCOUNT ? "Phoenix account" : `Phoenix child ${s.sub}` })));
   }
 
   /** Close legs for every stray position. */

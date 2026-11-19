@@ -1122,19 +1122,22 @@ export class ForkService {
         jupiterLendRedeem({ ...access, user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey! }))))),
     ]));
     if (shareValue == null) throw new ApiError(422, "no_exit_route", "Couldn't price this position's yield shares.");
-    // Phoenix legs: close each child's position, or the sale's share of its lots. The cash stays in
-    // the child: after a whole sale the app sweeps it (`buildPhoenixCashOut`), since Phoenix won't
-    // withdraw more than is there. After a partial sale the freed margin stays with the rest of the
-    // position (less leverage on what's left) until that's sold too.
+    // Phoenix legs: close each child's position, or the sale's share of its lots. After a whole
+    // sale the cash stays in the child and the app sweeps it (`buildPhoenixCashOut`), since Phoenix
+    // won't withdraw more than is there. A partial sale also moves the closed share's margin to the
+    // parent at the child's current leverage (`reduceLegs`), so what's left keeps its leverage, and
+    // the cash-out withdraws it from there.
+    const noPrice = () => new ApiError(422, "no_exit_route", "Phoenix has no price for one of this position's markets right now.");
     const phoenix = await t.time("phoenix", () => Promise.all(pieces.map(async (p) => {
-      if (!p.onPhoenix.length) return { closes: [] as VenueLeg[], usd: 0, notional: 0 };
-      const [closes, worth] = await Promise.all([
-        this.#phoenix!.closeLegs(p.position, owner, names, p.sale.full ? undefined : p.bps),
-        this.#phoenix!.valueAndNotional(p.position, owner),
-      ]);
-      if (worth === null) throw new ApiError(422, "no_exit_route", "Phoenix has no price for one of this position's markets right now.");
-      const share = p.sale.full ? 1 : p.bps / FULL_BPS;
-      return { closes, usd: worth.usd * share, notional: worth.notional * share };
+      if (!p.onPhoenix.length) return { closes: [] as VenueLeg[], usd: 0, notional: 0, cashOut: false };
+      if (!p.sale.full) {
+        const part = await this.#phoenix!.reduceLegs(p.position, owner, names, p.bps);
+        if (part === null) throw noPrice();
+        return { closes: part.legs, usd: part.usd, notional: part.notional, cashOut: part.released };
+      }
+      const [closes, worth] = await Promise.all([this.#phoenix!.closeLegs(p.position, owner, names), this.#phoenix!.valueAndNotional(p.position, owner)]);
+      if (worth === null) throw noPrice();
+      return { closes, usd: worth.usd, notional: worth.notional, cashOut: true };
     })));
     const closes = phoenix.reduce((n, x) => n + x.closes.length, 0);
     const escrowUsd = pieces.reduce((n, p) => n + p.escrowUsd, 0);
@@ -1173,10 +1176,10 @@ export class ForkService {
         expectedUsd: swapped("outAmount") + shareValue + escrowUsd + phx.expected,
         minimumUsd: swapped("otherAmountThreshold") + shareValue + escrowUsd + phx.minimum,
         /**
-         * Phoenix legs sold whole: once this lands, build `phoenix/cash-out` to move their cash back
-         * to USDC. A partial sale leaves the freed margin with the rest of the position.
+         * Phoenix legs sold, whole or in part (the margin a part freed): once this lands, build
+         * `phoenix/cash-out` to move that cash back to USDC.
          */
-        phoenixCashOut: pieces.some((p, i) => p.sale.full && (phoenix[i].closes.length > 0 || p.onPhoenix.length > 0)),
+        phoenixCashOut: phoenix.some((x) => x.cashOut),
       };
     };
     try {
