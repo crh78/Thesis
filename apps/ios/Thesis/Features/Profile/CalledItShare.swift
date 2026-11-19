@@ -838,7 +838,7 @@ extension AppState {
     /// `takeReturn` overrides the take's return (the take page passes the on-chain one).
     func shareCard(for take: Take, takeReturn: Double? = nil) -> CallCard {
         if isOnFork, let p = forkPortfolio?.holdings.first(where: { $0.takeId == take.id }),
-           let value = p.valueUsd, let cost = p.costUsd, cost > 0 {
+           let value = p.valueUsd, let cost = p.heldCostUsd, cost > 0 {
             return CallCard(takeID: take.id, claim: take.claim, ret: (value / cost - 1) * 100, faded: p.side == "fade",
                             author: p.authorHandle ?? take.author.handleID, name: me.name, handle: me.id, avatar: me.avatar,
                             since: take.since, legs: take.legs)

@@ -1,19 +1,73 @@
 import SwiftUI
 import os
 
-/// Trade or Fade a take. The sheet sits at a partial detent so iOS gives it the
-/// Liquid Glass sheet material; amount presets are separate glass pills.
+/// Trade or Fade a take, or sell what you hold in it: Buy | Sell tabs, Buy first (or Sell, opened
+/// from a position's Sell button). The sheet sits at a partial detent so iOS gives it the Liquid
+/// Glass sheet material.
+struct TradeSheet: View {
+    let intent: TradeIntent
+    @State private var tab: TradeTab
+
+    init(intent: TradeIntent) {
+        self.intent = intent
+        _tab = State(initialValue: intent.tab)
+    }
+
+    var body: some View {
+        Group {
+            switch tab {
+            case .buy: BuyPanel(intent: intent, tab: $tab)
+            case .sell: SellPanel(take: intent.take, side: intent.side, tab: $tab)
+            }
+        }
+        .presentationDetents([.fraction(0.9)])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+/// The sheet's top row: the Buy | Sell tabs and Close.
+struct TradeSheetTop: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var tab: TradeTab
+    /// A trade or sale is on its way: neither switching nor closing.
+    var busy = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Picker("Buy or sell", selection: $tab) {
+                Text("Buy").tag(TradeTab.buy)
+                Text("Sell").tag(TradeTab.sell)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 168)
+            .disabled(busy)
+            .accessibilityIdentifier("trade-tabs")
+            Spacer()
+            Button { dismiss() } label: {
+                Image(systemName: "xmark").font(.system(size: 15, weight: .semibold))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .accessibilityLabel("Close")
+            .disabled(busy)
+        }
+    }
+}
+
+/// The Buy tab: trade or fade a take.
 ///
 /// Any amount from $1 up to your balance (starts at $20). It comes out of your
 /// balance and buys shares at the take's price (1 + its return); sell them any
-/// time from the take page.
+/// time from the Sell tab.
 ///
 /// Fork mode: the trade is built before the tap (as the sheet opens, at once on a preset, and
 /// half a second after typing stops), so the tap only signs and sends it. It shows "You're in"
 /// as soon as the fork accepts it; if it then doesn't land, the sheet (or a banner, once it's
 /// closed) says so and your balance comes back.
-struct TradeSheet: View {
+private struct BuyPanel: View {
     let intent: TradeIntent
+    @Binding var tab: TradeTab
 
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -38,10 +92,6 @@ struct TradeSheet: View {
     private static let log = Logger(subsystem: "xyz.yourthesis.app", category: "trade")
 
     private let presets: [Double] = [10, 20, 50, 100]
-
-    init(intent: TradeIntent) {
-        self.intent = intent
-    }
 
     /// Fork mode: what the chain can trade right now, loaded when the sheet opens.
     @State private var receipt: ForkReceipt?
@@ -111,7 +161,8 @@ struct TradeSheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 14) {
+                    TradeSheetTop(tab: $tab, busy: placing || confirming != nil)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("\(side.title) \(take.author.name)'s take")
                             .font(.geist(26, .bold))
@@ -121,14 +172,6 @@ struct TradeSheet: View {
                             .font(.geist(14))
                             .foregroundStyle(Palette.muted)
                     }
-                    Spacer()
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark").font(.system(size: 15, weight: .semibold))
-                            .frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .accessibilityLabel("Close")
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -323,8 +366,6 @@ struct TradeSheet: View {
         .onDisappear {
             if let confirming { app.sheetShows(confirming, false) }
         }
-        .presentationDetents([.fraction(0.9)])
-        .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(placing)
         .sensoryFeedback(.success, trigger: placed)
     }

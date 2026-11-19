@@ -3,6 +3,8 @@ import SwiftUI
 struct TradeIntent: Identifiable {
     let take: Take
     let side: Side
+    /// The tab the trade sheet opens on: Buy, or Sell from a position's Sell button.
+    var tab: TradeTab = .buy
     var id: String { take.id + side.rawValue }
 }
 

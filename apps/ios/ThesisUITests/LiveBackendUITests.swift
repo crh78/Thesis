@@ -369,9 +369,10 @@ final class LiveBackendUITests: XCTestCase {
         XCTAssertTrue(sell.waitForExistence(timeout: 15))
         let soldCount = app.staticTexts.matching(identifier: "Sold").count
         sell.tap()
-        let confirm = app.buttons["Confirm full sale"]
+        // The trade sheet's Sell tab, at all of it; its build (and quote) comes in ahead of the tap.
+        let confirm = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Sell all'")).firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 50))
-        XCTAssertTrue(app.descendants(matching: .any)["fork-exit-minimum"].firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["sell-minimum"].firstMatch.waitForExistence(timeout: 50))
         confirm.tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 75))
         let sold = app.staticTexts.matching(identifier: "Sold")
