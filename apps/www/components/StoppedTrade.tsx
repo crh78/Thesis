@@ -1,9 +1,10 @@
 "use client";
 // A split trade that stopped partway (the fork API's `trade_incomplete`): part of it landed, so the
 // wallet holds tokens that aren't in a position. The owner's decision: retry once ("Finish the
-// trade"), and if that fails, sweep them back to USDC ("Swap the leftover back to cash"). Drawn in
-// TradeDock's sheet right after a trade stops, and as a card on Me (GET /wallets/:w/incomplete),
-// so it can be finished after a reload or on another device.
+// trade"), and if that fails, sweep them back to USDC ("Swap the leftover back to cash"). TradeDock
+// runs the retry itself right after a trade stops (no tap), so its sheet draws this only when that
+// didn't finish it; Me draws it as a card (GET /wallets/:w/incomplete), so it can be finished after
+// a reload or on another device.
 import { useState } from "react";
 import { usd } from "@/lib/data";
 import { ForkError, retryTrade, sweepToCash, type Built, type Incomplete, type Recovery } from "@/lib/fork";

@@ -7,7 +7,10 @@
 // Fast trades (lib/trade.ts): the sheet builds as soon as it opens and again as the amount changes,
 // so the tap only signs and sends. "You're in" shows once the fork has accepted the transactions;
 // confirmation is watched in the background, and the rare trade that doesn't confirm is rolled back
-// on screen ("That trade didn't go through").
+// on screen ("That trade didn't go through"). A trade the fork refuses for slippage recovers without
+// a tap (the wallet signs silently): one that sent nothing (`requote`) is built again with fresh
+// quotes, and a split trade that stopped partway is finished with its one retry; the stopped-trade
+// screen shows only when that fails too.
 //
 // The sheet has Buy | Sell tabs once you hold something in the take (Buy opens first). Sell sells
 // all or part of a side's holding (lib/sell.ts), by % or $, built ahead of the tap like a trade.
@@ -15,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { closedReason, legName, money, pct, takeState, usd, type Position, type Receipt } from "@/lib/data";
 // The fork client adds the Privy token on money calls and handles "Sign in again".
-import { cashOutPhoenix, centsInput, depositLeft, fork, ForkError, markTraded, stoppedTrade, stopwatch, submit, useForkWallet, type Built, type Incomplete, type PhoenixLeg, type PhoenixRisk, type Stopwatch, type WalletSummary } from "@/lib/fork";
+import { cashOutPhoenix, centsInput, depositLeft, fork, ForkError, markTraded, REQUOTE_FAILED, requoted, retryTrade, stoppedTrade, stopwatch, submit, useForkWallet, type Built, type Incomplete, type PhoenixLeg, type PhoenixRisk, type Stopwatch, type WalletSummary } from "@/lib/fork";
 import { ALL_BPS, bpsOf, exitKey, holdingKey, holdingsOf, isAll, legacyBuild, limitNote, missingRoute, normalize, parseSaleKey, partLabel, PCT_PRESETS, remainingOf, saleBody, saleRefusal, soldAll, USD_PRESETS, type Holding, type SaleAmount } from "@/lib/sell";
 import { pendingTrade, useEarlyBuild, watchSubmission, type PendingTrade, type Submission } from "@/lib/trade";
 import { cardValue } from "@/lib/data";
@@ -419,6 +422,8 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
     if (!(usdAmount >= config.minStakeUsd)) return setError(`The minimum is $${config.minStakeUsd}.`);
     setError(null);
     const sw = stopwatch();
+    const p = { kind: side, takeId, usd: usdAmount, position: null };
+    const text = `You ${side === "back" ? "traded" : "faded"} ${author}'s take with $${usdAmount}.`;
     try {
       setBusy(side === "back" ? "Trading…" : "Fading…");
       if (!(await priorSettled())) return;
@@ -426,20 +431,55 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
       const t = await early.take(tradeKey(side, usdAmount));
       sw.mark("built", t.at);
       const signed = await sign(t.built, sw);
-      await place({ kind: side, takeId, usd: usdAmount, position: null }, t.built, signed, sw, `You ${side === "back" ? "traded" : "faded"} ${author}'s take with $${usdAmount}.`);
+      try {
+        await place(p, t.built, signed, sw, text);
+      } catch (e) {
+        if (!requoted(e)) throw e;
+        // Refused for slippage with nothing sent (the fork API already sent the same bytes once
+        // more): build it again with fresh quotes and sign once more, without asking. The wallet
+        // signs silently, so this is one tap all the same.
+        sw.mark("requote");
+        const again = await early.take(tradeKey(side, usdAmount));
+        await place(p, again.built, await sign(again.built, sw), sw, text).catch((e2: unknown) => {
+          throw requoted(e2) ? new ForkError("send_failed", REQUOTE_FAILED) : e2;
+        });
+      }
     } catch (e) {
       const stopped = stoppedTrade(e);
       if (stopped) {
-        // Some legs were bought, the rest (and the receipt) weren't: finish it, or swap them back.
+        // Some legs were bought, the rest (and the receipt) weren't: finish it at once with its
+        // one retry, and only if that doesn't work offer to finish it, or swap them back.
         markTraded();
+        const left = await finishStopped(stopped);
+        if (!left) return recovered(text);
         await refresh().catch(() => {});
-        return setStep({ kind: "incomplete", ...stopped });
+        return setStep({ kind: "incomplete", ...left });
       }
       // The author sold while this was open: read the receipt again so the dock shows it's closed.
       if (e instanceof ForkError && e.code === "take_closed") await refresh().catch(() => {});
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
+    }
+  }
+
+  /**
+   * A split trade that stopped partway, right after its submit: its one retry (the legs that didn't
+   * land, quoted afresh, on the same ticket) is built, signed and sent at once, without asking:
+   * signing is silent, and the owner's rule ("retry once, then sweep") is the same. Null when that
+   * finished it; otherwise what the stopped-trade screen shows (only the sweep once the retry was
+   * used or can't be built; the retry still offered after a busy or unreachable API).
+   */
+  async function finishStopped(stopped: { trade: Incomplete | null; retry: boolean }): Promise<{ trade: Incomplete | null; retry: boolean } | null> {
+    if (!stopped.retry || !address) return stopped;
+    setBusy("Finishing your trade…");
+    try {
+      const outcome = await retryTrade(address, stopped.trade?.position ?? null, signAndSubmit);
+      return outcome === "complete" ? null : { trade: stopped.trade, retry: false };
+    } catch (e) {
+      const again = stoppedTrade(e);
+      const used = !!again || (e instanceof ForkError && e.data?.retry === false);
+      return { trade: again?.trade ?? stopped.trade, retry: !used };
     }
   }
 
