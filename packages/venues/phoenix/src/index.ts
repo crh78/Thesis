@@ -17,6 +17,7 @@ import type { VenueLeg } from "../../jupiter/src/index.ts";
 import { PERP_ASSET_MAP, PHOENIX_PROGRAM_ID, traderAddress, type TraderView } from "./layout.ts";
 
 export * from "./layout.ts";
+export * from "./makers.ts";
 
 export const PHOENIX_API_URL = "https://perp-api.phoenix.trade";
 /** How far a market order may fill from the price it was sized at. */

@@ -54,7 +54,7 @@ import {
 import { cardLeg, underlyingIdHex, type BankState } from "@thesis/venues/bank";
 import { cardIdHex } from "@thesis/venues/collector-crypt";
 import { jupiterBuy, jupiterLendRedeem, type JupiterBuy, type VenueLeg } from "@thesis/venues/jupiter";
-import { PHOENIX_LEG_CU } from "@thesis/venues/phoenix";
+import { PHOENIX_LEG_CU, PHOENIX_PROGRAM_ID } from "@thesis/venues/phoenix";
 import {
   ApiError,
   base58,
@@ -92,6 +92,7 @@ import { dailyDigests } from "./digests.ts";
 import { PortfolioHistory } from "./history.ts";
 import { contractResolver, escrowedKind, mapLegs, nameResolver, onChainLegs, perpResolver, sameLegs, type AppLeg, type ContractResolver, type MappedLeg, type NameResolver, type PerpResolver } from "./legs.ts";
 import { PhoenixDesk, type PhoenixClose } from "./phoenix.ts";
+import { withPhoenixLock } from "./phoenix-lock.ts";
 import { LANE, newUse, type JupiterUse, type Lane } from "./guard.ts";
 import { Router, TEMPLATE_TTL_MS, escrowShare, type TradeLeg } from "./routing.ts";
 import { SendFailed, fates, refusedByPreflight, resendOnce, sendBackToBack, slippageRefusal, type Fate } from "./send.ts";
@@ -2543,7 +2544,20 @@ export class ForkService {
    * a later one, with the ones after it (api/send.ts `resendOnce`).
    */
   async #send(txs: VersionedTransaction[], market: PublicKey[], t = new Timings(), accept?: () => void, freshMs = 0): Promise<string[]> {
-    const refreshed = await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs }));
+    // A transaction that names Phoenix's program (program ids are always static keys) waits for the
+    // Phoenix lock, and its refresh puts Phoenix's mainnet traders back first (lib.ts syncPhoenixMakers).
+    const phoenix = txs.some((tx) => tx.message.staticAccountKeys.some((k) => k.equals(PHOENIX_PROGRAM_ID)));
+    if (!phoenix) return this.#sendNow(txs, market, t, accept, freshMs, false);
+    const queued = Date.now();
+    return withPhoenixLock(() => {
+      const waited = Date.now() - queued;
+      if (waited > 5) t.add("phoenix lock", waited);
+      return this.#sendNow(txs, market, t, accept, freshMs, true);
+    });
+  }
+
+  async #sendNow(txs: VersionedTransaction[], market: PublicKey[], t: Timings, accept: (() => void) | undefined, freshMs: number, phoenixMakers: boolean): Promise<string[]> {
+    const refreshed = await t.time("refresh", () => this.#o.fork.refreshMarkets(market, { freshMs, phoenixMakers }));
     // lib.ts says how many it left (`fresh`); a fork that doesn't say may have left any of them.
     const left = (refreshed as { fresh?: unknown } | undefined)?.fresh;
     try {
@@ -2551,7 +2565,7 @@ export class ForkService {
         stale: freshMs > 0 && market.length > 0 && (typeof left === "number" ? left > 0 : true),
         reset: () => {
           t.note("resent", "markets reset");
-          return t.time("refresh", () => this.#o.fork.refreshMarkets(market));
+          return t.time("refresh", () => this.#o.fork.refreshMarkets(market, { phoenixMakers }));
         },
         log: this.#log,
       });

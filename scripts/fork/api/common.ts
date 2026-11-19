@@ -191,8 +191,11 @@ export type ServiceOpts = {
   fork: {
     addUsdc(wallet: PublicKey, usd: number): Promise<bigint>;
     setUsdc(wallet: PublicKey, baseUnits: bigint): Promise<void>;
-    /** `freshMs`: leave accounts refreshed less than that long ago (lib.ts refreshMarkets). */
-    refreshMarkets(accounts: PublicKey[], o?: { freshMs?: number }): Promise<unknown>;
+    /**
+     * `freshMs`: leave accounts refreshed less than that long ago; `phoenixMakers`: also put
+     * mainnet's traders back in Phoenix's active trader buffer, under the Phoenix lock (lib.ts refreshMarkets).
+     */
+    refreshMarkets(accounts: PublicKey[], o?: { freshMs?: number; phoenixMakers?: boolean }): Promise<unknown>;
     /** After a send: these accounts moved on the fork, so the next refresh copies them again (lib.ts). */
     forgetFresh?(accounts: PublicKey[]): void;
     /** Brings the fork's clock up to wall time; given, the service runs it every CLOCK_SYNC_MS. */

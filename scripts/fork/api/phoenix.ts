@@ -22,6 +22,7 @@ import {
 } from "@thesis/venues/phoenix";
 import { ApiError, type ServiceOpts } from "./common.ts";
 import { partLots } from "./sales.ts";
+import { withPhoenixLock } from "./phoenix-lock.ts";
 import type { StateStore } from "./store.ts";
 
 /** One Phoenix leg of one position: the take leg, its child subaccount and market. */
@@ -225,6 +226,11 @@ export class PhoenixDesk {
 
   /** Signs with `signers` (the payer first) and sends, confirming. Only for transactions the user needn't sign. */
   async #sendSigned(label: string, ixs: TransactionInstruction[], signers: Keypair[]) {
+    // Registrations write Phoenix's trader index and buffer: not while a maker sync is between its read and write.
+    return withPhoenixLock(() => this.#sendSignedNow(label, ixs, signers));
+  }
+
+  async #sendSignedNow(label: string, ixs: TransactionInstruction[], signers: Keypair[]) {
     const conn = this.#o.connection;
     const { blockhash } = await conn.getLatestBlockhash("confirmed");
     const msg = new TransactionMessage({ payerKey: signers[0].publicKey, recentBlockhash: blockhash, instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }), ...ixs] }).compileToV0Message();
