@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { Keypair, type Connection } from "@solana/web3.js";
 import { emptyState } from "../../../packages/venues/bank/src/state.ts";
+import { PortfolioHistory } from "../api/history.ts";
 import { ForkService, type ServiceOpts } from "../api/service.ts";
+import { StateStore } from "../api/store.ts";
 
 function walletFixture(t: TestContext) {
   const dir = mkdtempSync(join(tmpdir(), "thesis-portfolio-"));
@@ -94,4 +96,16 @@ test("a take deleted from Supabase doesn't break the chart", async (t) => {
   const chart = await service.history(addr, "1W");
   assert.equal(chart.value, 100);
   assert.deepEqual((await service.portfolio(addr, { strict: true })).positions, []);
+});
+
+test("an unpriced position counts at what's still held of it, after partial sales", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "thesis-portfolio-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = new StateStore(join(dir, "api-state.json"), null, () => {});
+  const connection = { getTokenAccountBalance: async () => ({ value: { amount: "50000000" } }) } as unknown as Connection;
+  // A $40 back ($40.04 with the fee) with a quarter sold, no price right now: $30.03 of it is held.
+  const positions = [{ openedAt: 1, stakeUsd: 40, remainingStakeUsd: 30, costUsd: 40.04, valueUsd: null }];
+  const history = new PortfolioHistory(store, connection, async () => ({ positions }));
+  const snap = await history.snapshot(Keypair.generate().publicKey.toBase58());
+  assert.ok(Math.abs(snap.value - 80.03) < 1e-9, `$50 of USDC and $30.03 held, not ${snap.value}`);
 });

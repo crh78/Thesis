@@ -1,17 +1,23 @@
-// pnpm fork:exit-e2e — selling a whole position on the fork, end to end over the fork API.
+// pnpm fork:exit-e2e — selling a position on the fork, in part and then whole, end to end over the
+// fork API.
 //
 // A throwaway wallet adds cash and backs a take made up for the run (the legs of the low-risk
-// "Mortgage rates dip under 6%" demo take, so a jlUSDC yield leg is in the sale too). Then it sells the position the
-// way the app does: quote, sign, submit. It checks:
+// "Mortgage rates dip under 6%" demo take, so a jlUSDC yield leg is in the sale too). It sells a
+// quarter first ($10 of $40: `sell_part`), after a partial sale too large to keep the $10 minimum is
+// refused with how much can be sold. Then it sells the rest the way the app does: quote, sign,
+// submit. It checks:
+//   - the partial sale: USDC back, the program's remaining stake and partial sale account, and the
+//     receipt's remaining, sold and settling amounts;
 //   - the wallet got USDC back and holds none of the position's tokens;
 //   - the program marked the position sold and created its exit account;
 //   - the receipt shows it sold and the portfolio no longer lists it;
 //   - a second sale is refused.
 // Then an author posts a take of the same legs and a holder backs it. The author's sale closes the
 // take: the quote says so, the receipt shows it closed, new backs and fades get 409 take_closed,
-// and the holder can still sell.
+// and the holder can still sell (through the holding route, `/takes/:id/sell`).
 // With `--settle` it then runs the real settler until the sales are priced and settled, before the
-// take's horizon: the first position and its exit account close into a scored profile, and the
+// take's horizon: the partial sale settles first, then the first position and its exit account
+// close into a scored profile, and the
 // author's take settles on the author's sale.
 //
 // Needs the asset bank and `JUPITER_API_KEY`, like fork:api-e2e.
@@ -21,7 +27,7 @@ import type { AddressInfo } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
-import { USDC_MINT_MAINNET, exitAddress, profileAddress, thesisProgram, TAKE_LIFETIME_SECS } from "@thesis/chain";
+import { USDC_MINT_MAINNET, exitAddress, partSaleAddress, profileAddress, thesisProgram, TAKE_LIFETIME_SECS } from "@thesis/chain";
 import { forkApiServer } from "./api/server.ts";
 import type { AppTake } from "./api/service.ts";
 import { startForkService } from "./api.ts";
@@ -106,12 +112,33 @@ async function e2e(): Promise<void> {
     const mine = receipt.json.viewerPositions.find((p: any) => !p.exited);
     if (!mine) throw new Error("no position on the receipt");
     checks.push(["receipt: the new back can be sold", mine.canExit === true]);
+    checks.push(["receipt: $40 left, up to 75% sellable in part", mine.remainingStakeUsd === 40 && mine.minStakeUsd === 10 && mine.maxPartialBps === 7_500]);
+
+    // Part of it: too much first (it would leave less than $10), then a quarter.
+    const tooMuch = await call("POST", `/takes/${TAKE.id}/positions/${mine.address}/exit`, { owner: me, bps: 8_000 });
+    checks.push(["a partial sale leaving under $10: 422 with how much can be sold", tooMuch.status === 422 && tooMuch.json.error === "remainder_below_minimum" && tooMuch.json.maxPartialBps === 7_500 && tooMuch.json.minStakeUsd === 10]);
+    const partQuote = await call("POST", `/takes/${TAKE.id}/positions/${mine.address}/exit`, { owner: me, bps: 2_500 });
+    if (partQuote.status !== 200) throw new Error(`partial quote: ${partQuote.status} ${JSON.stringify(partQuote.json)}`);
+    console.log(`partial sale quote: expect $${partQuote.json.expectedUsd.toFixed(2)}, at least $${partQuote.json.minimumUsd.toFixed(2)}`);
+    checks.push(["partial quote: a quarter, $10 of $40, in one transaction", partQuote.json.bps === 2_500 && partQuote.json.full === false && partQuote.json.sale.stakeUsd === 10 && partQuote.json.sale.remainingStakeUsd === 30 && partQuote.json.transactions.length === 1]);
+    const partSold = await call("POST", "/submit", { buildId: partQuote.json.buildId, transactions: sign(partQuote.json.transactions) });
+    if (partSold.status !== 200) throw new Error(`partial submit: ${partSold.status} ${JSON.stringify(partSold.json)}`);
+    const afterPart = await usdc();
+    console.log(`sold a quarter: +$${(afterPart - afterBack).toFixed(2)}; wallet ${afterPart} USDC`);
+    checks.push(["partial sale: USDC back, at least the quoted minimum", afterPart - afterBack >= partQuote.json.minimumUsd - 0.005]);
+    const partKey = new PublicKey(mine.address);
+    const halfway = await thesis.account.position.fetch(partKey, "confirmed");
+    const part = await thesis.account.partSale.fetchNullable(partSaleAddress(partKey, 0, thesis.programId), "confirmed");
+    checks.push(["chain: $30 left, one partial sale, not sold", halfway.remaining.toNumber() === 30_000_000 && halfway.parts === 1 && !halfway.exited]);
+    checks.push(["chain: the partial sale account records $10 at 2,500 bps", part?.stake.toNumber() === 10_000_000 && part?.bps === 2_500]);
+    const partView = (await call("GET", `/takes/${TAKE.id}?viewer=${me}`)).json.viewerPositions.find((p: any) => p.address === mine.address);
+    checks.push(["receipt: $30 left, $10 sold, the part settling, the stake as first paid", partView?.remainingStakeUsd === 30 && partView?.soldStakeUsd === 10 && partView?.pendingSales?.length === 1 && partView?.stakeUsd === 40]);
 
     const quote = await call("POST", `/takes/${TAKE.id}/positions/${mine.address}/exit`, { owner: me });
     if (quote.status !== 200) throw new Error(`exit quote: ${quote.status} ${JSON.stringify(quote.json)}`);
     console.log(`sale quote: expect $${quote.json.expectedUsd.toFixed(2)}, at least $${quote.json.minimumUsd.toFixed(2)}`);
     for (const s of quote.json.steps) console.log(`  ${s.labels.join(" + ")}: ${s.bytes} bytes`);
-    checks.push(["quote: one transaction", quote.json.transactions.length === 1]);
+    checks.push(["quote: the rest, $30, in one transaction", quote.json.transactions.length === 1 && quote.json.full === true && quote.json.sale.stakeUsd === 30]);
     checks.push(["quote: a backer's sale doesn't close the take", quote.json.closesTake === false]);
     // A second quote prepared before the first sale lands.
     const second = await call("POST", `/takes/${TAKE.id}/positions/${mine.address}/exit`, { owner: me });
@@ -120,7 +147,7 @@ async function e2e(): Promise<void> {
     const sold = await call("POST", "/submit", { buildId: quote.json.buildId, transactions: sign(quote.json.transactions) });
     if (sold.status !== 200) throw new Error(`exit submit: ${sold.status} ${JSON.stringify(sold.json)}`);
     const afterSale = await usdc();
-    const proceeds = afterSale - afterBack;
+    const proceeds = afterSale - afterPart;
     console.log(`sold: +$${proceeds.toFixed(2)}; wallet ${afterSale} USDC`);
     checks.push(["sale: USDC back, at least the quoted minimum", proceeds >= quote.json.minimumUsd - 0.005]);
 
@@ -169,8 +196,9 @@ async function e2e(): Promise<void> {
     const lateFade = await call("POST", `/takes/${AUTHORED.id}/trades`, { owner: me, side: "fade", usd: 20 });
     checks.push(["a back after the author's sale: 409 take_closed", lateBack.status === 409 && lateBack.json.error === "take_closed"]);
     checks.push(["a fade after the author's sale: 409 take_closed", lateFade.status === 409 && lateFade.json.error === "take_closed"]);
-    const holderQuote = await call("POST", `/takes/${AUTHORED.id}/positions/${held?.address}/exit`, { owner: h });
-    checks.push(["holder's quote: doesn't close anything", holderQuote.json.closesTake === false]);
+    // The holder sells through the holding route: everything they hold on the back side.
+    const holderQuote = await call("POST", `/takes/${AUTHORED.id}/sell`, { owner: h, side: "back", bps: 10_000 });
+    checks.push(["holder's quote: sells their one position, doesn't close anything", holderQuote.json.closesTake === false && holderQuote.json.positions?.length === 1 && holderQuote.json.positions[0] === held?.address]);
     await submit("holder's sale", holderQuote, holder);
 
     if (SETTLE) {
@@ -184,6 +212,7 @@ async function e2e(): Promise<void> {
         if (!closed) await sleep(3_000);
       }
       checks.push(["settler: prices the sale and settles it before the horizon", closed]);
+      checks.push(["chain: the partial sale settled and closed first", !(await conn.getAccountInfo(partSaleAddress(positionKey, 0, thesis.programId), "confirmed"))]);
       if (closed) {
         const profile = await thesis.account.profile.fetch(profileAddress(user.publicKey, thesis.programId), "confirmed");
         console.log(`profile: settled ${profile.positionsSettled}, scored ${profile.scoredPositions}, pnl ${profile.scoredPnl.toString()}`);

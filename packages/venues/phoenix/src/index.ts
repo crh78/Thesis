@@ -314,7 +314,18 @@ export class PhoenixVenue {
     return { label: `${o.label}: close`, instructions: [toWeb3(order)], lookupTables: [], marketAccounts: this.marketAccounts(m) };
   }
 
-  /** Withdraws `collateral` (exactly what child `sub` holds, with no position open) back to USDC. */
+  /**
+   * Phoenix's `withdraw_to_target_leverage`: moves child `sub`'s collateral above what keeps its
+   * position at `targetLeverageBps` (10,000 = 1x) to the parent (subaccount 0). After a partial
+   * close this frees the closed share's margin while what's left keeps its leverage; `sweepLeg`
+   * on the parent then withdraws it, once the amount is known.
+   */
+  async releaseLeg(o: { owner: PublicKey; sub: number; targetLeverageBps: bigint; label: string }): Promise<VenueLeg> {
+    const ix = await this.#sdk(() => this.client.ixs.buildWithdrawToTargetLeverage({ authority: auth(o.owner), traderPdaIndex: 0, childSubaccountIndex: o.sub, targetLeverageBps: o.targetLeverageBps }));
+    return { label: `${o.label}: release margin`, instructions: [toWeb3(ix)], lookupTables: [], marketAccounts: [] };
+  }
+
+  /** Withdraws `collateral` (exactly what trader account `sub` holds, with no position open) back to USDC. */
   async sweepLeg(o: { owner: PublicKey; payer: PublicKey; sub: number; collateral: bigint; label: string }): Promise<VenueLeg> {
     const wd = await this.#sdk(() => this.client.ixs.buildWithdrawIxs({ authority: auth(o.owner), amount: o.collateral, feePayer: auth(o.payer), traderSubaccountIndex: o.sub }));
     return { label: `${o.label}: withdraw`, instructions: wd.instructions.map(toWeb3), lookupTables: [], marketAccounts: [] };

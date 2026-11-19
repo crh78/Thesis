@@ -19,7 +19,7 @@ import type { AddressInfo } from "node:net";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { USDC_MINT_MAINNET, profileAddress, thesisProgram, TAKE_LIFETIME_SECS } from "@thesis/chain";
-import { decodeTrader, positionSize } from "@thesis/venues/phoenix";
+import { PhoenixVenue, decodeTrader, positionSize } from "@thesis/venues/phoenix";
 import type { AppTake } from "./api/common.ts";
 import { forkApiServer } from "./api/server.ts";
 import { startForkService } from "./api.ts";
@@ -59,6 +59,7 @@ async function e2e(): Promise<void> {
     return { status: r.status, json: (await r.json()) as any };
   };
   const conn = connection();
+  const venue = new PhoenixVenue({ rpcUrl: RPC_URL });
   const thesis = thesisProgram(conn);
   const user = Keypair.generate();
   const me = user.publicKey.toBase58();
@@ -142,6 +143,41 @@ async function e2e(): Promise<void> {
     checks.push(["fade: recorded on-chain", r2.json.faders === 1]);
     checks.push(["fade: a short of each leg, each in its own child", fadeKids.length === 2 && fadeKids.every((k) => !k.long && k.size > 0n)]);
     checks.push(["fade: children apart from the back's", !fadeKids.some((k) => k.account === backKids[0].account)]);
+
+    console.log("\n2b. Sell 40% of the back, then cash out the freed margin");
+    // A child's leverage now: notional at the mid over equity (collateral plus the position).
+    const leverage = async (account: string) => {
+      const t = decodeTrader((await conn.getAccountInfo(new PublicKey(account), "confirmed"))!.data)!;
+      const m = await venue.market("SOL");
+      const mid = (await venue.mid("SOL"))!;
+      const base = Number(t.positions[0].baseLots) / 10 ** m.baseLotsDecimals;
+      return (Math.abs(base) * mid) / (Number(t.collateral) / 1e6 + base * mid + Number(t.positions[0].virtualQuoteLots) / 1e6);
+    };
+    const levBefore = await leverage(backKids[0].account);
+    const partQuote = await call("POST", `/takes/${take.id}/positions/${backPos.address}/exit`, { owner: me, bps: 4_000 });
+    console.log(`  part: expect $${partQuote.json.expectedUsd?.toFixed(2)}, at least $${partQuote.json.minimumUsd?.toFixed(2)}`);
+    await send("sell 40% of the back", partQuote);
+    checks.push(["partial sale: $12 of $30, asks for a cash-out (the freed margin)", partQuote.json.full === false && partQuote.json.sale?.stakeUsd === 12 && partQuote.json.phoenixCashOut === true]);
+    const partKids = await children(backPos.address);
+    const kept = Number(partKids[0]?.size ?? 0n) / Number(backKids[0].size);
+    console.log(`  the long kept ${(kept * 100).toFixed(1)}% of its lots`);
+    checks.push(["partial sale: the long is cut to about 60% of its lots, still open", partKids.length === 1 && partKids[0].long && kept > 0.55 && kept < 0.65]);
+    const levAfter = await leverage(partKids[0].account);
+    console.log(`  leverage ${levBefore.toFixed(2)}x → ${levAfter.toFixed(2)}x`);
+    checks.push(["partial sale: what's left keeps its leverage (within 5%)", Math.abs(levAfter / levBefore - 1) < 0.05]);
+    const freed = await call("GET", `/wallets/${me}/phoenix`);
+    console.log(`  freed margin: $${freed.json.cashUsd}`);
+    checks.push(["partial sale: the freed margin is cash to take out, no stray position", freed.json.cashUsd > 0 && freed.json.openPositions === 0]);
+    for (let i = 0; i < 3; i++) {
+      const out = await call("POST", `/wallets/${me}/phoenix/cash-out`);
+      if (out.json.done) break;
+      await send("cash out the freed margin", out);
+    }
+    const afterPart = await call("GET", `/wallets/${me}/phoenix`);
+    const keptKids = await children(backPos.address);
+    checks.push(["partial cash-out: the margin is withdrawn, the rest of the long stays open", afterPart.json.cashUsd === 0 && keptKids[0]?.size === partKids[0].size]);
+    const partChain = await thesis.account.position.fetch(new PublicKey(backPos.address), "confirmed");
+    checks.push(["partial sale: $18 left on-chain, not sold", partChain.remaining.toNumber() === 18_000_000 && !partChain.exited]);
 
     console.log("\n3. Sell both, then cash out");
     for (const pos of [backPos, fadePos]) {

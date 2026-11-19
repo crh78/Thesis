@@ -11,8 +11,17 @@
 //                                                     `prebuilt: true`. Otherwise it's a normal build (a money action
 //                                                     now) without `prebuilt`, and the apps build at the tap instead.
 //                                                     409 take_closed once the take isn't open
-//   POST /takes/:id/positions/:pos/exit  { owner, prebuild? }  → a sale's build, with closesTake (the author's buy-in);
-//                                                     prebuild and prebuilt as for trades
+//   POST /takes/:id/positions/:pos/exit  { owner, bps?, usd?, prebuild? }  → a sale's build: bps of what's left
+//                                                     (1–10000), or usd of what it's worth now (all of it within
+//                                                     0.5%), neither = all. Adds bps, full, sale { stakeUsd,
+//                                                     remainingStakeUsd, valueUsd, remainingValueUsd }, closesTake
+//                                                     (all of the author's buy-in); prebuild and prebuilt as for
+//                                                     trades. 422 remainder_below_minimum { maxPartialBps,
+//                                                     maxPartialUsd, minStakeUsd }, 422 part_too_small, 409
+//                                                     too_many_open_sales, 400 invalid_amount, 409 already_exited
+//   POST /takes/:id/sell     { owner, side, bps?, usd?, prebuild? }  → the same, for that share of the wallet's whole
+//                                                     holding on that side (whole positions first, smallest first,
+//                                                     then at most one partial sale), plus positions[] sold
 //   POST /takes/:id/publish  { author, usd, prebuild? }  → same, for posting an app take with the author's buy-in
 //   POST /takes/:id/confirm                         → { onChain, take?, relayed }: is the author's publish
 //                                                     on-chain here? If so, its events go to the backend again
@@ -250,7 +259,16 @@ export function forkApiServer(
           const owner = str(b.owner, "owner");
           const prebuild = await buildLimits(req, owner, "sell", b.prebuild === true);
           const t = timed();
-          return send(200, await service.buildExit(parts[1], parts[3], owner, { timings: t, prebuild }));
+          return send(200, await service.buildExit(parts[1], parts[3], owner, { timings: t, prebuild, bps: b.bps, usd: b.usd }));
+        }
+        if (m === "POST" && parts[2] === "sell" && parts.length === 3) {
+          const b = await body(req);
+          const side = b.side === "fade" ? "fade" : b.side === "back" ? "back" : null;
+          if (!side) throw new ApiError(400, "invalid_side");
+          const owner = str(b.owner, "owner");
+          const prebuild = await buildLimits(req, owner, "sell", b.prebuild === true);
+          const t = timed();
+          return send(200, await service.buildHoldingSale(parts[1], owner, side, { timings: t, prebuild, bps: b.bps, usd: b.usd }));
         }
         if (m === "POST" && parts[2] === "confirm" && parts.length === 3) {
           // Harmless (it only re-delivers a landed publish), so it counts as a read.

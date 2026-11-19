@@ -53,8 +53,11 @@ export type ChainActivity = { kind: string; usd: number; at: string; takeId: str
 export type CashEntry = { wallet: string; kind: "deposit" | "withdrawal"; usd: number; at: string };
 /** A wallet's total (USDC plus what its positions are worth) at `at` (unix s), and its net deposits by then. */
 export type Snapshot = { at: number; value: number; netIn: number };
-/** The last daily digest per wallet: its day and what the positions were worth then. */
-export type DigestMark = { day: string; valueUsd: number };
+/**
+ * The last daily digest per wallet: its day, what the positions were worth then, and the stake
+ * still held behind that value (after partial sales; missing on older marks).
+ */
+export type DigestMark = { day: string; valueUsd: number; stakeUsd?: number };
 /** A sale this service submitted, kept so the receipt still shows it after its position settles and closes. */
 /** A sale this service submitted. `side` is missing on sales recorded before fades could be sold (all backs). */
 export type ExitReceipt = { horizonEnd: number; owner: string; side?: "back" | "fade"; stakeUsd: number; costUsd: number; openedAt: number; legsMask: number; exitedAt?: number };

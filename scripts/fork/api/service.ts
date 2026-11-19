@@ -37,6 +37,8 @@ import {
   createTakeIx,
   exitAddress,
   exitPositionIx,
+  partSaleAddress,
+  sellPartIx,
   fetchConfig,
   positionAddress,
   positionReturnBps,
@@ -44,6 +46,8 @@ import {
   takeAddress,
   thesisProgram,
   ticketAddress,
+  type PartSaleAccount,
+  type PositionAccount,
   type TakeAccount,
   type ThesisProgram,
 } from "@thesis/chain";
@@ -91,6 +95,17 @@ import { Router, TEMPLATE_TTL_MS, escrowShare, type TradeLeg } from "./routing.t
 import { SendFailed, fates, refusedByPreflight, resendIfStale, sendBackToBack, type Fate } from "./send.ts";
 import { SplitTrades, afterFailure, deserializeIx, incompleteView, serializeIx, sweepLegs } from "./split.ts";
 import { StateStore } from "./store.ts";
+import {
+  escrowReturned,
+  holdingMaxPartialBps,
+  planHoldingSale,
+  positionMaxPartialBps,
+  positionSale,
+  saleBps,
+  saleError,
+  tokensToSell,
+  type PositionSale,
+} from "./sales.ts";
 import { Valuation } from "./valuation.ts";
 import { Wallets } from "./wallets.ts";
 
@@ -233,7 +248,7 @@ type Build = {
   claims?: string[];
   expires: number;
   /** The position the receipt instruction opens, so the receipt can show it right away. */
-  position: { take: PublicKey; address: PublicKey; publishTakeId?: string; exit?: ExitReceipt };
+  position: { take: PublicKey; address: PublicKey; publishTakeId?: string; exit?: ExitReceipt; sales?: SaleRecord[] };
   /**
    * Trailing transactions that only cancel this owner's abandoned trade tickets (security review
    * L-4). They're sent after the trade has landed, and a failure there doesn't fail the trade.
@@ -258,6 +273,39 @@ type Build = {
  * changed): its Jupiter calls go in routing's prebuild lane, and its money action counts at submit.
  */
 export type BuildOpts = { timings?: Timings; prebuild?: boolean };
+
+/** How much a sale sells: `bps` of what's left, or `usd` of what it's worth now; neither sells all. */
+export type SaleAmount = { bps?: unknown; usd?: unknown };
+
+/**
+ * One position a sale build sells: its partial sale's seq (the PDA it creates) and whether it sells
+ * all of it; `exit` for a whole sale (what the receipt shows once it's settled).
+ */
+type SaleRecord = { address: PublicKey; seq: number; full: boolean; horizonEnd: number; exit?: ExitReceipt };
+
+/** A position a sale reads: its account, and what's left of it with its unsettled partial sales. */
+type SaleHolding = { address: PublicKey; account: PositionAccount; view: { remaining: bigint; openParts: number } };
+/** What a sale build reads first (`#saleContext`). */
+type SaleContext = {
+  takeId: string;
+  owner: PublicKey;
+  takeKey: PublicKey;
+  take: TakeAccount;
+  config: Awaited<ReturnType<typeof fetchConfig>>;
+  holdings: SaleHolding[];
+  minStake: bigint;
+  minStakeUsd: number;
+};
+/** One position of a sale build and the share of it sold. */
+type SaleTarget = { holding: SaleHolding; bps: number; sale: Extract<PositionSale, { ok: true }> };
+
+const FULL_BPS = 10_000;
+const hasUsd = (o: SaleAmount) => o.usd !== undefined && o.usd !== null;
+/** Runs `f` once, the first time it's asked for. */
+function lazy<T>(f: () => Promise<T>): () => Promise<T> {
+  let p: Promise<T> | null = null;
+  return () => (p ??= f());
+}
 /**
  * `clientTimings`: the submit body's `timings` (the client's marks), logged with the build id.
  * `until: "accepted"`: answer once the fork accepted every transaction (see ForkService#submit).
@@ -542,11 +590,19 @@ export class ForkService {
     const status = takeStatusName(take);
     const open = takeOpen(take);
     // Closed: the headline is the author's sale, read from their exit account once it's priced.
-    const [marks, config, authorExit] = await Promise.all([
+    // The viewer's partial sales still settling, by position.
+    const partKeys = mine.flatMap((p) =>
+      Array.from({ length: Math.max(0, p.account.parts - p.account.partsSettled) }, (_, i) => partSaleAddress(p.publicKey, p.account.partsSettled + i, this.#program.programId)));
+    const [marks, config, authorExit, partAccounts] = await Promise.all([
       this.#valuation.marks(take, legs, [...(author ? [author] : []), ...mine]),
       this.#config(),
       status === "closed" && author ? this.#program.account.exit.fetchNullable(exitAddress(author.publicKey, this.#program.programId)).catch(() => null) : null,
+      partKeys.length ? (this.#program.account.partSale.fetchMultiple(partKeys) as Promise<(PartSaleAccount | null)[]>).catch(() => []) : [],
     ]);
+    const partsOf = new Map<string, PartSaleAccount[]>();
+    for (const part of partAccounts) if (part) partsOf.set(part.position.toBase58(), [...(partsOf.get(part.position.toBase58()) ?? []), part]);
+    const minStake = BigInt(config.params.minStake.toString());
+    const minStakeUsd = Number(minStake) / USD;
     /**
      * A position's return at current prices: each leg marked on the source its entry was priced
      * on. Null while a priced leg has no entry or no mark (never a -100% from a missing price).
@@ -611,13 +667,35 @@ export class ForkService {
           const stake = BigInt(p.account.stake.toString());
           const fee = splitFee(stake, config.params, { isAuthor: p.account.owner.equals(take.author) }).fee;
           const pending = legs.filter((_, i) => p.account.legsMask & (1 << i) && !(p.account.entrySet & (1 << i)));
+          // In any take status: holders can sell after the author has, until the horizon.
+          const canExit = !exited && take.horizonEnd.toNumber() > Date.now() / 1000 &&
+            take.legs.every((leg, i) => !(p.account.legsMask & (1 << i)) || SELLABLE(leg.kind));
+          // Sold whole: nothing left (the account keeps what that sale sold until it settles).
+          const remaining = exited ? 0n : BigInt(p.account.remaining.toString());
+          const priced = p.account.legsMask & ((1 << take.legs.length) - 1);
           return {
             address: p.publicKey.toBase58(),
             side: "back" in p.account.side ? "back" : "fade",
             exited,
-            // In any take status: holders can sell after the author has, until the horizon.
-            canExit: !exited && take.horizonEnd.toNumber() > Date.now() / 1000 &&
-              take.legs.every((leg, i) => !(p.account.legsMask & (1 << i)) || SELLABLE(leg.kind)),
+            canExit,
+            /** The cost basis still held, after partial sales. `stakeUsd` and `costUsd` stay what was first paid. */
+            remainingStakeUsd: Number(remaining) / USD,
+            soldStakeUsd: Number(stake - remaining) / USD,
+            /** P&L from partial sales that have settled; null before the first one has. */
+            realizedPnlUsd: p.account.partsSettled > 0 ? Number(p.account.realizedPnl.toString()) / USD : null,
+            /** Partial sales still settling: `priced` once their sale prices are all in. */
+            pendingSales: (partsOf.get(p.publicKey.toBase58()) ?? []).sort((a, b) => a.seq - b.seq).map((part) => ({
+              seq: part.seq,
+              bps: part.bps,
+              stakeUsd: Number(BigInt(part.stake.toString())) / USD,
+              soldAt: part.soldAt.toNumber(),
+              priced: (part.priceSet & priced) === priced,
+            })),
+            minStakeUsd,
+            /** The largest partial sale allowed now (keeps at least the minimum stake); null: only selling all. */
+            maxPartialBps: canExit ? positionMaxPartialBps({ remaining, openParts: p.account.parts - p.account.partsSettled }, minStake) : null,
+            /** Selling all of it closes the take (the author's buy-in on an open take). */
+            closesTakeIfSoldAll: !exited && p.account.id.isZero() && p.account.owner.equals(take.author) && "open" in take.status,
             /** The prediction share held in escrow; it comes back in full at a sale or when the position settles. */
             escrowedUsd: Number(BigInt(p.account.escrowed.toString())) / USD,
             stakeUsd: Number(stake) / USD,
@@ -627,7 +705,7 @@ export class ForkService {
             returnBps: live(p),
             /** What the trade cost the wallet (stake plus the Thesis fee). */
             costUsd: Number(stake + fee) / USD,
-            /** What the tokens this trade bought are worth now, or null if a price is missing. */
+            /** What's left of it is worth now (after partial sales), or null if a price is missing. */
             valueUsd: exited ? null : await this.#positionWorth(take, p, marks.get(p.publicKey.toBase58()) ?? []).catch(() => null),
             /**
              * Legs held on Phoenix: entry, the market now, the liquidation price and how far it is
@@ -639,7 +717,7 @@ export class ForkService {
             pendingNote: pending.length ? pendingNote(pending, p.account.openedAt.toNumber()) : null,
           };
         })),
-        ...(viewer ? this.#settledExits(address, viewer, new Set(mine.map((p) => p.publicKey.toBase58()))) : []),
+        ...(viewer ? this.#settledExits(address, viewer, new Set(mine.map((p) => p.publicKey.toBase58())), minStakeUsd) : []),
       ],
       canBack: open && canBuy,
       canFade: open && fadeable && !viewerIsAuthor,
@@ -742,12 +820,22 @@ export class ForkService {
   /**
    * What a position is worth now: the tokens its trade bought, plus its escrowed prediction and card
    * share at the legs' paper marks (at cost while a leg has no entry or mark). Null if a token can't be priced.
+   * After partial sales it's what's left: the tokens scale by remaining / stake (each sale sold that
+   * share of them); the escrow and Phoenix children are read as they stand now.
    */
   async #positionWorth(
     take: TakeAccount,
-    p: { publicKey: PublicKey; account: { owner: PublicKey; side: object; legsMask: number; escrowed: { toString(): string }; entrySet: number; prices: { entry: { toString(): string } }[] } },
+    p: {
+      publicKey: PublicKey;
+      account: {
+        owner: PublicKey; side: object; legsMask: number; escrowed: { toString(): string }; entrySet: number; prices: { entry: { toString(): string } }[];
+        stake: { toString(): string }; remaining: { toString(): string };
+      };
+    },
     marks: (bigint | null)[],
   ): Promise<number | null> {
+    const stake = Number(p.account.stake.toString());
+    const left = stake > 0 ? Number(p.account.remaining.toString()) / stake : 1;
     const held = (i: number) => p.account.legsMask & (1 << i);
     const paper = take.legs.map((leg, i) => (held(i) && escrowedKind(leg.kind) ? i : -1)).filter((i) => i >= 0);
     // Legs held on Phoenix are valued from their child subaccounts, not tokens.
@@ -759,7 +847,7 @@ export class ForkService {
       phoenix.length && this.#phoenix ? this.#phoenix.value(p.publicKey, p.account.owner) : 0,
     ]);
     if (tokenValue === null || phoenixValue === null) return null;
-    const tokens = tokenValue + phoenixValue;
+    const tokens = tokenValue * left + phoenixValue;
     const escrowed = Number(BigInt(p.account.escrowed.toString())) / USD;
     if (!paper.length || escrowed === 0) return tokens;
     const fade = "fade" in p.account.side;
@@ -817,58 +905,195 @@ export class ForkService {
   }
 
   /**
-   * Sells a whole position: the wallet swaps each spot leg's tokens back to USDC and redeems each
-   * yield leg's jlUSDC, and `exit_position` records the sale in the same transaction. The program
-   * lets each position exit once; it then scores on the settler's prices at the sale.
+   * Sells a position, or part of it: `bps` of what's left (1 to 10,000; or `usd`, converted from
+   * what it's worth now; neither sells all). The wallet swaps that share of each spot leg's tokens
+   * back to USDC, redeems that share of each yield leg's jlUSDC and closes that share of each
+   * Phoenix leg's lots, and the program records the sale in the same transaction: `exit_position`
+   * for all of it, `sell_part` for part (which keeps at least the minimum stake). Either way it
+   * scores on the settler's prices at the sale.
    */
-  async buildExit(takeId: string, address: string, wallet: string, o: BuildOpts = {}) {
+  async buildExit(takeId: string, address: string, wallet: string, o: BuildOpts & SaleAmount = {}) {
     const t = o.timings ?? new Timings();
-    return this.#timed(`sale build ${takeId.slice(0, 8)}`, t, async () => this.#keep(await this.#buildExit(takeId, address, wallet, t, o)));
+    return this.#timed(`sale build ${takeId.slice(0, 8)}`, t, async () => {
+      const owner = parseKey(wallet);
+      const position = parseKey(address);
+      const ctx = await this.#saleContext(takeId, owner, [position], t);
+      const holding = ctx.holdings[0];
+      // What it's worth is read only to size a dollar amount, or to say how much can be sold.
+      const worth = lazy(async () => (await this.#saleValues(ctx, [holding]))[0]);
+      const bps = saleBps(o, hasUsd(o) ? await worth() : 0);
+      const sale = positionSale(holding.view, bps, ctx.minStake);
+      if (!sale.ok) throw saleError(sale.code, positionMaxPartialBps(holding.view, ctx.minStake), await worth(), ctx.minStakeUsd);
+      const built = await this.#buildSale(ctx, [{ holding, bps, sale }], t, o);
+      // The part sold is worth what selling it brings in; what's left, in proportion.
+      const soldValue = built.expectedUsd;
+      return this.#keep({
+        ...built,
+        bps,
+        full: sale.full,
+        sale: {
+          stakeUsd: Number(sale.sold) / USD,
+          remainingStakeUsd: Number(sale.left) / USD,
+          valueUsd: soldValue,
+          remainingValueUsd: sale.full ? 0 : (soldValue * (FULL_BPS - bps)) / bps,
+        },
+      });
+    });
   }
 
-  async #buildExit(takeId: string, address: string, wallet: string, t: Timings, o: BuildOpts) {
-    const owner = parseKey(wallet);
-    const position = parseKey(address);
+  /**
+   * Sells `bps` (or `usd`) of the wallet's whole holding in a take on one side: whole positions
+   * first, smallest first, then at most one partial sale, in one build and one approval
+   * (`planHoldingSale`; the author's buy-in last, and whole only when all of it sells, since that
+   * closes the take). The apps group positions by take and side, so their Sell tab uses this.
+   */
+  async buildHoldingSale(takeId: string, wallet: string, side: "back" | "fade", o: BuildOpts & SaleAmount = {}) {
+    const t = o.timings ?? new Timings();
+    return this.#timed(`holding sale build ${takeId.slice(0, 8)}`, t, async () => {
+      const owner = parseKey(wallet);
+      const mirror = this.#state.takes[takeId];
+      if (!mirror) throw new ApiError(404, "take_missing");
+      const takeKey = new PublicKey(mirror.address);
+      const held = (await this.#positionsOf(takeKey)).filter((p) =>
+        p.account.owner.equals(owner) && !p.account.exited && ("back" in p.account.side ? "back" : "fade") === side);
+      if (!held.length) throw new ApiError(404, "position_missing", "You hold nothing on that side of this take.");
+      const ctx = await this.#saleContext(takeId, owner, held.map((p) => p.publicKey), t);
+      const total = lazy(async () => (await this.#saleValues(ctx, ctx.holdings)).reduce((n, v) => n + v, 0));
+      const bps = saleBps(o, hasUsd(o) ? await total() : 0);
+      // The author's buy-in sells last, and whole only when all of the holding sells.
+      const views = ctx.holdings.map((h) => ({ address: h.address.toBase58(), ...h.view, buyIn: h.account.id.isZero() && h.account.owner.equals(ctx.take.author) }));
+      const plan = planHoldingSale(views, bps, ctx.minStake);
+      if ("error" in plan) throw saleError(plan.error, holdingMaxPartialBps(views, ctx.minStake), await total(), ctx.minStakeUsd);
+      const byAddress = new Map(ctx.holdings.map((h) => [h.address.toBase58(), h]));
+      const targets = [
+        ...plan.whole.map((a) => ({ holding: byAddress.get(a)!, bps: FULL_BPS })),
+        ...(plan.part ? [{ holding: byAddress.get(plan.part.address)!, bps: plan.part.bps }] : []),
+      ].map((x) => ({ ...x, sale: positionSale(x.holding.view, x.bps, ctx.minStake) as Extract<PositionSale, { ok: true }> }));
+      const built = await this.#buildSale(ctx, targets, t, o);
+      const remaining = ctx.holdings.reduce((n, h) => n + h.view.remaining, 0n);
+      const soldValue = built.expectedUsd;
+      const left = remaining - plan.sold;
+      return this.#keep({
+        ...built,
+        bps,
+        full: left === 0n,
+        sale: {
+          stakeUsd: Number(plan.sold) / USD,
+          remainingStakeUsd: Number(left) / USD,
+          valueUsd: soldValue,
+          remainingValueUsd: plan.sold > 0n ? (soldValue * Number(left)) / Number(plan.sold) : 0,
+        },
+        positions: targets.map((x) => x.holding.address.toBase58()),
+      });
+    });
+  }
+
+  /** The take and the positions a sale reads, checked: the wallet's, open, before the horizon. */
+  async #saleContext(takeId: string, owner: PublicKey, positions: PublicKey[], t: Timings): Promise<SaleContext> {
     const mirror = this.#state.takes[takeId];
     if (!mirror) throw new ApiError(404, "take_missing");
-    if (this.#pendingExits.has(position.toBase58())) throw new ApiError(409, "already_exited", "This position is being sold.");
+    for (const p of positions) if (this.#pendingExits.has(p.toBase58())) throw new ApiError(409, "already_exited", "This position is being sold.");
     // A sale right after the back: the back may still be confirming (until=accepted).
     await t.time("pending", () => this.#afterPending(owner.toBase58()));
     const takeKey = new PublicKey(mirror.address);
-    const [take, holding] = await t.time("position", () => Promise.all([
+    const [take, accounts, config] = await t.time("position", () => Promise.all([
       this.#program.account.take.fetchNullable(takeKey),
-      this.#program.account.position.fetchNullable(position),
+      this.#program.account.position.fetchMultiple(positions),
+      this.#config(),
     ]));
-    if (!holding?.owner.equals(owner) || !holding.take.equals(takeKey)) throw new ApiError(404, "position_missing");
-    if (holding.exited) throw new ApiError(409, "already_exited", "This position has already been sold.");
+    const holdings = positions.map((address, i) => {
+      const account = accounts[i];
+      if (!account?.owner.equals(owner) || !account.take.equals(takeKey)) throw new ApiError(404, "position_missing");
+      if (account.exited) throw new ApiError(409, "already_exited", "This position has already been sold.");
+      return { address, account, view: { remaining: BigInt(account.remaining.toString()), openParts: account.parts - account.partsSettled } };
+    });
     // Any status before the horizon: holders can sell after the author has (the take closed or settled).
     if (!take || take.horizonEnd.toNumber() <= Date.now() / 1000) throw new ApiError(409, "take_closed", TAKE_ENDED);
-    // The author's own buy-in: selling it closes the take to new backs and fades.
-    const closesTake = holding.id.isZero() && holding.owner.equals(take.author) && "open" in take.status;
-    const legs = take.legs.filter((_, i) => holding.legsMask & (1 << i));
-    if (!legs.length || legs.some((leg) => !SELLABLE(leg.kind))) {
-      throw new ApiError(422, "not_sellable", "Only spot, yield, perp, prediction and card legs can be sold on the fork.");
+    for (const h of holdings) {
+      const legs = take.legs.filter((_, i) => h.account.legsMask & (1 << i));
+      if (!legs.length || legs.some((leg) => !SELLABLE(leg.kind))) {
+        throw new ApiError(422, "not_sellable", "Only spot, yield, perp, prediction and card legs can be sold on the fork.");
+      }
+      if (this.#onPhoenix(take, h.account.side, h.account.legsMask).length && !this.#phoenix) throw new ApiError(422, "not_sellable", "Phoenix isn't connected on this fork.");
     }
-    // Legs held on Phoenix (perp legs; a fade's shorts) close there; the rest swap back.
-    const onPhoenix = this.#onPhoenix(take, holding.side, holding.legsMask);
-    const phoenixAssets = new Set(onPhoenix.map((i) => take.legs[i].asset.toBuffer().toString("hex")));
-    if (onPhoenix.length && !this.#phoenix) throw new ApiError(422, "not_sellable", "Phoenix isn't connected on this fork.");
+    const minStake = BigInt(config.params.minStake.toString());
+    return { takeId, owner, takeKey, take, config, holdings, minStake, minStakeUsd: Number(minStake) / USD };
+  }
 
+  /** What each position is worth now (what's left of it), for sizing a `usd` sale; its cost basis when a price is missing. */
+  async #saleValues(ctx: SaleContext, holdings: SaleHolding[]): Promise<number[]> {
+    const marks = await this.#valuation.marks(ctx.take, this.#mapLegs((await this.#appTake(ctx.takeId)).legs), holdings.map((h) => ({ publicKey: h.address, account: h.account }))).catch(() => new Map<string, (bigint | null)[]>());
+    return Promise.all(holdings.map(async (h) => {
+      const worth = await this.#positionWorth(ctx.take, { publicKey: h.address, account: h.account }, marks.get(h.address.toBase58()) ?? []).catch(() => null);
+      return worth ?? Number(h.view.remaining) / USD;
+    }));
+  }
+
+  /**
+   * One build selling each target's share: its Phoenix closes, swaps and redeems, then its
+   * `exit_position` or `sell_part`. The last target's instruction is the build's receipt; the
+   * others ride as legs before it, each after its own swaps.
+   */
+  async #buildSale(ctx: SaleContext, targets: SaleTarget[], t: Timings, o: BuildOpts) {
+    const { owner, take, takeKey, config } = ctx;
     const inventoryStarted = Date.now();
-    const bought = await this.#valuation.bought(position, owner);
     const tokens = this.#o.bank().tokens;
-    // A spot leg's asset is its underlying; a yield leg's is the vault token itself (`token:<mint>`).
-    // Prediction and card legs hold no tokens: the sale pays their escrow back.
-    const inventory = legs.filter((leg) => !escrowedKind(leg.kind) && !phoenixAssets.has(leg.asset.toBuffer().toString("hex"))).map((leg) => {
-      const asset = leg.asset.toBuffer().toString("hex");
-      const isYield = "yield" in leg.kind;
-      const matches = [...bought].filter(([mint]) =>
-        isYield ? underlyingIdHex(`token:${mint}`) === asset : Boolean(tokens[mint]) && underlyingIdHex(tokens[mint].underlying) === asset);
-      if (matches.length !== 1) throw new ApiError(422, "inventory_unavailable", "The receipt transaction must identify every token bought by this position.");
-      return { mint: matches[0][0], amount: matches[0][1], isYield };
-    });
-    if (new Set(inventory.map((l) => l.mint)).size !== inventory.length) throw new ApiError(422, "inventory_unavailable");
-    await Promise.all(inventory.map(async ({ mint, amount, isYield }) => {
+    const payer = this.#o.appPayer.publicKey;
+    const usdc = USDC_MINT_MAINNET.toBase58();
+    const appLegs = targets.some((x) => this.#onPhoenix(take, x.holding.account.side, x.holding.account.legsMask).length)
+      ? (await this.#appTake(ctx.takeId).catch(() => null))?.legs
+      : undefined;
+    const names = new Map(take.legs.map((_, i) => [i, appLegs?.[i]?.name ?? `Leg ${i + 1}`] as const));
+    // What each target sells of each token it bought (a share of the trade's tokens), checked
+    // against the wallet's balance (summed when two positions hold the same token).
+    const pieces = await Promise.all(targets.map(async ({ holding, bps, sale }) => {
+      const { address: position, account } = holding;
+      const legs = take.legs.filter((_, i) => account.legsMask & (1 << i));
+      const onPhoenix = this.#onPhoenix(take, account.side, account.legsMask);
+      const phoenixAssets = new Set(onPhoenix.map((i) => take.legs[i].asset.toBuffer().toString("hex")));
+      const bought = await this.#valuation.bought(position, owner);
+      const stake = BigInt(account.stake.toString());
+      // A spot leg's asset is its underlying; a yield leg's is the vault token itself (`token:<mint>`).
+      // Prediction and card legs hold no tokens: the sale pays their escrow back.
+      const inventory = legs.filter((leg) => !escrowedKind(leg.kind) && !phoenixAssets.has(leg.asset.toBuffer().toString("hex"))).map((leg) => {
+        const asset = leg.asset.toBuffer().toString("hex");
+        const isYield = "yield" in leg.kind;
+        const matches = [...bought].filter(([mint]) =>
+          isYield ? underlyingIdHex(`token:${mint}`) === asset : Boolean(tokens[mint]) && underlyingIdHex(tokens[mint].underlying) === asset);
+        if (matches.length !== 1) throw new ApiError(422, "inventory_unavailable", "The receipt transaction must identify every token bought by this position.");
+        const amount = tokensToSell(matches[0][1], stake, holding.view.remaining, sale.left);
+        return { mint: matches[0][0], amount, isYield };
+      });
+      if (new Set(inventory.map((l) => l.mint)).size !== inventory.length) throw new ApiError(422, "inventory_unavailable");
+      const seq = account.parts;
+      const ix = sale.full
+        ? await exitPositionIx(this.#program, { owner, take: takeKey, position, payer })
+        : await sellPartIx(this.#program, { owner, take: takeKey, position, seq, bps, payer });
+      const fee = splitFee(stake, config.params, { isAuthor: take.author.equals(owner) }).fee;
+      // The original stake and cost, unscaled: what the receipt shows for a sold position.
+      const exit: ExitReceipt | undefined = sale.full
+        ? {
+          horizonEnd: take.horizonEnd.toNumber(),
+          owner: owner.toBase58(),
+          side: "back" in account.side ? "back" : "fade",
+          stakeUsd: Number(stake) / USD,
+          costUsd: Number(stake + fee) / USD,
+          openedAt: account.openedAt.toNumber(),
+          legsMask: account.legsMask,
+        }
+        : undefined;
+      return {
+        position, bps, sale, seq, ix, exit,
+        inventory: inventory.filter((l) => l.amount > 0n),
+        onPhoenix,
+        escrowUsd: Number(escrowReturned(BigInt(account.escrowed.toString()), bps)) / USD,
+        closesTake: sale.full && account.id.isZero() && account.owner.equals(take.author) && "open" in take.status,
+      };
+    }));
+    const need = new Map<string, bigint>();
+    for (const p of pieces) for (const l of p.inventory) need.set(l.mint, (need.get(l.mint) ?? 0n) + l.amount);
+    await Promise.all([...need].map(async ([mint, amount]) => {
+      const isYield = pieces.some((p) => p.inventory.some((l) => l.mint === mint && l.isYield));
       const program = isYield ? "spl" : tokens[mint].program;
       if (program === "unknown") throw new ApiError(422, "inventory_unavailable", "The token program for this position is unknown.");
       const ata = getAssociatedTokenAddressSync(new PublicKey(mint), owner, false, program === "token-2022" ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID);
@@ -880,26 +1105,10 @@ export class ForkService {
     const use = newUse(laneOf(o.prebuild));
     const jupiter = this.#router.jupiter(use.lane, use);
     const access = { apiKey: jupiter.apiKey, fetchFn: jupiter.fetchFn, max429WaitMs: jupiter.max429WaitMs };
-    const payer = this.#o.appPayer.publicKey;
-    const usdc = USDC_MINT_MAINNET.toBase58();
-    const config = await this.#config();
-    const ix = await exitPositionIx(this.#program, { owner, take: takeKey, position, payer });
-    const stake = BigInt(holding.stake.toString());
-    const fee = splitFee(stake, config.params, { isAuthor: take.author.equals(owner) }).fee;
-    const escrowUsd = Number(BigInt(holding.escrowed.toString())) / USD;
-    const exit: ExitReceipt = {
-      horizonEnd: take.horizonEnd.toNumber(),
-      owner: wallet,
-      side: "back" in holding.side ? "back" : "fade",
-      stakeUsd: Number(stake) / USD,
-      costUsd: Number(stake + fee) / USD,
-      openedAt: holding.openedAt.toNumber(),
-      legsMask: holding.legsMask,
-    };
     // Redeeming jlUSDC has no slippage: it's worth its shares at the vault's rate, read exactly
     // from Jupiter Lend (totalAssets / totalSupply), with Jupiter's token price as a fallback. Each
     // read is tried twice, then the last value known stands in (it only sizes the proceeds shown).
-    const redeems = inventory.filter((l) => l.isYield);
+    const redeems = pieces.flatMap((p) => p.inventory.filter((l) => l.isYield));
     const redeemValue = async () => {
       let usd = 0;
       for (const { mint, amount } of redeems) {
@@ -911,41 +1120,68 @@ export class ForkService {
     };
     const [shareValue, redeemLegs] = await t.time("redeems", () => Promise.all([
       redeems.length ? redeemValue() : Promise.resolve(0),
-      Promise.all(redeems.map(({ amount }) => jupiterLendRedeem({ ...access, user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey! }))),
+      Promise.all(pieces.map((p) => Promise.all(p.inventory.filter((l) => l.isYield).map(({ amount }) =>
+        jupiterLendRedeem({ ...access, user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey! }))))),
     ]));
     if (shareValue == null) throw new ApiError(422, "no_exit_route", "Couldn't price this position's yield shares.");
-    // Phoenix legs: close each child's position. The cash stays in the child until the app sweeps
-    // it (`buildPhoenixCashOut`), since Phoenix won't withdraw more than is there.
-    const appLegs = onPhoenix.length ? (await this.#appTake(takeId).catch(() => null))?.legs : undefined;
-    const names = new Map(take.legs.map((_, i) => [i, appLegs?.[i]?.name ?? `Leg ${i + 1}`] as const));
-    const [closes, phoenixWorth] = onPhoenix.length
-      ? await t.time("phoenix", () => Promise.all([this.#phoenix!.closeLegs(position, owner, names), this.#phoenix!.valueAndNotional(position, owner)]))
-      : [[] as VenueLeg[], { usd: 0, notional: 0 }];
-    if (phoenixWorth === null) throw new ApiError(422, "no_exit_route", "Phoenix has no price for one of this position's markets right now.");
+    // Phoenix legs: close each child's position, or the sale's share of its lots. After a whole
+    // sale the cash stays in the child and the app sweeps it (`buildPhoenixCashOut`), since Phoenix
+    // won't withdraw more than is there. A partial sale also moves the closed share's margin to the
+    // parent at the child's current leverage (`reduceLegs`), so what's left keeps its leverage, and
+    // the cash-out withdraws it from there.
+    const noPrice = () => new ApiError(422, "no_exit_route", "Phoenix has no price for one of this position's markets right now.");
+    const phoenix = await t.time("phoenix", () => Promise.all(pieces.map(async (p) => {
+      if (!p.onPhoenix.length) return { closes: [] as VenueLeg[], usd: 0, notional: 0, cashOut: false };
+      if (!p.sale.full) {
+        const part = await this.#phoenix!.reduceLegs(p.position, owner, names, p.bps);
+        if (part === null) throw noPrice();
+        return { closes: part.legs, usd: part.usd, notional: part.notional, cashOut: part.released };
+      }
+      const [closes, worth] = await Promise.all([this.#phoenix!.closeLegs(p.position, owner, names), this.#phoenix!.valueAndNotional(p.position, owner)]);
+      if (worth === null) throw noPrice();
+      return { closes, usd: worth.usd, notional: worth.notional, cashOut: true };
+    })));
+    const closes = phoenix.reduce((n, x) => n + x.closes.length, 0);
+    const escrowUsd = pieces.reduce((n, p) => n + p.escrowUsd, 0);
+    const last = pieces[pieces.length - 1];
     const quoteExit = async (maxAccounts: number) => {
-      const swaps = await t.time("quotes", () => Promise.all(inventory.filter((l) => !l.isYield).map(async ({ mint, amount }) => {
+      const swaps = await t.time("quotes", () => Promise.all(pieces.map((p) => Promise.all(p.inventory.filter((l) => !l.isYield).map(async ({ mint, amount }) => {
         const { quote } = await jupiter.quoteExactIn(mint, usdc, amount, { ...this.#router.route, maxAccounts });
         if (!quote || quote.inputMint !== mint || quote.outputMint !== usdc || quote.inAmount !== amount.toString()) throw new ApiError(422, "no_exit_route", "No route to sell every token in this position.");
         return { quote, venue: await jupiterBuy({ ...access, quote, user: owner, payer, label: `Sell ${tokens[mint].symbol}` }) };
-      })));
+      })))));
       t.quotedAt ??= Date.now();
-      const venues: VenueLeg[] = [...closes, ...swaps.map((q) => q.venue), ...redeemLegs];
-      // A sale with Phoenix closes may take several transactions (each order is ~640 bytes);
-      // the exit is recorded in the last one.
-      const built = await this.#compose(venues, ix, THESIS_COMPUTE_UNITS.exitPosition, owner, "exit", { take: takeKey, address: position, exit }, false, closes.length > 0, { timings: t, quotedAt: t.quotedAt, prebuilt: o.prebuild });
-      const swapped = (k: "outAmount" | "otherAmountThreshold") => Number(swaps.reduce((n, q) => n + BigInt(q.quote[k]), 0n)) / USD;
-      // The sale pays the escrow back in full, in the same transaction. Phoenix legs close at
+      // Each target's legs, then its sale record; the last target's record is the receipt.
+      const venues: VenueLeg[] = pieces.flatMap((p, i) => [
+        ...phoenix[i].closes,
+        ...swaps[i].map((q) => q.venue),
+        ...redeemLegs[i],
+        ...(p === last ? [] : [{ label: p.sale.full ? "Record sale" : "Record partial sale", instructions: [p.ix], lookupTables: [], marketAccounts: [] }]),
+      ]);
+      const sales = pieces.map((p) => ({ address: p.position, seq: p.seq, full: p.sale.full, horizonEnd: take.horizonEnd.toNumber(), ...(p.exit ? { exit: p.exit } : {}) }));
+      // A sale with Phoenix closes, or of several positions, may take several transactions (each
+      // order is ~640 bytes); the last sale is recorded in the last one.
+      const built = await this.#compose(
+        venues, last.ix, last.sale.full ? THESIS_COMPUTE_UNITS.exitPosition : THESIS_COMPUTE_UNITS.sellPart, owner, "exit",
+        { take: takeKey, address: last.position, ...(last.exit ? { exit: last.exit } : {}), sales },
+        false, closes > 0 || pieces.length > 1, { timings: t, quotedAt: t.quotedAt, prebuilt: o.prebuild },
+      );
+      const swapped = (k: "outAmount" | "otherAmountThreshold") => Number(swaps.flat().reduce((n, q) => n + BigInt(q.quote[k]), 0n)) / USD;
+      // The sale pays its share of the escrow back, in the same transaction. Phoenix legs close at
       // most 1% from the mid (DEFAULT_SLIPPAGE).
-      const phx = { expected: phoenixWorth.usd, minimum: phoenixWorth.usd - 0.01 * phoenixWorth.notional };
+      const phx = phoenix.reduce((n, x) => ({ expected: n.expected + x.usd, minimum: n.minimum + x.usd - 0.01 * x.notional }), { expected: 0, minimum: 0 });
       return {
         ...built,
         escrowUsd,
-        /** This sale is the author's buy-in on an open take: it closes the take, and its result is final at the sale. */
-        closesTake,
+        /** This sale sells all of the author's buy-in on an open take: it closes the take, and its result is final at the sale. */
+        closesTake: pieces.some((p) => p.closesTake),
         expectedUsd: swapped("outAmount") + shareValue + escrowUsd + phx.expected,
         minimumUsd: swapped("otherAmountThreshold") + shareValue + escrowUsd + phx.minimum,
-        /** Phoenix legs closed: once this lands, build `phoenix/cash-out` to move their cash back to USDC. */
-        phoenixCashOut: closes.length > 0 || onPhoenix.length > 0,
+        /**
+         * Phoenix legs sold, whole or in part (the margin a part freed): once this lands, build
+         * `phoenix/cash-out` to move that cash back to USDC.
+         */
+        phoenixCashOut: phoenix.some((x) => x.cashOut),
       };
     };
     try {
@@ -960,7 +1196,7 @@ export class ForkService {
   }
 
   /** Sales this service submitted whose positions have since settled and closed. */
-  #settledExits(take: PublicKey, viewer: string, live: Set<string>) {
+  #settledExits(take: PublicKey, viewer: string, live: Set<string>, minStakeUsd: number) {
     return Object.entries(this.#state.exits?.[take.toBase58()] ?? {})
       .filter(([address, exit]) => exit.owner === viewer && !live.has(address))
       .map(([address, exit]) => ({
@@ -968,6 +1204,13 @@ export class ForkService {
         side: exit.side ?? "back",
         exited: true,
         canExit: false,
+        remainingStakeUsd: 0,
+        soldStakeUsd: exit.stakeUsd,
+        realizedPnlUsd: null,
+        pendingSales: [] as { seq: number; bps: number; stakeUsd: number; soldAt: number; priced: boolean }[],
+        minStakeUsd,
+        maxPartialBps: null,
+        closesTakeIfSoldAll: false,
         stakeUsd: exit.stakeUsd,
         costUsd: exit.costUsd,
         openedAt: exit.openedAt,
@@ -1631,8 +1874,7 @@ export class ForkService {
       return tx;
     }));
     // A sale of this position already on its way: the second one would fail on-chain anyway.
-    const position = build.position.address.toBase58();
-    if (build.kind === "exit" && this.#pendingExits.has(position)) throw new ApiError(409, "already_exited", "This position is being sold.");
+    if (build.kind === "exit" && saleAddresses(build).some((a) => this.#pendingExits.has(a))) throw new ApiError(409, "already_exited", "This position is being sold.");
     o.admit?.({ owner: build.owner, kind: build.kind, prebuilt: Boolean(build.prebuilt) });
     // From here on the build is used: a repeat of it finds this submission instead.
     this.#builds.delete(buildId);
@@ -1723,7 +1965,7 @@ export class ForkService {
         sub.status = status;
         if (sigs) sub.signatures = sigs;
         if (error) sub.error = error instanceof ApiError ? error : new ApiError(502, "send_failed", errorText(error));
-        if (build.kind === "exit") this.#pendingExits.delete(position);
+        if (build.kind === "exit") for (const a of saleAddresses(build)) this.#pendingExits.delete(a);
         const s = this.#state.submissions?.[buildId];
         if (s) Object.assign(s, { status, signatures: sub.signatures, error: sub.error ? savedError(sub.error) : undefined });
         this.#save();
@@ -1732,7 +1974,7 @@ export class ForkService {
       },
     };
     this.#submissions.set(buildId, sub);
-    if (build.kind === "exit") this.#pendingExits.set(position, buildId);
+    if (build.kind === "exit") for (const a of saleAddresses(build)) this.#pendingExits.set(a, buildId);
     saved[buildId] = {
       owner: build.owner, kind: build.kind, digest, signatures, status: "pending", at: now, lastValid,
       ...(build.kind === "back" || build.kind === "publish" ? { position, take: build.position.take.toBase58(), publishTakeId: build.position.publishTakeId } : {}),
@@ -1782,9 +2024,14 @@ export class ForkService {
     const signatures = await this.#store.withWallet(build.owner, async () => {
       t.add("lock", Date.now() - queued);
       if (build.expires < Date.now()) throw new ApiError(410, "build_expired", "Build again: transactions expire after about a minute");
-      if (build.position.exit) {
-        const held = await this.#program.account.position.fetchNullable(build.position.address, "confirmed");
-        if (!held || held.exited) throw new ApiError(409, "already_exited", "This position has already been sold.");
+      if (build.kind === "exit") {
+        // Each position it sells: still held, and for a partial sale still at the seq it was built for.
+        const sales = salesOf(build);
+        const held = await this.#program.account.position.fetchMultiple(sales.map((x) => x.address), "confirmed");
+        sales.forEach((x, i) => {
+          if (!held[i] || held[i]!.exited) throw new ApiError(409, "already_exited", "This position has already been sold.");
+          if (!x.full && held[i]!.parts !== x.seq) throw new ApiError(409, "build_stale", "This position changed since the sale was built. Build again.");
+        });
       }
       if (build.retry) await this.#admitRetry(build as Build & { retry: IncompleteTrade });
       // Its Phoenix children are its own from here (a rebuild may have given them to another build).
@@ -1803,14 +2050,15 @@ export class ForkService {
       // A retry's position opened over the transactions that landed first, too.
       const confirmed = [...(build.retry?.signatures ?? []), ...sent];
       this.#split.delete(positionKey);
-      if (build.position.exit) {
+      const sold = build.kind === "exit" ? salesOf(build).filter((x) => x.exit) : [];
+      if (sold.length) {
         const byTake = ((this.#state.exits ??= {})[build.position.take.toBase58()] ??= {});
-        byTake[build.position.address.toBase58()] = { ...build.position.exit, exitedAt: Math.floor(Date.now() / 1000) };
+        for (const x of sold) byTake[x.address.toBase58()] = { ...x.exit!, exitedAt: Math.floor(Date.now() / 1000) };
         this.#save();
       }
       this.#notePosition(build.position.take, build.position.address, build.owner, build.kind === "publish");
-      // A sold position is no longer held (the next read of the take confirms it).
-      if (build.position.exit) this.#positions.get(build.position.take.toBase58())?.owners.delete(positionKey);
+      // A position sold whole is no longer held (the next read of the take confirms it).
+      for (const x of sold) this.#positions.get(build.position.take.toBase58())?.owners.delete(x.address.toBase58());
       // A back or fade paid the take's author a creator share: their fee summary is out of date.
       if (build.kind === "back") {
         const takeAddress = build.position.take.toBase58();
@@ -1953,7 +2201,7 @@ export class ForkService {
       }
     }
     const buildId = randomUUID();
-    const expires = Math.min(started + BUILD_TTL_MS, (position.exit?.horizonEnd ?? Infinity) * 1_000);
+    const expires = Math.min(started + BUILD_TTL_MS, (position.exit?.horizonEnd ?? position.sales?.[0]?.horizonEnd ?? Infinity) * 1_000);
     this.#builds.set(buildId, {
       owner: owner.toBase58(),
       messages: txs.map((c) => Buffer.from(c.tx.message.serialize())),
@@ -2032,7 +2280,7 @@ export class ForkService {
       });
       build.previous = { messages: build.messages, expires: build.expires };
       build.messages = messages.map((m) => Buffer.from(m.serialize()));
-      build.expires =Math.min(started + BUILD_TTL_MS, (build.position.exit?.horizonEnd ?? Infinity) * 1_000);
+      build.expires = Math.min(started + BUILD_TTL_MS, (build.position.exit?.horizonEnd ?? build.position.sales?.[0]?.horizonEnd ?? Infinity) * 1_000);
       return {
         ...(build.response ?? {}),
         buildId,
@@ -2411,3 +2659,13 @@ const BADGES = [
   { kind: "tenOver50", title: "Ten takes at +50%" },
   { kind: "over1000", title: "A take at +1,000%" },
 ] as const;
+
+/** The positions a sale build sells (a build from before partial sales names only its one exit). */
+function salesOf(build: Build): SaleRecord[] {
+  if (build.position.sales?.length) return build.position.sales;
+  return [{ address: build.position.address, seq: 0, full: true, horizonEnd: build.position.exit?.horizonEnd ?? 0, exit: build.position.exit }];
+}
+
+function saleAddresses(build: Build): string[] {
+  return salesOf(build).map((x) => x.address.toBase58());
+}

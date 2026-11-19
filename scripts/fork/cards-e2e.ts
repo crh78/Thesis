@@ -84,7 +84,18 @@ async function e2e(): Promise<void> {
     console.log(`fade build: ${fade.status} ${fadeOut ? `card left out: ${fadeOut.reason}` : JSON.stringify(fade.json).slice(0, 200)}`);
     checks.push(["fade: built without the card", fade.status === 200 && !!fadeOut && !fade.json.included.includes(1)]);
 
-    const usdcBefore = wallet.json.usdc;
+    // A fifth of it first: a fifth of the $5 escrow comes back with it.
+    const usdcBeforePart = (await call("GET", `/wallets/${me}`)).json.usdc;
+    const part = await call("POST", `/takes/${TAKE.id}/positions/${pos.address}/exit`, { owner: me, bps: 2_000 });
+    if (part.status !== 200) throw new Error(`partial sale build: ${part.status} ${JSON.stringify(part.json)}`);
+    const partSold = await call("POST", "/submit", { buildId: part.json.buildId, transactions: sign(user, part.json.transactions) });
+    if (partSold.status !== 200) throw new Error(`partial sale submit: ${partSold.status} ${JSON.stringify(partSold.json)}`);
+    const afterPart = await call("GET", `/wallets/${me}`);
+    checks.push(["partial sale: $1 of the $5 escrow comes back", Math.abs(part.json.escrowUsd - 1) < 1e-6 && afterPart.json.usdc - usdcBeforePart >= 1 - 1e-6]);
+    const view = (await call("GET", `/takes/${TAKE.id}?viewer=${me}`)).json.viewerPositions.find((p: any) => p.address === pos.address);
+    checks.push(["receipt: $20 left, $4 escrowed", view?.remainingStakeUsd === 20 && Math.abs(view?.escrowedUsd - 4) < 1e-6]);
+
+    const usdcBefore = afterPart.json.usdc;
     const exit = await call("POST", `/takes/${TAKE.id}/positions/${pos.address}/exit`, { owner: me });
     if (exit.status !== 200) throw new Error(`exit build: ${exit.status} ${JSON.stringify(exit.json)}`);
     console.log(`sale: escrow back $${exit.json.escrowUsd}, expected $${exit.json.expectedUsd}`);
@@ -92,7 +103,7 @@ async function e2e(): Promise<void> {
     if (sold.status !== 200) throw new Error(`exit submit: ${sold.status} ${JSON.stringify(sold.json)}`);
     const end = await call("GET", `/wallets/${me}`);
     console.log(`USDC ${usdcBefore} -> ${end.json.usdc}`);
-    checks.push(["sale: the $5 escrow comes back", Math.abs(exit.json.escrowUsd - 5) < 1e-6 && end.json.usdc - usdcBefore >= 5 - 1e-6]);
+    checks.push(["sale: the rest of the escrow, $4, comes back", Math.abs(exit.json.escrowUsd - 4) < 1e-6 && end.json.usdc - usdcBefore >= 4 - 1e-6]);
     console.log(`\nposition ${pos.address}: the settler signs the card's entry once the asset bank holds card ${CARD} (rule card-insured-value in price_audit).`);
   } finally {
     server.close();
