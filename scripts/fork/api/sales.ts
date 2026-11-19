@@ -83,8 +83,11 @@ export function positionMaxPartialBps(p: { remaining: bigint; openParts: number 
   return maxPartialBps(p.remaining, minStake);
 }
 
-/** A position in a holding: its address, what's left of it, and its unsettled partial sales. */
-export type Held = { address: string; remaining: bigint; openParts: number };
+/**
+ * A position in a holding: its address, what's left of it, its unsettled partial sales, and
+ * whether it's the take author's buy-in (selling all of that closes the take).
+ */
+export type Held = { address: string; remaining: bigint; openParts: number; buyIn?: boolean };
 
 /** What a holding's sale sells: whole positions, and at most one partial sale. */
 export type HoldingPlan = { whole: string[]; part: { address: string; bps: number } | null; sold: bigint };
@@ -92,19 +95,21 @@ export type HoldingPlan = { whole: string[]; part: { address: string; bps: numbe
 /**
  * Sells `bps` of a holding (one wallet's positions in one take, on one side): whole positions
  * first, smallest first, while they fit in the target (bps of what's left across them, rounded
- * down), then at most one partial sale of the next position that can take it. Null when no
- * position can take the rest within the program's rules.
+ * down), then at most one partial sale of the next position that can take it. The author's
+ * buy-in comes last and is never sold whole below 10,000 (at most a part of it): only selling all
+ * of it closes the take. An error when no position can take the rest within the program's rules.
  */
 export function planHoldingSale(held: Held[], bps: number, minStake: bigint): HoldingPlan | { error: "remainder_below_minimum" | "too_many_open_sales" | "part_too_small" } {
   const total = held.reduce((n, p) => n + p.remaining, 0n);
-  const ordered = [...held].sort((a, b) => (a.remaining < b.remaining ? -1 : a.remaining > b.remaining ? 1 : a.address.localeCompare(b.address)));
+  const ordered = [...held].sort((a, b) =>
+    Number(Boolean(a.buyIn)) - Number(Boolean(b.buyIn)) || (a.remaining < b.remaining ? -1 : a.remaining > b.remaining ? 1 : a.address.localeCompare(b.address)));
   if (bps >= FULL) return { whole: ordered.map((p) => p.address), part: null, sold: total };
   const target = (total * BigInt(bps)) / BPS_DENOMINATOR;
   if (target <= 0n) return { error: "part_too_small" };
   const whole: string[] = [];
   let sold = 0n;
   let i = 0;
-  for (; i < ordered.length && sold + ordered[i].remaining <= target; i++) {
+  for (; i < ordered.length && !ordered[i].buyIn && sold + ordered[i].remaining <= target; i++) {
     whole.push(ordered[i].address);
     sold += ordered[i].remaining;
   }

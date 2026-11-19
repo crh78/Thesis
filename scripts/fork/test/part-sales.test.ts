@@ -84,6 +84,35 @@ test("a holding sells whole positions first, smallest first, then at most one pa
   assert.equal(holdingMaxPartialBps([{ address: "x", remaining: 10n * USD, openParts: 0 }], MIN), null);
 });
 
+test("a holding's sale puts the author's buy-in last and sells it whole only when all of it sells", () => {
+  // The author's $12 buy-in is the smaller position, but it comes last.
+  const held = [
+    { address: "buy-in", remaining: 12n * USD, openParts: 0, buyIn: true },
+    { address: "later", remaining: 40n * USD, openParts: 0 },
+  ];
+  // A quarter is $13: the $12 buy-in would fit whole (and close the take); $13 of the $40 instead.
+  assert.deepEqual(planHoldingSale(held, 2_500, MIN), { whole: [], part: { address: "later", bps: 3_250 }, sold: 13n * USD });
+  // 85% is $44.20: the $40 whole, then $4.20 of the buy-in would leave it $7.80: refused.
+  assert.deepEqual(planHoldingSale(held, 8_500, MIN), { error: "remainder_below_minimum" });
+  // 75% is $39: $39 of the $40 would leave $1, and the buy-in can't take $39: refused too.
+  assert.deepEqual(planHoldingSale(held, 7_500, MIN), { error: "remainder_below_minimum" });
+  // 60% is $31.20: $31.20 of the $40 leaves $8.80; the buy-in can't either.
+  assert.deepEqual(planHoldingSale(held, 6_000, MIN), { error: "remainder_below_minimum" });
+  const big = [
+    { address: "buy-in", remaining: 40n * USD, openParts: 0, buyIn: true },
+    { address: "small", remaining: 12n * USD, openParts: 0 },
+  ];
+  assert.deepEqual(planHoldingSale(big, 5_000, MIN), { whole: ["small"], part: { address: "buy-in", bps: 3_500 }, sold: 26n * USD });
+  // Short of all of it, the buy-in is never sold whole, even when everything else is.
+  for (let bps = 1; bps < 10_000; bps += 7) {
+    const plan = planHoldingSale(big, bps, MIN);
+    if (!("error" in plan)) assert.ok(!plan.whole.includes("buy-in"), `${bps} bps sells the buy-in whole`);
+  }
+  assert.deepEqual(planHoldingSale(big, 10_000, MIN), { whole: ["small", "buy-in"], part: null, sold: 52n * USD });
+  // The most a part can be: $42 of $52 (the buy-in keeps $10).
+  assert.equal(holdingMaxPartialBps(big, MIN), 8_077);
+});
+
 /** A card position of `stake` dollars (all of it escrowed) for the fixture's wallet. */
 async function cardPosition(f: Awaited<ReturnType<typeof tradeFixture>>, id: number, stake: number, o: { remaining?: number; parts?: number; partsSettled?: number; realizedPnl?: number; owner?: PublicKey } = {}) {
   const owner = o.owner ?? f.owner.publicKey;
@@ -174,6 +203,25 @@ test("a holding's sale: the smaller position whole and part of the bigger one, i
   const all = await service.buildHoldingSale(TAKE_ID, f.wallet, "back", { bps: 10_000 });
   assert.equal(all.full, true);
   assert.deepEqual(all.positions, [small.toBase58(), big.toBase58()]);
+});
+
+test("the author's holding sale never sells their buy-in whole short of all of it, so the take stays open", async (t) => {
+  const f = await tradeFixture(t, { status: () => confirmed });
+  const author = f.author.publicKey;
+  // The author's $12 buy-in (id 0) and a later $40 back of their own take.
+  const buyIn = await cardPosition(f, 0, 12, { owner: author });
+  const later = await cardPosition(f, 1, 40, { owner: author });
+  const service = new ForkService(f.options);
+  // A quarter is $13: part of the $40, not the $12 buy-in whole.
+  const quarter = await service.buildHoldingSale(TAKE_ID, author.toBase58(), "back", { bps: 2_500 });
+  assert.deepEqual(quarter.positions, [later.toBase58()]);
+  assert.equal(quarter.closesTake, false);
+  assert.equal(quarter.sale.stakeUsd, 13);
+  assert.ok(!quarter.transactions.flatMap(instructionsIn).some((d) => d.equals(discriminator("exit_position"))));
+  // All of it: the buy-in last, and that closes the take.
+  const all = await service.buildHoldingSale(TAKE_ID, author.toBase58(), "back", { bps: 10_000 });
+  assert.deepEqual(all.positions, [later.toBase58(), buyIn.toBase58()]);
+  assert.equal(all.closesTake, true);
 });
 
 test("the receipt shows what's left, what's sold, partial sales settling and how much can be sold", async (t) => {

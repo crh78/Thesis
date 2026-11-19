@@ -944,7 +944,8 @@ export class ForkService {
   /**
    * Sells `bps` (or `usd`) of the wallet's whole holding in a take on one side: whole positions
    * first, smallest first, then at most one partial sale, in one build and one approval
-   * (`planHoldingSale`). The apps group positions by take and side, so their Sell tab uses this.
+   * (`planHoldingSale`; the author's buy-in last, and whole only when all of it sells, since that
+   * closes the take). The apps group positions by take and side, so their Sell tab uses this.
    */
   async buildHoldingSale(takeId: string, wallet: string, side: "back" | "fade", o: BuildOpts & SaleAmount = {}) {
     const t = o.timings ?? new Timings();
@@ -959,7 +960,8 @@ export class ForkService {
       const ctx = await this.#saleContext(takeId, owner, held.map((p) => p.publicKey), t);
       const total = lazy(async () => (await this.#saleValues(ctx, ctx.holdings)).reduce((n, v) => n + v, 0));
       const bps = saleBps(o, hasUsd(o) ? await total() : 0);
-      const views = ctx.holdings.map((h) => ({ address: h.address.toBase58(), ...h.view }));
+      // The author's buy-in sells last, and whole only when all of the holding sells.
+      const views = ctx.holdings.map((h) => ({ address: h.address.toBase58(), ...h.view, buyIn: h.account.id.isZero() && h.account.owner.equals(ctx.take.author) }));
       const plan = planHoldingSale(views, bps, ctx.minStake);
       if ("error" in plan) throw saleError(plan.error, holdingMaxPartialBps(views, ctx.minStake), await total(), ctx.minStakeUsd);
       const byAddress = new Map(ctx.holdings.map((h) => [h.address.toBase58(), h]));
