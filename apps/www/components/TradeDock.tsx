@@ -599,7 +599,8 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
       {step.kind !== "closed" ? (
         <div className="sheet-wrap" onClick={(e) => e.target === e.currentTarget && !busy && setStep({ kind: "closed" })}>
           {/* Any touch keeps the sheet's early build fresh (it stops after 3 minutes untouched). */}
-          <div className="sheet" onPointerDown={early.touch}>
+          {/* With Buy | Sell tabs the sheet keeps one height, so switching tabs doesn't move them. */}
+          <div className={(step.kind === "trade" || step.kind === "sell") && sellable.length ? "sheet tabbed" : "sheet"} onPointerDown={early.touch}>
             <button className="x" aria-label="Close" disabled={!!busy} onClick={() => setStep({ kind: "closed" })}>×</button>
             {/* Buy | Sell once there's something here to sell (Buy opens first). */}
             {(step.kind === "trade" || step.kind === "sell") && sellable.length ? (
