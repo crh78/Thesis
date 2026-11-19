@@ -36,6 +36,7 @@ import { USDC_MINT_MAINNET, exitAddress, partSaleAddress, profileAddress, thesis
 import { forkApiServer } from "./api/server.ts";
 import type { AppTake } from "./api/service.ts";
 import { startForkService } from "./api.ts";
+import { planHoldingSale } from "./api/sales.ts";
 import { REPO_ROOT, RPC_URL, connection, main, syncClock } from "./lib.ts";
 
 /** One tick of the real settler against this fork. */
@@ -250,17 +251,31 @@ async function e2e(): Promise<void> {
     if (half.status !== 200) throw new Error(`holding half quote: ${half.status} ${JSON.stringify(half.json)}`);
     console.log(`holding half: ${half.json.transactions.length} transaction(s), Jupiter ${jupiterCalls(half.timing)} calls`);
     for (const x of half.json.steps) console.log(`  ${x.labels.join(" + ")}: ${x.bytes} bytes`);
-    checks.push(["holding half: $25 of $50, the $20 position whole and part of the $30 one", half.json.full === false && half.json.sale.stakeUsd === 25 && half.json.positions?.length === 2 && half.json.positions[0] === small && half.json.positions[1] === big]);
+    // Half of $50 is $25: the $20 position whole, then the $5 left as a part of the $30 one. A part
+    // is whole bps of its position (5/30 rounds to 1,667 bps, $5.001), so the planner says exactly
+    // what sells and what's left.
+    const plan = planHoldingSale([{ address: small, remaining: 20_000_000n, openParts: 0 }, { address: big, remaining: 30_000_000n, openParts: 0 }], 5_000, 10_000_000n);
+    if ("error" in plan) throw new Error(`the planner refused the half: ${plan.error}`);
+    const halfSold = Number(plan.sold) / 1e6;
+    const bigLeft = 30_000_000 - (Number(plan.sold) - 20_000_000);
+    const halfGot = { full: half.json.full, stakeUsd: half.json.sale?.stakeUsd, remainingStakeUsd: half.json.sale?.remainingStakeUsd, positions: half.json.positions, small, big, plan: { whole: plan.whole, part: plan.part, sold: halfSold } };
+    const halfOk = half.json.full === false && half.json.sale.stakeUsd === halfSold && plan.whole[0] === small && plan.part?.address === big && half.json.positions?.length === 2 && half.json.positions[0] === small && half.json.positions[1] === big;
+    if (!halfOk) console.log(`  holding half got: ${JSON.stringify(halfGot)}`);
+    checks.push([`holding half: $${halfSold} of $50, the $20 position whole and part of the $30 one`, halfOk]);
     checks.push(["holding half: one swap per token, the records last", swapsIn(half) === bought && recordsLast(half)]);
     await submit("holding half", half, seller);
     const afterHalf = await usdc(seller.publicKey);
     checks.push(["holding half: USDC back, at least the quoted minimum", afterHalf - beforeHalf >= half.json.minimumUsd - 0.005]);
     const [smallAfter, bigAfter] = await thesis.account.position.fetchMultiple([new PublicKey(small), new PublicKey(big)], "confirmed");
-    checks.push(["chain: the $20 position sold, $25 left of the $30 one with one partial sale", smallAfter?.exited === true && bigAfter?.remaining.toNumber() === 25_000_000 && bigAfter?.parts === 1 && !bigAfter?.exited]);
+    const chainOk = smallAfter?.exited === true && bigAfter?.remaining.toNumber() === bigLeft && bigAfter?.parts === 1 && !bigAfter?.exited;
+    if (!chainOk) console.log(`  chain got: $20 exited ${smallAfter?.exited}; $30 remaining ${bigAfter?.remaining.toString()} (want ${bigLeft}), parts ${bigAfter?.parts}, exited ${bigAfter?.exited}`);
+    checks.push([`chain: the $20 position sold, $${bigLeft / 1e6} left of the $30 one with one partial sale`, chainOk]);
     const rest = await call("POST", `/takes/${FOUR.id}/sell`, { owner: s, side: "back", bps: 10_000 });
     if (rest.status !== 200) throw new Error(`holding rest quote: ${rest.status} ${JSON.stringify(rest.json)}`);
     console.log(`holding rest: ${rest.json.transactions.length} transaction(s), Jupiter ${jupiterCalls(rest.timing)} calls (${rest.timing})`);
-    checks.push(["holding rest: the $25 left, whole, one swap per token", rest.json.full === true && rest.json.sale.stakeUsd === 25 && rest.json.positions?.length === 1 && swapsIn(rest) === bought]);
+    const restOk = rest.json.full === true && rest.json.sale.stakeUsd === bigLeft / 1e6 && rest.json.positions?.length === 1 && rest.json.positions[0] === big && swapsIn(rest) === bought;
+    if (!restOk) console.log(`  holding rest got: ${JSON.stringify({ full: rest.json.full, stakeUsd: rest.json.sale?.stakeUsd, want: bigLeft / 1e6, positions: rest.json.positions, swaps: swapsIn(rest), bought })}`);
+    checks.push([`holding rest: the $${bigLeft / 1e6} left, whole, one swap per token`, restOk]);
     checks.push(["holding rest: the sell routes kept, at most one Jupiter call", (jupiterCalls(rest.timing) ?? 99) <= 1]);
     await submit("holding rest", rest, seller);
     const bigSold = await thesis.account.position.fetch(new PublicKey(big), "confirmed");

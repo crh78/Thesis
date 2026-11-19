@@ -9,10 +9,15 @@ import idl from "@thesis/chain/idl/thesis.json" with { type: "json" };
 import { positionAddress } from "@thesis/chain";
 import { ApiError, base58 } from "../api/common.ts";
 import { ForkService } from "../api/service.ts";
-import { mergeInventory, saleLeft, stepsByTx } from "../api/sales.ts";
+import { mergeInventory, planHoldingSale, saleLeft, stepsByTx } from "../api/sales.ts";
 import { TAKE_ID, tradeFixture, type Status } from "./trade-fixture.ts";
 
 const apiError = (status: number, code: string) => (e: unknown) => e instanceof ApiError && e.status === status && e.code === code;
+
+test("exit-e2e's holding: half of $20 + $30 is the $20 whole and 1,667 bps of the $30 ($5.001: a part is whole bps)", () => {
+  const plan = planHoldingSale([{ address: "small", remaining: 20_000_000n, openParts: 0 }, { address: "big", remaining: 30_000_000n, openParts: 0 }], 5_000, 10_000_000n);
+  assert.deepEqual(plan, { whole: ["small"], part: { address: "big", bps: 1_667 }, sold: 25_001_000n });
+});
 
 test("a holding sale swaps each token once, summing exactly what each position sells of it", () => {
   const merged = mergeInventory([

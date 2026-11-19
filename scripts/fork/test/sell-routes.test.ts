@@ -129,7 +129,7 @@ test("a sale of tokens sold minutes ago makes no quote: the kept routes, reprice
   assert.equal(calls2.prices.length, 1, "≤1 Jupiter call: the batched price read");
   assert.equal(later.calls, 1);
   assert.deepEqual(third.map((s) => s.quote.outAmount), ["2020000", "1990000"], "out at the price now");
-  assert.deepEqual(router.jupiterStats().sells, { size: 2, repriced: 4, quoted: 2, kept: 2, unkept: 0, seeded: 0 });
+  assert.deepEqual(router.jupiterStats().sells, { size: 2, repriced: 4, quoted: 2, kept: 2, unkept: 0, seeded: 0, seedsRefused: 0 });
 });
 
 test("a sell route isn't reused past a 3% move, for a repeat moments after, without a price, or with routes off", async (t) => {
@@ -222,10 +222,24 @@ test("a back seeds its tokens' sell routes when the budget has room, so the firs
   assert.equal(use.quotes + use.instructions, 0);
   assert.equal(router.jupiterStats().sells.seeded, 2);
 
-  // A budget kept for trades: seeding is refused, quietly.
-  const busy = busyRouter();
-  await busy.sellSwaps(sells(1_000n, 1_000n), wallet, payer); // spends the spare request
+  // Right after a back's own calls the budget is kept for trades: the seed is refused, quietly,
+  // and tried again once it has refilled. The fork's budget shape (10 at once, 6 kept for trades),
+  // on a clock the test moves.
+  let budgetClock = Date.now();
+  const busy = new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null } as any, {
+    budget: new JupiterBudget({ perMinute: 30, burst: 10, reserve: 6 }, () => budgetClock),
+    readMints: null,
+    prices: new PriceCache(PRICE_TTL_MS, () => clock),
+    seedRetryMs: [150],
+  });
+  await busy.sellSwaps(sells(1_000n, 1_000n), wallet, payer); // a sale's 5 calls: 5 left
   const before = calls.length;
   await busy.seedSells([{ mint: Keypair.generate().publicKey.toBase58(), amount: 1_000n }], wallet);
   assert.equal(calls.length, before, "no call made");
+  assert.equal(busy.jupiterStats().sells.seedsRefused, 1);
+  budgetClock += 20_000; // refilled
+  await new Promise((r) => setTimeout(r, 400));
+  await busy.routesLearned();
+  assert.equal(calls.length, before + 2, "the retry quoted it");
+  assert.equal(busy.jupiterStats().sells.seeded, 1);
 });
