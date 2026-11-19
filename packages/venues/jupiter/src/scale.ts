@@ -40,11 +40,14 @@ const TAIL = 19;
  * most `maxPriceImpactPct`, the new input between `minRatio` and `maxRatio` times the quoted one,
  * and, scaling up, the estimated shortfall within `maxShortfallPct`. A bigger trade moves the
  * price more, so the proportional output overstates it by about impact x (ratio - 1); a smaller
- * one moves it less and gets at least the estimate. With the 1% slippage the swap keeps, 0.25%
- * leaves plenty: a 0.02%-impact quote (a $20 leg in a deep pool) scales up to 10x, a 0.1% one to
- * 3.5x. (The fixed 0.4x-2.5x this replaces missed $20 -> $50 on rounding, on the owner's phone.)
+ * one moves it less and gets at least the estimate. The swap keeps its 1% slippage, so a 0.5%
+ * shortfall still leaves half of it for the price to move before the send; a worse fill fails at
+ * preflight, never mistrades. A 0.02%-impact quote (a $20 leg in a deep pool) scales up to 10x, a
+ * 0.16% one (MSFTx's Raydium CLMM pool for $5, on the owner's take) to ~4x. (Before: a fixed
+ * 0.4x-2.5x missed $20 -> $50 on rounding; then a 0.1% impact cap failed the whole build on that one
+ * thin leg.)
  */
-export const SCALE_LIMITS = { maxPriceImpactPct: 0.1, minRatio: 0.1, maxRatio: 10, maxShortfallPct: 0.25 };
+export const SCALE_LIMITS = { maxPriceImpactPct: 0.5, minRatio: 0.1, maxRatio: 10, maxShortfallPct: 0.5 };
 export type ScaleLimits = typeof SCALE_LIMITS;
 
 /** The amounts an exact-in route instruction carries, or null if it isn't one read here. */

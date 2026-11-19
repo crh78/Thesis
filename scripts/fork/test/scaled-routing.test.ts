@@ -133,12 +133,21 @@ test("only within 0.1x-10x of a routing quoted in the last 20 seconds", async (t
   assert.equal((await router.venueLegs(legs, user(), 30)).jupiter.template, "miss", "past 20 s: quoted afresh");
 });
 
-test("a quote that moved the price 0.1% or more isn't scaled", async (t) => {
-  const calls = jupiter(t, { impact: "0.0015" });
+test("a quote that moved the price over 0.5% isn't scaled; a thin one scales only as far as its shortfall allows", async (t) => {
+  const calls = jupiter(t, { impact: "0.006" });
   const router = routerWith();
   await router.venueLegs(legs, Keypair.generate().publicKey, 20);
   assert.equal((await router.venueLegs(legs, Keypair.generate().publicKey, 25)).jupiter.template, "miss");
   assert.equal(calls.length, 16);
+});
+
+test("a 0.16%-impact quote (a thin pool) scales to $50 and down, not to $100", async (t) => {
+  jupiter(t, { impact: "0.0016" });
+  const router = routerWith();
+  await router.venueLegs(legs, Keypair.generate().publicKey, 20);
+  assert.equal((await router.venueLegs(legs, Keypair.generate().publicKey, 50)).jupiter.template, "scaled", "2.5x: ~0.24% short");
+  assert.equal((await router.venueLegs(legs, Keypair.generate().publicKey, 10)).jupiter.template, "scaled", "down");
+  assert.equal((await router.venueLegs(legs, Keypair.generate().publicKey, 100)).jupiter.template, "miss", "5x: ~0.64% short");
 });
 
 test("a swap instruction scale.ts can't read isn't scaled", async (t) => {
