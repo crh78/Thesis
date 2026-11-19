@@ -69,6 +69,8 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
 
   const [step, setStep] = useState<Step>({ kind: "closed" });
   const [pending, setPending] = useState<Side | null>(null);
+  /** Why a fade link couldn't open (the take has no leg a fade can take). */
+  const [fadeNote, setFadeNote] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(initial);
   // Closed (its author sold, or it settled): no Trade or Fade, only this. The receipt read here
   // can find out after the server render did.
@@ -128,6 +130,8 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
     // Only a side this take allows right now (a link can ask for one it doesn't, or the take closed).
     const allowed = !closedText && (pending === "back" ? (receipt?.canBack ?? true) : !!receipt?.canFade);
     if (allowed) setStep({ kind: "trade", side: pending });
+    // A fade link on a take nobody can fade: say why, instead of quietly showing the trade button.
+    else if (pending === "fade" && !closedText) setFadeNote(receipt?.fadeBlocked ?? "This take can't be faded right now.");
     setPending(null);
     try { sessionStorage.removeItem(pendingKey); } catch { /* private mode */ }
   }, [pending, phase.kind, wallet, pendingKey, receipt, viewerReceipt, closedText]);
@@ -428,6 +432,7 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
       ) : null}
 
       {missing ? <p className="small muted" style={{ marginTop: 20 }}>{missing}</p> : null}
+      {fadeNote && !canFade ? <p className="small muted" role="status" style={{ marginTop: 20 }}>{fadeNote}</p> : null}
 
       <div className="dock">
         <div className="dock-inner">

@@ -2,7 +2,7 @@
 // The iOS feed's TakeRow: avatar column, then the take. The claim, return, sparkline and allocation
 // bar open the take page; Trade / Fade open it with that sheet up; then comments, save and share.
 import Link from "next/link";
-import { authorName, closedReason, dayLabel, isDeleted, pct, SERIES, takeState, type Take } from "@/lib/data";
+import { authorName, closedReason, dayLabel, isDeleted, pct, SERIES, takeState, type Take, fadeable } from "@/lib/data";
 import Avatar from "./Avatar";
 
 export type FeedTake = Take & { tags?: string[]; history?: number[]; topic?: string; money_in?: number; posting?: boolean };
@@ -93,7 +93,7 @@ export default function TakeRow({ take, saved, onSave, mine = false }: { take: F
             {state.open ? (
               <>
                 <Link href={`${href}?side=back`} className="sidepill up-pill"><Arrow /> Trade <span className="mono">{take.backs}</span></Link>
-                {mine ? null : <Link href={`${href}?side=fade`} className="sidepill down-pill"><Arrow down /> Fade <span className="mono">{take.fades}</span></Link>}
+                {mine || !fadeable(take) ? null : <Link href={`${href}?side=fade`} className="sidepill down-pill"><Arrow down /> Fade <span className="mono">{take.fades}</span></Link>}
               </>
             ) : (
               <span className="muted small">{closedReason(state, gone ? null : take.author.handle)}</span>
