@@ -18,6 +18,11 @@ type RouteQuote = Pick<JupQuote, "inAmount" | "outAmount" | "otherAmountThreshol
   outputMint: string;
   inputMint?: string;
   routePlan?: { swapInfo?: { inputMint?: string; outputMint?: string } }[];
+  /** Read by scale.ts (Jupiter's quotes carry them). */
+  swapMode?: string;
+  slippageBps?: number;
+  priceImpactPct?: string;
+  platformFee?: { feeBps?: number } | null;
 };
 
 /** One wallet's swap: Jupiter's answer and the quote it was built from. */
