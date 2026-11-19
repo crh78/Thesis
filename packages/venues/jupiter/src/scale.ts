@@ -7,8 +7,8 @@
 // to that. Pure, so it's unit-tested on recorded answers.
 //
 // Only safe when the price barely depends on the size: the quote moved the price less than
-// SCALE_LIMITS.maxPriceImpactPct, and the new amount is within SCALE_LIMITS' ratio of the quoted
-// one. At the limits (0.1% impact, 2.5x) the proportional estimate is off by about 0.15%, inside
+// SCALE_LIMITS.maxPriceImpactPct, the new amount is within SCALE_LIMITS' ratio of the quoted one,
+// and scaling up can't fall more than maxShortfallPct short of the estimate (see SCALE_LIMITS), inside
 // the 1% slippage. A fill worse than the slippage limit, or a pool that needs accounts the quote
 // didn't name, fails the transaction's preflight: nothing is mistraded.
 //
@@ -36,11 +36,15 @@ export const EXACT_IN_ROUTES: Record<string, string> = {
 const TAIL = 19;
 
 /**
- * When a quote may be scaled: its price impact (percent, as the bank reads Jupiter's fraction)
- * at most `maxPriceImpactPct`, and the new input between `minRatio` and `maxRatio` times the
- * quoted one. 2.5x each way reaches the next web amount chip ($10, $20, $50, $100) from any one.
+ * When a quote may be scaled: its price impact (percent, as the bank reads Jupiter's fraction) at
+ * most `maxPriceImpactPct`, the new input between `minRatio` and `maxRatio` times the quoted one,
+ * and, scaling up, the estimated shortfall within `maxShortfallPct`. A bigger trade moves the
+ * price more, so the proportional output overstates it by about impact x (ratio - 1); a smaller
+ * one moves it less and gets at least the estimate. With the 1% slippage the swap keeps, 0.25%
+ * leaves plenty: a 0.02%-impact quote (a $20 leg in a deep pool) scales up to 10x, a 0.1% one to
+ * 3.5x. (The fixed 0.4x-2.5x this replaces missed $20 -> $50 on rounding, on the owner's phone.)
  */
-export const SCALE_LIMITS = { maxPriceImpactPct: 0.1, minRatio: 0.4, maxRatio: 2.5 };
+export const SCALE_LIMITS = { maxPriceImpactPct: 0.1, minRatio: 0.1, maxRatio: 10, maxShortfallPct: 0.25 };
 export type ScaleLimits = typeof SCALE_LIMITS;
 
 /** The amounts an exact-in route instruction carries, or null if it isn't one read here. */
@@ -88,6 +92,8 @@ export function unscalable(leg: SwapLeg, inAmount: bigint, limits: ScaleLimits =
   if (quotedIn <= 0n || out <= 0n || inAmount <= 0n) return "nothing to scale";
   const ratio = Number(inAmount) / Number(quotedIn);
   if (ratio < limits.minRatio || ratio > limits.maxRatio) return `${ratio.toFixed(2)}x the quoted amount is outside ${limits.minRatio}x-${limits.maxRatio}x`;
+  const shortfall = Math.abs(impact) * Math.max(0, ratio - 1);
+  if (shortfall > limits.maxShortfallPct) return `scaling ${ratio.toFixed(2)}x a ${impact.toFixed(3)}%-impact quote could fall ${shortfall.toFixed(3)}% short (over ${limits.maxShortfallPct}%)`;
   return null;
 }
 
