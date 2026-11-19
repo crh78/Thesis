@@ -131,7 +131,12 @@ struct SellPanel: View {
         guard !quotes.isEmpty, quotes.allSatisfy({ $0.minimumUsd != nil }) else { return nil }
         return quotes.reduce(0) { $0 + ($1.minimumUsd ?? 0) }
     }
-    private var closesTake: Bool { isAll && (holding?.closesTakeIfSoldAll == true || quotes.contains { $0.closesTake == true }) }
+    /// Only a sale of all of a holding that includes the author's buy-in closes the take; a partial
+    /// sale (by the amount, or as the build says) never does.
+    private var closesTake: Bool {
+        isAll && !quotes.contains { $0.full == false }
+            && (holding?.closesTakeIfSoldAll == true || quotes.contains { $0.closesTake == true })
+    }
 
     // MARK: Builds
 

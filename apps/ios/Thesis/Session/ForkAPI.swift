@@ -590,10 +590,13 @@ struct ForkReceipt: Decodable, Equatable {
             let level: String
         }
 
-        /** Profit or loss on what the wallet actually holds. */
+        /** Profit or loss on what the wallet actually holds. `costUsd` stays the original total
+            and `valueUsd` covers only what's left, so the cost counts for the share still held. */
         var pnl: (usd: Double, pct: Double)? {
-            guard let costUsd, let valueUsd, costUsd > 0 else { return nil }
-            return (valueUsd - costUsd, valueUsd / costUsd - 1)
+            guard let costUsd, let valueUsd, costUsd > 0, stakeUsd > 0 else { return nil }
+            let cost = costUsd * heldStakeUsd / stakeUsd
+            guard cost > 0 else { return nil }
+            return (valueUsd - cost, valueUsd / cost - 1)
         }
 
         /** Just traded and still waiting for its entry prices: worth re-reading soon. */
