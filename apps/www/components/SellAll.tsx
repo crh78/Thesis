@@ -1,5 +1,5 @@
 "use client";
-// Selling all of a holding from Me: swipe a position left (touch or mouse) or tap its red arrow,
+// Selling all of a holding from Me: swipe a position left (touch or mouse) or tap its red trash can,
 // confirm "Sell all of your $X position in …?", and it sells through the fork API's holding route
 // (`POST /takes/:id/sell`, bps 10,000) with the same flow as the take page's trades: built while the
 // question is up, signed on the tap, "Sold" once the fork accepted it, confirmed in the background,
@@ -214,7 +214,7 @@ const SWIPE_MAX = 140;
 /**
  * A row that swipes left to sell, with pointer events so touch and a mouse both work; vertical
  * moves still scroll the page (touch-action: pan-y). A swipe never also opens the row's link. The
- * red left-arrow (`arrowLabel`) does the same with a tap or the keyboard.
+ * red trash can (`arrowLabel`) does the same with a tap or the keyboard.
  */
 export function SwipeRow({ onSell, disabled, arrowLabel, children }: { onSell: () => void; disabled?: boolean; arrowLabel: string; children: ReactNode }) {
   const [dx, setDx] = useState(0);
@@ -267,7 +267,7 @@ export function SwipeRow({ onSell, disabled, arrowLabel, children }: { onSell: (
         {children}
         {disabled ? null : (
           <button type="button" className="sell-arrow" aria-label={arrowLabel} title="Sell all" onClick={onSell}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="m11 6-6 6 6 6" /></svg>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 7h16" /><path d="M9 7V4.5h6V7" /><path d="M6 7l1 13h10l1-13" /><path d="M10 11v6M14 11v6" /></svg>
           </button>
         )}
       </div>

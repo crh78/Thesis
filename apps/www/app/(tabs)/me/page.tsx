@@ -14,8 +14,8 @@ import { hasPhoenixCash, LiquidationLines, PhoenixCashCard } from "@/components/
 import { PostingRow } from "@/components/PostingRecovery";
 import { holdingWorth, SellAllSheet, SwipeRow } from "@/components/SellAll";
 import ShareButton from "@/components/ShareButton";
-import { assetKeys, dayLabel, money, pct, rpcNow, takeState, topicImage, type Profile, type Take } from "@/lib/data";
-import TakeLogo from "@/components/TakeLogo";
+import { assetKeys, dayLabel, money, pct, rpcNow, takeState, topicImage, type Profile, type Take, type TakeLeg } from "@/lib/data";
+import TakeLogo, { type LogoLeg } from "@/components/TakeLogo";
 import { fork, holdings, markTraded, TRADED_AT_KEY, TRADED_EVENT, useForkWallet, type CreatorFees as Fees, type History, type Incomplete, type PhoenixCash, type Portfolio, type PortfolioPosition, type WalletSummary } from "@/lib/fork";
 import StoppedTrade from "@/components/StoppedTrade";
 import { X_LOGIN } from "@/lib/flags";
@@ -60,6 +60,9 @@ export default function MePage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [takes, setTakes] = useState<(Take & { posting?: boolean })[]>([]);
   const [legKeys, setLegKeys] = useState<Record<string, string>>({});
+  // The baskets of takes you hold (by take id), for the positions' pie logos.
+  const [heldLegs, setHeldLegs] = useState<Record<string, TakeLeg[]>>({});
+  const logoLegs = (legs: TakeLeg[]): LogoLeg[] => legs.map((l) => ({ key: (l.asset_id && legKeys[l.asset_id]) || null, name: l.name, kind: l.kind, weight: l.weight }));
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [summary, setSummary] = useState<WalletSummary | null>(null);
   const [history, setHistory] = useState<Record<string, History>>({});
@@ -194,6 +197,19 @@ export default function MePage() {
 
   const balance = summary?.usdc ?? 0;
   const held = holdings((portfolio?.positions ?? []).filter((p) => !p.exited));
+  const heldIds = [...new Set(held.map((p) => p.takeId))].sort().join(",");
+  useEffect(() => {
+    const missing = heldIds ? heldIds.split(",").filter((id) => !(id in heldLegs)) : [];
+    if (!missing.length) return;
+    rpcNow<Take[]>("takes_by_ids", { p_ids: missing })
+      .then((ts) => {
+        setHeldLegs((m) => ({ ...m, ...Object.fromEntries(missing.map((id) => [id, ts.find((t) => t.id === id)?.legs ?? []])) }));
+        return assetKeys(ts.flatMap((t) => (t.legs ?? []).map((l) => l.asset_id ?? "")));
+      })
+      .then((k) => setLegKeys((old) => ({ ...old, ...k })))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [heldIds]);
   // Without a history yet (or if it can't load), a flat line at what you have now: cash plus positions.
   const now = balance + held.reduce((s, p) => s + holdingWorth(p), 0);
   const h = history[range];
@@ -252,8 +268,8 @@ export default function MePage() {
         <div className="muted small">@{me.handle}</div>
         {profile?.bio ? <p className="me-bio">{profile.bio}</p> : null}
         <div className="me-follow small">
-          <span><b>{profile?.following ?? 0}</b> <span className="muted">Following</span></span>
-          <span><b>{profile?.followers ?? 0}</b> <span className="muted">Followers</span></span>
+          <Link href="/people/following"><b>{profile?.following ?? 0}</b> <span className="muted">Following</span></Link>
+          <Link href="/people/followers"><b>{profile?.followers ?? 0}</b> <span className="muted">Followers</span></Link>
         </div>
         <div className="caps me-counts">
           <span>{takes.length} {takes.length === 1 ? "take" : "takes"}</span>
@@ -328,8 +344,12 @@ export default function MePage() {
               <SwipeRow key={p.address} onSell={() => setSelling(p)} disabled={!p.canExit || isSending}
                 arrowLabel={`Sell all of your ${money(worth)} position in ${p.claim}`}>
                 <Link href={`/t/${p.takeId}`} className="item">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img className="tile" src={topicImage(p.topic)} alt="" />
+                  {heldLegs[p.takeId]?.length ? (
+                    <TakeLogo legs={logoLegs(heldLegs[p.takeId])} size={52} />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img className="tile" src={topicImage(p.topic)} alt="" />
+                  )}
                   <div className="item-main">
                     <div className="item-claim">{p.claim}</div>
                     <div className="item-meta"><b className={p.side === "fade" ? "down" : "up"}>{p.side === "fade" ? "Faded" : "Traded"}</b> · {[byAuthor(p), detail].filter(Boolean).join(" · ")}</div>
@@ -354,7 +374,7 @@ export default function MePage() {
             ) : (
               <Link key={t.id} href={`/t/${t.id}`} className="item">
                 {t.legs?.length ? (
-                  <TakeLogo legs={t.legs.map((l) => ({ key: (l.asset_id && legKeys[l.asset_id]) || null, name: l.name, kind: l.kind, weight: l.weight }))} />
+                  <TakeLogo legs={logoLegs(t.legs)} size={52} />
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img className="tile" src={topicImage((t as Take & { topic?: string }).topic)} alt="" />
@@ -376,7 +396,7 @@ export default function MePage() {
           portfolio?.badges.length ? portfolio.badges.map((b) => (
             <div key={b.mint} className="item">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className="tile" src={b.image ?? topicImage(null)} alt="" />
+              <img className="tile badge-tile" src={b.image ?? topicImage(null)} alt="" />
               <div className="item-main">
                 <div className="item-claim">{b.title}</div>
                 <div className="item-meta"><b className="up">Badge</b> · on-chain · {b.mint.slice(0, 4)}…{b.mint.slice(-4)}</div>

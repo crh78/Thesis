@@ -1,6 +1,6 @@
 // The "called it" card: the data every theme draws, and the themes ("filters") themselves.
 // Shared by the page (components/CalledCard.tsx) and its link preview (lib/og-called.tsx).
-import { avatar, calledIt, legName, nameOf, pct, type Receipt, SERIES, shortDate, since, type Take, takeReturn } from "@/lib/data";
+import { avatar, calledIt, type Holder, legName, nameOf, pct, type Receipt, SERIES, shortDate, since, type Take, takeReturn } from "@/lib/data";
 
 export const THEMES = [
   { id: "glow", name: "Glow", swatch: "radial-gradient(circle at 70% 75%, #A6E3B8, #1B3A2A 55%, #0B0D12)" },
@@ -32,6 +32,8 @@ export type CardData = {
   fades: number;
   onChain: boolean;
   legs: { name: string; color: string; weight: number }[];
+  /** Set on a holder's P&L card: their side, and the take's author (handle) when it's someone else's. */
+  holder?: { side: "back" | "fade"; author: string | null };
 };
 
 export function cardData(take: Take, receipt: Receipt | null): CardData {
@@ -59,6 +61,21 @@ export function cardData(take: Take, receipt: Receipt | null): CardData {
 }
 
 /** A barcode for the receipt theme, the same every time for a take. */
+/** The card as a holder's P&L: their face and name, their return on their position. */
+export function asHolder(d: CardData, h: Holder): CardData {
+  return {
+    ...d,
+    ret: h.ret,
+    pct: pct(h.ret),
+    called: calledIt(h.ret),
+    name: nameOf(h.person),
+    handle: h.person.handle,
+    avatar: avatar(h.person.avatar_url),
+    letter: (h.person.handle ?? h.person.display_name ?? "?").slice(0, 1).toUpperCase(),
+    holder: { side: h.side, author: d.holder ? d.holder.author : d.handle },
+  };
+}
+
 export function barcode(id: string, bars = 46): number[] {
   let h = 2166136261;
   for (const c of id) h = Math.imul(h ^ c.charCodeAt(0), 16777619);

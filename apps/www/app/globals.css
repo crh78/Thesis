@@ -87,8 +87,25 @@ input { font: inherit; color: inherit; }
 .section h2 { font-size: 17px; font-weight: 600; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: baseline; }
 .bar { display: flex; gap: 3px; height: 6px; margin: 4px 0 14px; }
 .bar span { border-radius: 3px; }
-.leg { display: grid; grid-template-columns: 12px 1fr auto; gap: 10px; align-items: start; padding: 8px 0; }
-.dot { width: 10px; height: 10px; border-radius: 3px; margin-top: 5px; }
+.leg { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: start; padding: 8px 0; }
+/* LegMark: the pick's logo in a frame of its color; the frame's shape says what kind of pick. */
+.legmark { --lm: var(--muted); width: 34px; height: 34px; display: grid; place-items: center; flex: none; }
+.lm-in { display: grid; place-items: center; overflow: hidden; background: #fff; border: 2px solid var(--lm); box-sizing: border-box; }
+.lm-in img { width: 78%; height: 78%; object-fit: contain; }
+.lm-light .lm-in { background: #1b1e24; }
+.lm-sym .lm-in { background: color-mix(in srgb, var(--lm) 14%, var(--sheet)); }
+.lm-glyph { font-family: var(--font-mono); font-size: 12px; font-weight: 600; line-height: 1; }
+.lm-mono { color: #0f1419; font-size: 9px; }
+.lm-square .lm-in { width: 32px; height: 32px; border-radius: 8px; }
+.lm-circle .lm-in { width: 32px; height: 32px; border-radius: 50%; }
+.lm-card .lm-in { width: 25px; height: 33px; border-radius: 5px; }
+.lm-diamond .lm-in { width: 24px; height: 24px; border-radius: 5px; transform: rotate(45deg); }
+.lm-diamond .lm-in > * { transform: rotate(-45deg); }
+.lm-diamond .lm-in img { width: 92%; height: 92%; }
+/* A hexagon can't take a border: the frame color behind, the face inset over it. */
+.lm-hex .lm-in { width: 32px; height: 32px; border: 0; background: var(--lm); clip-path: polygon(25% 4%, 75% 4%, 100% 50%, 75% 96%, 25% 96%, 0 50%); position: relative; }
+.lm-hex .lm-in::before { content: ""; position: absolute; inset: 2.5px; background: color-mix(in srgb, var(--lm) 14%, var(--sheet)); clip-path: inherit; }
+.lm-hex .lm-in > * { position: relative; }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .stats b { display: block; font-family: var(--font-mono); font-weight: 500; font-size: 17px; margin-top: 4px; }
 
@@ -106,6 +123,7 @@ input { font: inherit; color: inherit; }
 .sheet { width: 100%; max-width: var(--col); max-height: calc(92dvh - env(safe-area-inset-top)); overflow: auto; background: var(--sheet); border: 1px solid var(--hairline); border-bottom: 0; border-radius: 28px 28px 0 0; padding: 22px 20px calc(20px + env(safe-area-inset-bottom)); }
 .sheet h3 { font-size: 24px; margin: 0 0 4px; }
 .x { float: right; width: 36px; height: 36px; border-radius: 50%; background: var(--tile); font-size: 18px; }
+.sheet-action { float: right; height: 36px; margin-right: 8px; }
 .amount { font-family: var(--font-mono); font-size: 46px; font-weight: 500; margin: 18px 0 12px; display: flex; align-items: center; }
 .amount input { background: none; border: 0; outline: none; width: 100%; font-size: 46px; font-family: var(--font-mono); }
 .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
@@ -144,6 +162,7 @@ select.field { appearance: none; color: var(--text); }
 .tag { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.4px; text-transform: uppercase; background: var(--tile); color: var(--muted); white-space: nowrap; }
 .tag-up { background: rgba(169, 227, 186, 0.16); color: var(--up); border: 1px solid rgba(169, 227, 186, 0.3); }
 .tag-icon { width: 14px; height: 14px; margin-top: -1px; }
+.tag-down { background: color-mix(in srgb, var(--down) 14%, transparent); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 30%, transparent); }
 a.tag-up:hover { background: rgba(169, 227, 186, 0.24); }
 .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 
@@ -409,6 +428,10 @@ button.menu-item:hover { background: var(--glass-on); }
 .alogo-img img { width: 64%; height: 64%; object-fit: contain; }
 .tlrow { display: grid; grid-template-columns: 50px 1fr auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--hairline); }
 .take-logo { flex: none; display: block; border-radius: 50%; }
+/* Me's lists: take logos, topic tiles and badges all at one size. */
+.me-list .item { grid-template-columns: 52px 1fr auto; }
+.me-list .tile { width: 52px; height: 52px; }
+.me-list .badge-tile { padding: 0; background: none; object-fit: cover; }
 .tile-sq { width: 50px; height: 50px; border-radius: 12px; }
 .tlrow-main { display: grid; gap: 4px; min-width: 0; }
 .tlrow-claim { font-family: var(--font-serif); font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
@@ -596,3 +619,4 @@ button.ditem:hover, a.ditem:hover { background: var(--tile); }
 /* --- End money flows. --- */
 /* Back on pages below the tabs (TopBar): no glass, just the arrow. */
 .back-btn { background: none; border: 0; margin-left: -8px; color: var(--text); }
+.tags:empty { display: none; }

@@ -71,7 +71,11 @@ export default function CalledStudio({ d, initial }: { d: CardData; initial: The
     if (r && el) r.scrollTo({ left: el.offsetLeft - (r.clientWidth - el.clientWidth) / 2, behavior: "smooth" });
   }
 
-  const shareText = d.called ? `Called it. ${d.claim} ${d.pct}` : `${d.claim} (${d.pct} so far)`;
+  // A holder's P&L card says whose take it is; the take's own card brags for its author.
+  const whose = d.holder?.author && d.holder.author !== d.handle ? ` on @${d.holder.author}'s take` : "";
+  const shareText = d.holder
+    ? `I'm ${d.pct}${whose}${d.holder.side === "fade" ? " (faded)" : ""}: ${d.claim}`
+    : d.called ? `Called it. ${d.claim} ${d.pct}` : `${d.claim} (${d.pct} so far)`;
 
   return (
     <>
