@@ -89,14 +89,15 @@ test("the safety bounds: ratio, price impact, shortfall when scaling up", () => 
   assert.equal(unscalable(leg(), 150_000_000n), null, "10x (no price impact: no shortfall)");
   assert.match(unscalable(leg(), 1_499_999n)!, /outside/);
   assert.match(unscalable(leg(), 150_000_001n)!, /outside/);
-  // 0.09% impact: 3x up falls ~0.18% short (fine), 4x ~0.27% (over 0.25%); scaling down is always fine.
-  const deepish = leg(a.res, { ...quote, priceImpactPct: "0.0009" });
-  assert.equal(unscalable(deepish, 45_000_000n), null, "3x");
-  assert.match(unscalable(deepish, 60_000_000n)!, /short/);
-  assert.equal(unscalable(deepish, 1_500_000n), null, "0.1x down");
+  // 0.16% impact (MSFTx for $5 on the owner's take): 4x up falls ~0.48% short (fine), 5x ~0.65%
+  // (over 0.5%); scaling down is always fine.
+  const thin = leg(a.res, { ...quote, priceImpactPct: "0.0016" });
+  assert.equal(unscalable(thin, 60_000_000n), null, "4x");
+  assert.match(unscalable(thin, 75_000_000n)!, /short/);
+  assert.equal(unscalable(thin, 1_500_000n), null, "0.1x down");
   assert.match(unscalable(leg(), 0n)!, /nothing to scale/);
-  assert.match(unscalable(leg(a.res, { ...quote, priceImpactPct: "0.0011" }), 20_000_000n)!, /price impact 0.110% is over 0.1%/);
-  assert.equal(unscalable(leg(a.res, { ...quote, priceImpactPct: "0.0009" }), 20_000_000n), null);
+  assert.match(unscalable(leg(a.res, { ...quote, priceImpactPct: "0.0051" }), 15_000_001n)!, /price impact 0.510% is over 0.5%/);
+  assert.equal(unscalable(leg(a.res, { ...quote, priceImpactPct: "0.0049" }), 15_000_001n), null);
   assert.match(unscalable(leg(a.res, { ...quote, priceImpactPct: undefined }), 20_000_000n)!, /no price impact/);
   assert.match(unscalable(leg(a.res, { ...quote, priceImpactPct: "lots" }), 20_000_000n)!, /no price impact/);
   assert.equal(unscalable(leg(), 50_000_000n, { ...SCALE_LIMITS, maxRatio: 4 }), null, "limits are a parameter");
