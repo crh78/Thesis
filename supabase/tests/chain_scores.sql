@@ -1,4 +1,5 @@
--- Checks chain_positions and the chain leaderboard (migrations/*_chain_scores.sql).
+-- Checks chain_positions and the chain leaderboard (migrations/*_chain_scores.sql), and partial
+-- sales in them (migrations/*_partial_sales.sql).
 -- Run against a scratch database with the migrations applied (it rolls back):
 --   psql "$SCRATCH_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/chain_scores.sql
 -- Each check raises if it fails. Events are shaped like functions/quicknode-stream sends them.
@@ -213,6 +214,107 @@ begin
   end if;
   select * into s from public.chain_wallet_stats('solana-mainnet-fork') where owner = 'W_WIN';
   if s.takes_settled <> 2 then raise exception 'the early-settled take counts as settled: %', row_to_json(s); end if;
+
+  -- Partial sales (migrations/*_partial_sales.sql). Parter backs Loser's T4 with $100, sells 25%
+  -- ($25 of basis) at +20% ($5) 20 days ago, then another $25 that settles unscored at 0% (prices
+  -- never came), then sells the last $50 at -4% ($-2). Each piece counts at its own settle time;
+  -- the position is one win, since $5 + $0 - $2 > 0 though the final sale lost.
+  insert into public.profiles (id, handle, display_name, solana_address, created_at) values
+    ('00000000-0000-4000-8000-0000000000c7', 'parter', 'Parter', 'W_PART', now() - interval '8 days');
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature','m1','ordinal',0,'slot',40,'block_time',old,'name','takeCreated',
+      'data', jsonb_build_object('take','T4','author','W_LOSE')),
+    jsonb_build_object('signature','m2','ordinal',0,'slot',41,'block_time',old,'name','positionOpened',
+      'data', jsonb_build_object('take','T4','position','P_P1','owner','W_PART','side','back','stake','100000000','scored',true)),
+    jsonb_build_object('signature','m3','ordinal',0,'slot',42,'block_time',old,'name','positionPartSold',
+      'data', jsonb_build_object('take','T4','position','P_P1','owner','W_PART','side','back','seq',0,'bps',2500,
+        'stakeSold','25000000','remainingStake','75000000','escrowReturned','0','soldAt',old::bigint::text)),
+    jsonb_build_object('signature','m4','ordinal',0,'slot',43,'block_time',old,'name','partSettled',
+      'data', jsonb_build_object('take','T4','position','P_P1','owner','W_PART','side','back','seq',0,
+        'stake','25000000','returnBps','2000','pnl','5000000','scored',true))));
+  if (select (remaining, realized_pnl, settled_at) from public.chain_positions where address = 'P_P1')
+     is distinct from (75000000::numeric, 5000000::numeric, null::timestamptz) then
+    raise exception 'a partial sale must lower remaining and realize P&L, leaving the position open';
+  end if;
+  if (select (bps, stake, remaining, sold_at, scored, pnl) from public.chain_position_parts where position = 'P_P1' and seq = 0)
+     is distinct from (2500, 25000000::numeric, 75000000::numeric, to_timestamp(old::bigint), true, 5000000::numeric) then
+    raise exception 'part row: %', (select row_to_json(pp) from public.chain_position_parts pp where position = 'P_P1' and seq = 0);
+  end if;
+  select * into s from public.chain_wallet_stats('solana-mainnet-fork') where owner = 'W_PART';
+  if (s.scored_stake, s.pnl, s.wins, s.settled) is distinct from (25000000::numeric, 5000000::numeric, 0::bigint, 0::bigint) then
+    raise exception 'a settled partial sale counts before the position settles: %', row_to_json(s);
+  end if;
+
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature','m5','ordinal',0,'slot',44,'block_time',t0,'name','positionPartSold',
+      'data', jsonb_build_object('take','T4','position','P_P1','owner','W_PART','side','back','seq',1,'bps',3333,
+        'stakeSold','25000000','remainingStake','50000000','escrowReturned','0','soldAt',t0::bigint::text)),
+    jsonb_build_object('signature','m6','ordinal',0,'slot',45,'block_time',t0,'name','partSettled',
+      'data', jsonb_build_object('take','T4','position','P_P1','owner','W_PART','side','back','seq',1,
+        'stake','25000000','returnBps','0','pnl','0','scored',false)),
+    jsonb_build_object('signature','m7','ordinal',0,'slot',46,'block_time',t0,'name','positionExited',
+      'data', jsonb_build_object('take','T4','position','P_P1','owner','W_PART','side','back','exitedAt',t0::bigint::text,'stake','50000000')),
+    jsonb_build_object('signature','m8','ordinal',0,'slot',47,'block_time',t0,'name','positionSettled',
+      'data', jsonb_build_object('take','T4','position','P_P1','owner','W_PART','side','back','returnBps','-400','pnl','-2000000',
+        'scored',true,'exited',true,'stake','50000000')),
+    -- Fader fades T4 with $40 and sells a quarter at +20%. Its partSettled carries only the
+    -- position (and positionPartSold never arrived): owner, take and side come from the position.
+    jsonb_build_object('signature','m9','ordinal',0,'slot',48,'block_time',t0,'name','positionOpened',
+      'data', jsonb_build_object('take','T4','position','P_F2','owner','W_FADE','side','fade','stake','40000000','scored',true)),
+    jsonb_build_object('signature','m10','ordinal',0,'slot',49,'block_time',t0,'name','partSettled',
+      'data', jsonb_build_object('position','P_F2','seq',0,'stake','10000000','returnBps','2000','pnl','2000000','scored',true))));
+  if (select (remaining, settled_stake, realized_pnl) from public.chain_positions where address = 'P_P1')
+     is distinct from (50000000::numeric, 50000000::numeric, 5000000::numeric) then
+    raise exception 'settled position: %', (select row_to_json(cp) from public.chain_positions cp where address = 'P_P1');
+  end if;
+  select * into s from public.chain_wallet_stats('solana-mainnet-fork') where owner = 'W_PART';
+  if (s.scored_stake, s.pnl, s.wins, s.settled) is distinct from (75000000::numeric, 3000000::numeric, 1::bigint, 1::bigint) then
+    raise exception 'parts plus the final settlement, unscored part left out, one win: %', row_to_json(s);
+  end if;
+  select * into s from public.chain_wallet_stats('solana-mainnet-fork', now() - interval '7 days') where owner = 'W_PART';
+  if (s.scored_stake, s.pnl, s.wins, s.settled) is distinct from (50000000::numeric, -2000000::numeric, 1::bigint, 1::bigint) then
+    raise exception 'a partial sale counts in the period it settled in: %', row_to_json(s);
+  end if;
+  if (select (made, pct) from public.chain_wallet_made('solana-mainnet-fork', 'W_PART')) is distinct from (3.00::numeric, 4.0000::numeric) then
+    raise exception 'chain_wallet_made with partial sales: %', (select row_to_json(m) from public.chain_wallet_made('solana-mainnet-fork', 'W_PART') m);
+  end if;
+  -- Loser's backers: Winner's $50 at $-5 before, plus Parter's $75 scored at $+3.
+  select * into s from public.chain_backer_stats('solana-mainnet-fork') where author = 'W_LOSE';
+  if (s.backer_stake, s.backer_pnl, s.backers) is distinct from (125000000::numeric, -2000000::numeric, 2::bigint) then
+    raise exception 'backer stats with partial sales: %', row_to_json(s);
+  end if;
+  if (select (made, pct) from public.chain_backers_made('solana-mainnet-fork', 'W_LOSE')) is distinct from (-2.00::numeric, -1.6000::numeric) then
+    raise exception 'chain_backers_made with partial sales';
+  end if;
+  -- Fader: the $80 fade at $+40, plus the open fade's settled quarter ($10 at $+2); two positions.
+  select * into s from public.chain_fader_stats('solana-mainnet-fork') where owner = 'W_FADE';
+  if (s.fade_stake, s.fade_pnl, s.fades) is distinct from (90000000::numeric, 42000000::numeric, 2::bigint) then
+    raise exception 'fader stats with partial sales: %', row_to_json(s);
+  end if;
+  set local role anon;
+  perform set_config('request.headers', '{"x-thesis-network":"solana-mainnet-fork"}', true);
+  j := public.leaderboard('all', 100);
+  if (select (x ->> 'cash')::numeric from jsonb_array_elements(j) x where x -> 'person' ->> 'handle' = 'parter') <> 3
+     or (select (x ->> 'pct')::numeric from jsonb_array_elements(j) x where x -> 'person' ->> 'handle' = 'parter') <> 4
+     or (select (x -> 'person' ->> 'made')::numeric from jsonb_array_elements(j) x where x -> 'person' ->> 'handle' = 'parter') <> 3 then
+    raise exception 'the board counts partial sales: %', j;
+  end if;
+  j := public.leaderboard('all', 100, 'faders');
+  if (select (x ->> 'cash')::numeric from jsonb_array_elements(j) x where x -> 'person' ->> 'handle' = 'fader') <> 42 then
+    raise exception 'the faders board counts partial sales: %', j;
+  end if;
+  perform set_config('request.headers', '{}', true);
+  reset role;
+
+  -- A fork reset that reuses the address drops the old position's partial sales.
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature','m11','ordinal',0,'slot',100,'block_time',extract(epoch from now()) + 60,'name','positionOpened',
+      'data', jsonb_build_object('take','T9','position','P_P1','owner','W_PART','side','back','stake','10000000','scored',true))));
+  if (select (remaining, settled_stake, realized_pnl) from public.chain_positions where address = 'P_P1')
+     is distinct from (null::numeric, null::numeric, null::numeric)
+     or exists (select 1 from public.chain_position_parts where position = 'P_P1') then
+    raise exception 'reused address keeps old partial sales';
+  end if;
   raise notice 'chain_scores: all checks passed';
 end $$;
 rollback;

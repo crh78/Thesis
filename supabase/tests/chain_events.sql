@@ -1,5 +1,6 @@
 -- Checks ingest_chain_events() and take_json()'s network header (migrations/*_chain_events.sql), and
--- takeClosed / settled_at (migrations/*_author_sale_closes.sql).
+-- takeClosed / settled_at (migrations/*_author_sale_closes.sql), and partial-sale price events
+-- (migrations/*_partial_sales.sql).
 -- Run against a scratch database with the migrations applied (it rolls back):
 --   psql "$SCRATCH_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/chain_events.sql
 -- Each check raises if it fails. Events are shaped like functions/quicknode-stream sends them.
@@ -106,6 +107,27 @@ begin
   if (select closed_at from public.chain_takes where network = 'solana-mainnet-fork' and address = 'TU') <> to_timestamp(1800040000) then
     raise exception 'takeClosed without closedAt uses the block time';
   end if;
+
+  -- A partial sale's prices (migrations/*_partial_sales.sql): price_audit takes moment 'part' with
+  -- its seq, and price_events() lists partPricesRecorded with that seq.
+  insert into public.price_audit (hash, network, position, moment, moment_at, part_seq, canonical, doc)
+  select encode(extensions.digest(convert_to(x.doc_text, 'UTF8'), 'sha256'), 'hex'), 'solana-mainnet-fork', 'PP_A', 'part', 1800050000, 2, x.doc_text, x.doc_text::jsonb
+  from (select '{"moment":"part","momentAt":1800050000,"partSeq":2,"position":"PP_A"}'::text as doc_text) x;
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature', 'pp1', 'ordinal', 0, 'slot', 30, 'block_time', 1800050010, 'name', 'partPricesRecorded',
+      'data', jsonb_build_object('take', 'TP', 'position', 'PP_A', 'seq', 2, 'legs', 1,
+        'sourceHash', (select jsonb_agg(get_byte(decode(a.hash, 'hex'), i) order by i) from public.price_audit a, generate_series(0, 31) i
+                       where a.position = 'PP_A')))));
+  if (select (name, part_seq, published) from public.price_events('PP_A'))
+     is distinct from ('partPricesRecorded'::text, 2, true) then
+    raise exception 'price_events must list a partial sale''s prices with its seq: %', (select jsonb_agg(row_to_json(p)) from public.price_events('PP_A') p);
+  end if;
+  begin
+    insert into public.price_audit (hash, moment, canonical, doc)
+    select encode(extensions.digest(convert_to('{}', 'UTF8'), 'sha256'), 'hex'), 'later', '{}', '{}'::jsonb;
+    raise exception 'an unknown moment must be refused';
+  exception when check_violation then null;
+  end;
   raise notice 'chain_events: all checks passed';
 end $$;
 rollback;
