@@ -129,7 +129,7 @@ test("a sale of tokens sold minutes ago makes no quote: the kept routes, reprice
   assert.equal(calls2.prices.length, 1, "≤1 Jupiter call: the batched price read");
   assert.equal(later.calls, 1);
   assert.deepEqual(third.map((s) => s.quote.outAmount), ["2020000", "1990000"], "out at the price now");
-  assert.deepEqual(router.jupiterStats().sells, { size: 2, repriced: 4, quoted: 2, kept: 2, unpriced: 0 });
+  assert.deepEqual(router.jupiterStats().sells, { size: 2, repriced: 4, quoted: 2, kept: 2, unkept: 0, seeded: 0 });
 });
 
 test("a sell route isn't reused past a 3% move, for a repeat moments after, without a price, or with routes off", async (t) => {
@@ -173,4 +173,59 @@ test("a token with no route back to USDC: 422 no_exit_route", async (t) => {
   const router = routerWith();
   await assert.rejects(router.sellSwaps(sells(1_000n, 1_000n), Keypair.generate().publicKey, Keypair.generate().publicKey),
     (e: unknown) => e instanceof ApiError && e.code === "no_exit_route");
+});
+
+/**
+ * A router whose budget refuses every prebuild and route-check call (lanes 2 and 3) after the first
+ * request, as on the fork when taps queue: only tap-time calls (lane 1) go through.
+ */
+const busyRouter = () =>
+  new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null } as any, {
+    budget: new JupiterBudget({ perMinute: 6_000, burst: 1_000, reserve: 999 }, () => Date.now()),
+    readMints: null,
+    prices: new PriceCache(PRICE_TTL_MS, () => clock),
+  });
+
+test("as on the fork: the same wallet's second sale seconds later, at other amounts, with prebuild calls refused, reprices", async (t) => {
+  clock = Date.now();
+  const calls = jupiter(t);
+  const router = busyRouter();
+  const [wallet, payer] = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+  // The half: four tokens' worth of two positions, quoted afresh in the tap's lane.
+  const half = newUse(1);
+  await router.sellSwaps(sells(1_250_000n, 3_100_000n), wallet, payer, { use: half });
+  assert.deepEqual([half.quotes, half.instructions, half.prices], [2, 2, 1], "the routes are kept with a price read in the build's own turn");
+  // The rest, seconds later (the price cache has moved on): one price read, no quote.
+  clock += PRICE_TTL_MS + 1;
+  const rest = newUse(1);
+  const out = await router.sellSwaps(sells(1_000_000n, 2_500_000n), wallet, payer, { use: rest });
+  assert.deepEqual(out.map((s) => s.repriced), [true, true]);
+  assert.equal(rest.calls, 1, "at most one Jupiter call");
+  assert.equal(calls.length, 4);
+  assert.deepEqual(amounts(out).map((r) => r.inAmount), [1_000_000n, 2_500_000n]);
+});
+
+test("a back seeds its tokens' sell routes when the budget has room, so the first sale makes no quote; never when it's short", async (t) => {
+  clock = Date.now();
+  const calls = jupiter(t);
+  const router = routerWith();
+  const [wallet, payer] = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+  await router.seedSells([{ mint: TOKENS[0].mint, amount: 1_000_000n }, { mint: TOKENS[1].mint, amount: 2_000_000n }], wallet);
+  assert.equal(calls.length, 4, "a quote and swap instructions per token, once");
+  assert.equal(calls.prices.length, 1);
+  // Seeded already: another back of the same tokens doesn't quote them again.
+  await router.seedSells([{ mint: TOKENS[0].mint, amount: 3_000_000n }], wallet);
+  assert.equal(calls.length, 4);
+  const use = newUse(1);
+  const sale = await router.sellSwaps(sells(1_000_000n, 1_500_000n), wallet, payer, { use });
+  assert.deepEqual(sale.map((s) => s.repriced), [true, true]);
+  assert.equal(use.quotes + use.instructions, 0);
+  assert.equal(router.jupiterStats().sells.seeded, 2);
+
+  // A budget kept for trades: seeding is refused, quietly.
+  const busy = busyRouter();
+  await busy.sellSwaps(sells(1_000n, 1_000n), wallet, payer); // spends the spare request
+  const before = calls.length;
+  await busy.seedSells([{ mint: Keypair.generate().publicKey.toBase58(), amount: 1_000n }], wallet);
+  assert.equal(calls.length, before, "no call made");
 });

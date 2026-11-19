@@ -53,7 +53,7 @@ import {
 } from "@thesis/chain";
 import { cardLeg, underlyingIdHex, type BankState } from "@thesis/venues/bank";
 import { cardIdHex } from "@thesis/venues/collector-crypt";
-import { jupiterBuy, jupiterLendRedeem, type VenueLeg } from "@thesis/venues/jupiter";
+import { jupiterBuy, jupiterLendRedeem, type JupiterBuy, type VenueLeg } from "@thesis/venues/jupiter";
 import { PHOENIX_LEG_CU } from "@thesis/venues/phoenix";
 import {
   ApiError,
@@ -275,6 +275,8 @@ type Build = {
   response?: Record<string, unknown>;
   /** A sale: what each transaction carries, so one that stops partway can be finished. */
   sale?: SaleBuild;
+  /** A back or publish: the tokens its swaps buy (about how many), to seed their sell routes once it lands. */
+  seeds?: { mint: string; amount: bigint }[];
 };
 
 /**
@@ -2297,6 +2299,8 @@ export class ForkService {
     }
     if (cleanup.length) t.add("cleanup", Date.now() - cleanupStarted);
     void this.#history.snapshot(build.owner).catch(() => {});
+    // The tokens it bought get sell routes now, when the budget has room, so their first sale is quick.
+    if (build.seeds?.length) void this.#router.seedSells(build.seeds, new PublicKey(build.owner));
     // The take goes live when the backend sees its takeCreated: deliver it now rather than
     // waiting for the relay, so the author's "posting…" clears as soon as this returns.
     if (build.position.publishTakeId) await t.time("relay", () => this.#relay(signatures));
@@ -2427,6 +2431,7 @@ export class ForkService {
       quotedAt: extra.quotedAt,
       prebuilt: Boolean(extra.prebuilt),
       marketFreshMs: phoenix ? 0 : SUBMIT_MARKET_FRESH_MS,
+      seeds: venue.flatMap((v) => ((v as Partial<TradeLeg>).how === "swap" ? [{ mint: (v as JupiterBuy).mint, amount: (v as JupiterBuy).minOutAmount }] : [])),
       sale: extra.sale && {
         takeId: extra.sale.takeId,
         txSteps: stepsByTx(txs.map((c) => c.legs), extra.sale.steps, extra.sale.receipt),
