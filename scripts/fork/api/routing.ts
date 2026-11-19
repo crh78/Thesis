@@ -42,6 +42,15 @@
 // A repriced estimate that's wrong fails at preflight (the fill is below the slippage limit or a
 // pool needs other accounts), never mistrades; the retry rule above applies, so the wallet's next
 // build of that trade and stake quotes afresh and replaces the kept routes.
+//
+// Sales: routes back to USDC are kept the same way, per token (the token in, USDC out), for
+// FORK_API_ROUTE_TTL_MS (`sellSwaps`). A sale's swap of a token sold in that time by any wallet
+// rewrites the kept template: in_amount exactly the tokens to sell, quoted_out_amount in
+// proportion and at the token's price now (the price now over the price then: the USDC out moves
+// with the price), the same 1% slippage, impact, shortfall and 3% move limits. So a sale whose
+// tokens all have kept sell routes costs one price read, or none. Any other token is quoted
+// afresh (a quote and a swap-instructions call) and its template kept; a wallet's repeat of the
+// same sale moments after a repriced answer quotes afresh, as for trades.
 import type { PublicKey } from "@solana/web3.js";
 import { PRICEABLE_MIN_POOLED_USD, bestIssuer, effectiveMultiplier, issuerPool, type BestIssuerResult, type ReadMints } from "@thesis/venues/bank";
 import { ineligible, otherSide, type GeminiContract } from "@thesis/venues/gemini";
@@ -62,9 +71,11 @@ import {
   PRICE_TTL_MS,
   SCALE_LIMITS,
   TEMPLATE_OWNER,
+  USDC_MINT,
   type CachedPrice,
   type JupSwapInstructions,
   type JupiterAccess,
+  type JupiterBuy,
   type SwapTemplate,
   type VenueLeg,
 } from "@thesis/venues/jupiter";
@@ -132,6 +143,10 @@ type Way = Winner | "lend" | "phoenix";
  * `at`, the token's Jupiter price then, and its scaled-UI multiplier then.
  */
 type KeptRoute = { at: number; winner: Winner; template: SwapTemplate; price: number; multiplier: number };
+/** A token's sell route kept to reprice (see "Sales" in the header): its template (the token in, USDC out) as quoted at `at`, the token's price then, and its multiplier then. */
+type KeptSell = { at: number; template: SwapTemplate; price: number; multiplier: number };
+/** One token a sale swaps back to USDC: exactly `amount` in, its quote (repriced or fresh) and the wallet's instructions. */
+export type SellSwap = { mint: string; amount: bigint; quote: { inAmount: string; outAmount: string; otherAmountThreshold: string }; venue: JupiterBuy; repriced: boolean };
 const isQuote = (w: Way | null | undefined): w is Winner => typeof w === "object" && w !== null;
 /** A USDC-in quote as Jupiter returned it (with its mints and route), as buyInstructions reads it. */
 const routeQuote = (q: Winner["quote"]) => q as Winner["quote"] & { outputMint: string; inputMint?: string };
@@ -258,6 +273,7 @@ export class Router {
       noRoute: this.#noRoute.size,
       templates: { size: this.#plans.size, ...this.#templateStats },
       routes: { size: this.#routes.size, ...this.#routeStats, prices: this.prices.stats },
+      sells: { size: this.#sells.size, ...this.#sellStats },
     };
   }
 
@@ -773,17 +789,10 @@ export class Router {
       const ready = (await Promise.all(quoted.map(async (q) => ({ ...q, template: await q.template }))))
         .filter((q): q is typeof q & { template: SwapTemplate } => q.template !== null && !unscalable(q.template, BigInt(q.template.quote.inAmount)));
       if (!ready.length) return;
-      const mints = [...new Set(ready.map((q) => q.way.mint))];
-      const inTime = (p: CachedPrice | null | undefined): p is CachedPrice => !!p && p.at >= quotedAt - PRICE_TTL_MS && p.at <= quotedAt + ROUTE_PRICE_AFTER_MS;
-      const read = () => this.prices.get(mints, (ms) => jupiterPrices(ms, this.jupiter(2)));
-      let prices = await read();
-      if (!mints.every((m) => inTime(prices.get(m)))) {
-        await new Promise((resolve) => setTimeout(resolve, ROUTE_PRICE_RETRY_MS));
-        prices = await read();
-      }
+      const prices = await this.#pricesAt([...new Set(ready.map((q) => q.way.mint))], quotedAt);
       for (const q of ready) {
         const p = prices.get(q.way.mint);
-        if (!inTime(p)) {
+        if (!p) {
           this.#routeStats.unpriced++;
           continue;
         }
@@ -795,6 +804,137 @@ export class Router {
         this.#routeStats.kept++;
       }
       if (this.#routes.size >= 500) for (const k of [...this.#routes.keys()]) if (!this.#keptRoutes(k, Date.now()).length) this.#routes.delete(k);
+    })().catch(() => {});
+    this.#learning.add(job);
+    void job.finally(() => this.#learning.delete(job));
+  }
+
+  /**
+   * The tokens' Jupiter prices when something was quoted at `quotedAt`: from the cache when read
+   * at most PRICE_TTL_MS before or ROUTE_PRICE_AFTER_MS after, else read now in a prebuild's turn
+   * (and once more ROUTE_PRICE_RETRY_MS later if the budget kept it for trades). Mints with no
+   * price in time are missing.
+   */
+  async #pricesAt(mints: string[], quotedAt: number): Promise<Map<string, CachedPrice>> {
+    const inTime = (p: CachedPrice | null | undefined): p is CachedPrice => !!p && p.at >= quotedAt - PRICE_TTL_MS && p.at <= quotedAt + ROUTE_PRICE_AFTER_MS;
+    const read = () => this.prices.get(mints, (ms) => jupiterPrices(ms, this.jupiter(2)));
+    let prices = await read();
+    if (!mints.every((m) => inTime(prices.get(m)))) {
+      await new Promise((resolve) => setTimeout(resolve, ROUTE_PRICE_RETRY_MS));
+      prices = await read();
+    }
+    return new Map(mints.flatMap((m) => {
+      const p = prices.get(m);
+      return inTime(p) ? [[m, p] as const] : [];
+    }));
+  }
+
+  /** Token → its kept sell routes (templates at different sizes, newest first; see "Sales" in the header). */
+  #sells = new Map<string, KeptSell[]>();
+  /** Wallet, token and amount → when that wallet's sale of it was last answered from a kept sell route (a repeat quotes afresh). */
+  #sellRepeats = new Map<string, number>();
+  /** Sell swaps repriced from kept routes, quoted afresh, templates kept, and not kept for want of a price. */
+  #sellStats = { repriced: 0, quoted: 0, kept: 0, unpriced: 0 };
+
+  /** The sell routes kept for `mint` and still in time, newest first. */
+  #keptSells(mint: string, now: number): KeptSell[] {
+    if (this.routeTtlMs <= 0) return [];
+    return (this.#sells.get(mint) ?? []).filter((r) => r.at > now - this.routeTtlMs);
+  }
+
+  /**
+   * A sale's swaps back to USDC (see "Sales" in the header): each token's exact `amount` in, from
+   * a kept sell route repriced at the token's price now (one batched price read for all of them,
+   * none when the shared cache has it), else a fresh quote and swap-instructions call whose
+   * template is kept. `fresh`: quote every one afresh (and drop their kept routes). Throws 422
+   * `no_exit_route` when a token has no route, 503 `busy` when its quote failed or the budget
+   * refused a call.
+   */
+  async sellSwaps(
+    sells: { mint: string; amount: bigint; label: string }[],
+    user: PublicKey,
+    payer: PublicKey,
+    o: { lane?: Lane; use?: JupiterUse; maxAccounts?: number; fresh?: boolean } = {},
+  ): Promise<SellSwap[]> {
+    const use = o.use ?? newUse(o.lane ?? 1);
+    const lane = (use.lane = o.lane ?? use.lane);
+    const now = Date.now();
+    const maxAccounts = o.maxAccounts ?? this.route.maxAccounts;
+    const mine = (s: { mint: string; amount: bigint }) => `${user.toBase58()} ${s.mint} ${s.amount}`;
+    // A wallet selling the same tokens again moments after a repriced answer (a refused submit): afresh.
+    for (const s of sells) {
+      if (!o.fresh && !((this.#sellRepeats.get(mine(s)) ?? 0) > now - TEMPLATE_TTL_MS)) continue;
+      this.#sells.delete(s.mint);
+      this.#sellRepeats.delete(mine(s));
+    }
+    const kept = [...new Set(sells.filter((s) => this.#keptSells(s.mint, now).length).map((s) => s.mint))];
+    const prices = kept.length ? await this.#readPrices(kept, lane, use) : new Map<string, CachedPrice>();
+    const jupiter = this.jupiter(lane, use);
+    const quoted: { mint: string; template: SwapTemplate | null }[] = [];
+    const out = await Promise.all(sells.map(async (s): Promise<SellSwap> => {
+      const repriced = prices.size ? this.#repriceSell(s.mint, s.amount, prices, now) : null;
+      if (repriced) {
+        this.#sellRepeats.set(mine(s), now);
+        this.#sellStats.repriced++;
+        use.templatedLegs++;
+        return { mint: s.mint, amount: s.amount, quote: repriced.quote, venue: fromTemplate(repriced, user, payer, s.label), repriced: true };
+      }
+      const { quote, error } = await jupiter.quoteExactIn(s.mint, USDC_MINT, s.amount, { ...this.route, maxAccounts });
+      if (use.refused) throw use.refused;
+      if (!quote && error && TRANSIENT_QUOTE.test(error)) throw busy(s.label);
+      if (!quote || quote.inputMint !== s.mint || quote.outputMint !== USDC_MINT || quote.inAmount !== s.amount.toString()) {
+        throw new ApiError(422, "no_exit_route", "No route to sell every token in this position.");
+      }
+      const res = await jupiterSwapInstructions({ ...jupiter, quote, user }).catch((e: unknown) => {
+        throw use.refused ?? e;
+      });
+      const q = quote as typeof quote & { outputMint: string; inputMint: string };
+      this.#sellStats.quoted++;
+      quoted.push({ mint: s.mint, template: swapTemplate({ res, quote: q }, user) });
+      return { mint: s.mint, amount: s.amount, quote: q, venue: buyInstructions(res, q, user, payer, s.label), repriced: false };
+    }));
+    if (quoted.length) this.#keepSells(quoted, Date.now());
+    if (this.#sellRepeats.size >= 1_000) for (const [k, at] of this.#sellRepeats) if (at <= now - TEMPLATE_TTL_MS) this.#sellRepeats.delete(k);
+    return out;
+  }
+
+  /**
+   * `mint` sold for exactly `amount` from a kept sell route at the token's price now, or null when
+   * none can be: none in time, no price now, the token paused, its multiplier changed, or scale.ts
+   * refuses (size, impact, shortfall, a price that moved over 3%). The nearest size is tried first.
+   */
+  #repriceSell(mint: string, amount: bigint, prices: Map<string, CachedPrice>, now: number): SwapTemplate | null {
+    const price = prices.get(mint);
+    if (!price || this.#o.bank().tokens[mint]?.paused) return null;
+    const size = (r: KeptSell) => Math.abs(Math.log(Number(amount) / Number(r.template.quote.inAmount)));
+    for (const r of this.#keptSells(mint, now).sort((x, y) => size(x) - size(y))) {
+      if (this.#multiplier(mint, now) !== r.multiplier) continue;
+      // Selling, the USDC out moves with the token's price: the price now over the price then.
+      const template = scaleTemplate(r.template, amount, SCALE_LIMITS, price.usd / r.price);
+      if (template) return template;
+    }
+    return null;
+  }
+
+  /** Keeps freshly quoted sells' templates (as #keep does a buy's), each with the token's price when it was quoted (one read for all). */
+  #keepSells(quoted: { mint: string; template: SwapTemplate | null }[], quotedAt: number) {
+    if (this.routeTtlMs <= 0) return;
+    const ready = quoted.filter((q): q is { mint: string; template: SwapTemplate } => q.template !== null && !unscalable(q.template, BigInt(q.template.quote.inAmount)));
+    if (!ready.length) return;
+    const job = (async () => {
+      const prices = await this.#pricesAt([...new Set(ready.map((q) => q.mint))], quotedAt);
+      for (const { mint, template } of ready) {
+        const p = prices.get(mint);
+        if (!p) {
+          this.#sellStats.unpriced++;
+          continue;
+        }
+        const route: KeptSell = { at: quotedAt, template, price: p.usd, multiplier: this.#multiplier(mint, quotedAt) };
+        const near = (r: KeptSell) => Math.abs(Math.log(Number(template.quote.inAmount) / Number(r.template.quote.inAmount))) < Math.log(1.5);
+        this.#sells.set(mint, [route, ...this.#keptSells(mint, Date.now()).filter((r) => !near(r))].slice(0, MAX_ROUTES));
+        this.#sellStats.kept++;
+      }
+      if (this.#sells.size >= 500) for (const k of [...this.#sells.keys()]) if (!this.#keptSells(k, Date.now()).length) this.#sells.delete(k);
     })().catch(() => {});
     this.#learning.add(job);
     void job.finally(() => this.#learning.delete(job));
