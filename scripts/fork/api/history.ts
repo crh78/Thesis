@@ -44,7 +44,8 @@ function thin<T>(xs: T[], n: number): T[] {
   return Array.from({ length: n }, (_, i) => xs[Math.round(i * step)]);
 }
 
-type HeldPosition = { openedAt: number; stakeUsd: number; costUsd: number | null; valueUsd: number | null };
+/** `stakeUsd` and `costUsd` are what was first paid; `remainingStakeUsd` what's still held after partial sales. */
+type HeldPosition = { openedAt: number; stakeUsd: number; remainingStakeUsd?: number; costUsd: number | null; valueUsd: number | null };
 /** The wallet's open positions, as the portfolio shows them; `strict` fails instead of guessing. */
 type PortfolioOf = (addr: string, o: { strict: boolean }) => Promise<{ positions: HeldPosition[] }>;
 /** Whether the wallet holds an open position on a take this API knows (no RPC). */
@@ -150,7 +151,8 @@ export class PortfolioHistory {
       }),
       this.#portfolio(addr, { strict: true }),
     ]);
-    const held = positions.reduce((sum, p) => sum + (p.valueUsd ?? p.costUsd ?? p.stakeUsd), 0);
+    // Unpriced: what's still held of it, at cost (the cost scaled by the stake left after partial sales).
+    const held = positions.reduce((sum, p) => sum + (p.valueUsd ?? ((p.costUsd ?? p.stakeUsd) * (p.remainingStakeUsd ?? p.stakeUsd)) / (p.stakeUsd || 1)), 0);
     const netIn = state.cash.filter((c) => c.wallet === addr).reduce((sum, c) => sum + (c.kind === "deposit" ? c.usd : -c.usd), 0);
     const snap = { at: Math.floor(Date.now() / 1000), value: usdc + held, netIn };
     if (!positions.length && !this.#deposited(addr)) {
