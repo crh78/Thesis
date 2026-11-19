@@ -1,13 +1,12 @@
 "use client";
 // Search, like the iOS SearchView: All, Takes, People and Assets. Nothing typed shows topics,
-// suggested people, the week's top callers and trending takes; typing searches (debounced) and
+// suggested people, the week's top callers and trending takes (with each take's pie logo); typing searches (debounced) and
 // All shows the best few of each kind, assets first.
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AssetRow, TakeListRow, type Asset } from "@/components/AssetBits";
 import Avatar from "@/components/Avatar";
 import SuggestedFollows from "@/components/SuggestedFollows";
-import XTradersRow from "@/components/XTraders";
 import type { FeedTake } from "@/components/TakeRow";
 import { rpcNow, type Person } from "@/lib/data";
 import { useSession } from "@/lib/session";
@@ -139,7 +138,7 @@ export default function SearchPage() {
       </div>
       {error ? <p className="err">{error}</p> : null}
 
-      {scope === "all" && !q ? <><XTradersRow />{takesPage}</> : null}
+      {scope === "all" && !q ? takesPage : null}
       {scope === "all" && q ? (
         <>
           {assets.length ? <>{section("Assets", assets.length > 4 ? "assets" : null)}{assets.slice(0, 4).map((a) => <AssetRow key={a.id} asset={a} />)}</> : null}
