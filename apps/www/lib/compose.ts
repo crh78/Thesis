@@ -113,7 +113,7 @@ export const builderLegs = (legs: Leg[]) =>
   legs.filter((l) => l.assetId).map((l) => ({ id: l.assetId, weight: l.weight, why: l.why, side: predictionSide(l), leverage: leverageOf(l) }));
 
 // Basket math: the weights always add up to 100 (BasketMath.swift).
-export const MAX_PICKS = 10;
+export const MAX_PICKS = 5;
 
 export function normalized(legs: Leg[]): Leg[] {
   if (!legs.length) return [];
