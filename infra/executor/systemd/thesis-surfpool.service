@@ -10,7 +10,7 @@ Wants=network-online.target
 Restart=always
 RestartSec=5
 ExecStartPre=-/usr/bin/docker rm -f thesis-surfpool
-# Forks from FORK_DATASOURCE_RPC_URL in the env file when it's set (a Helius or Alchemy URL:
+# Forks from FORK_DATASOURCE_RPC_URL in the env file when it's set (the QuickNode Build URL:
 # public mainnet rate-limits heavy use), else public mainnet.
 #
 # The URL carries the provider's API key, so it never goes on a command line (where `ps` and the

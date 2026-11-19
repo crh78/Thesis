@@ -67,7 +67,7 @@ Privy dashboard, for sign-in to work: the iOS client must list both bundle IDs u
 
 The app runs only on the fork: Trade, Cash, posting and the take page go through the Thesis program on the shared mainnet fork (the Oracle VM) with fake money. There is no other money mode. Social data (feed, profiles, comments) comes from Supabase.
 
-1. `cp Config/Fork.local.xcconfig.example Config/Fork.local.xcconfig` (gitignored). Set `FORK_API_URL` to the team's shared fork, `https://<fork-host>` (the Oracle VM in [`infra/executor`](../../infra/executor/README.md)), which runs the fork, the fork API, the relay and the settler. Nothing needs to run on your Mac, and a real iPhone reaches it too. Debug and Release both read it.
+1. `cp Config/Fork.local.xcconfig.example Config/Fork.local.xcconfig` (gitignored). Set `FORK_API_URL` to the team's shared fork, `https://<fork-host>` (the Oracle VM in [`infra/executor`](../../infra/executor/README.md)), which runs the fork, the fork API, the relay and the settler. Nothing needs to run on your Mac, and a real iPhone reaches it too. Debug and Release both read it. A build made before the fork API moved to Caddy still points at the old Tailscale Funnel address: update the file and rebuild.
 2. The team runs exactly one fork; don't start your own.
 3. `xcodegen generate`, build and sign in. Add cash first: on the fork it mints fake USDC into your Privy wallet.
 
@@ -79,22 +79,24 @@ How it works:
 - **Fast trades:** the Trade, Fade and Sell sheets build the trade before you tap (`Features/Trade/Prebuilds.swift`): at the default amount as the sheet opens, at once on a preset, half a second after typing stops, one build per amount, refreshed when it has under 15 s left while the sheet is open (for up to 3 minutes without a change). The tap signs every transaction at once and sends it with `until: "accepted"`, so the sheet says "You're in · Confirming on-chain…" (a sale: "Sold") as soon as the fork accepts it, and `AppState` follows it on `GET /submissions/:buildId`. If it then doesn't land, your balance and the take's counts come back and you're told: in the sheet if it's still open, otherwise in a banner with Try again ("That trade didn't go through. Nothing left your balance." / "That sale didn't go through. You still hold the position."). Each submit carries `timings` (ms from the tap: `built`, `sign_<i>`, `signed`, `submit`), and the app logs `accepted` and `shown` (category `trade`). Building ahead goes on only once a build made ahead answered `prebuilt: true` (the fork API counts its money action at submit); otherwise the app makes one early build and the tap builds, as before. A build is used for at most 50 s from when it was asked for, whatever its `expiresAt` says (the phone's clock can be behind). A `/submissions` 404 (`no_such_submission`) is an unknown: the app stops asking and reads the wallet. Against a fork API without these, the same code waits for confirmation at submit and builds again instead of refreshing.
 - **Perps:** leverage comes from the take builder ("Stock · 3x"). Under each position the receipt shows each Phoenix leg's liquidation price and distance, in warning colors within 25% and red within 10%. A sale closes Phoenix positions and moves the cash back; positions left open after their take settles keep their risk until **Cash out** on the Cash tab.
 - **Cash:** your wallet's fake USDC, added with fork cheatcodes up to $1,000 per account, no top-ups; withdrawals are off.
-- **No horizon:** a take is a claim and a risk level. It's open until its author sells their buy-in, or a year after posting at most; then it's closed: Trade and Fade go ("Closed: @author sold"), and its result is final. Everyone else's positions keep running until they sell. The author's Sell sheet warns first when the sale would close the take (`closesTake` on the exit build).
+- **No horizon:** a take is a claim and a risk level. It's open until its author sells their buy-in, or a year after posting at most; then it's closed: Trade and Fade go ("Closed: @author sold"), and its result is final. Everyone else's positions keep running until they sell. The author's Sell tab warns first when a sale of all of it would close the take (`closesTake` on the build); a partial sale never closes it.
 - **Posting:** the take goes on-chain with your buy-in. Until that confirms, only you see it ("Posting…", `PostingBar`); a failed buy-in shows "Didn't post" with Retry (same amount) or Discard.
 - **Scores:** on-chain P&L for accounts with fork activity: "Own P&L", "For backers" and "Faders" boards, each by dollars or percent; profiles show both scores.
 - **Creator fees:** your own profile shows what you earned (5 bps of every back and fade of your takes), with Claim and Claim all.
-- **Take page:** returns come from the chain ("—" while entry prices are pending), and an "On-chain receipt" section shows backers, faders, money in, each leg's entry and current price, and your positions. **Sell position** quotes a full exit and the program scores the position at the sale ([selling a position](../../scripts/fork/README.md#selling-a-position)).
+- **Selling:** the trade sheet has Buy | Sell tabs. Sell sells part or all of your holding on that side, by % or $, with presets and a typed amount (`Features/Trade/SellSheet.swift`, `SellModel.swift`, through `POST /takes/:id/sell`); it says why when an amount would leave less than $10, and warns at All when the sale would close your own take. On your profile, swipe an open holding left (or tap its red arrow) to sell all of it. Positions show the remaining size, realized P&L and "Selling…". Each sale scores at its own prices ([selling a position](../../scripts/fork/README.md#selling-a-position)). A fork API from before partial sales gets Sell all only.
+- **Stopped trades:** a split trade that stops partway shows a message, but the app has no Finish or Swap-back flow yet (the web app has one: `GET /wallets/:w/incomplete`, retry, sweep).
+- **Take page:** returns come from the chain ("—" while entry prices are pending), and an "On-chain receipt" section shows backers, faders, money in, each leg's entry and current price, and your positions.
 - **Feed:** cards show on-chain counts and settled results (the app sends `x-thesis-network: solana-mainnet-fork` on Supabase reads).
 
 ## Notifications
 
-The Home bell opens the inbox (opening it marks its network's notifications read; rows open their take). It covers: someone you follow posts; comments and replies; on the fork, trades and fades of your take, a take you're in settling, badges; a Phoenix leg turning near or close to liquidation; and the daily positions digest (after 9 a.m. New York).
+The Home bell opens the inbox (opening it marks its network's notifications read; rows open their take). It covers: someone you follow posts; comments and replies; on the fork, trades and fades of your take, a take you're in closing (its author sold) or settling, badges; a Phoenix leg turning near or close to liquidation; and the daily positions digest (after 9 a.m. New York).
 
 The free build shows local alerts when the app checks the inbox (on activation or Background App Refresh). Server-triggered APNs alerts need paid Apple signing.
 
 ## Debug: open a specific screen
 
-Debug builds accept `-screen <name>`: `feed`, `search`, `scores`, `me`, `take`, `back`, `fade`, `comments`, `create`, `building`, `basket`. These skip sign-in.
+Debug builds accept `-screen <name>` (`App/DebugRoute.swift`): `feed`, `search`, `scores`, `me`, `take`, `back`, `fade`, `sell`, `comments`, `create`, `building`, `basket`, `drawer`, `saved`, `followers`, `addcash`, `withdraw`, `cash`, `editprofile`, `startcash`, `loading`. These skip sign-in.
 
 Onboarding screens with stubbed actions (no network): `welcome`, `email`, `handle`, `location`. Pass `-skipAuth` to go straight to the app on mock data. Add `-mockTradeFails` to make mock trades get accepted and then not land, to see the rollback (`-mockTradeFailsLate`: after the sheet has closed, to see the banner).
 
@@ -104,7 +106,7 @@ xcrun simctl launch booted xyz.yourthesis.app.dev -screen take
 
 ## Tests
 
-UI smoke tests (`ThesisUITests`) tap through the tabs, Back/Fade sheets, the take page and comments, and the full new-take flow.
+UI smoke tests (`ThesisUITests`) tap through the tabs, Back/Fade and Sell sheets (`PartialSalesUITests`), the take page and comments, onboarding, asset pages, people and the full new-take flow.
 
 ```sh
 xcodebuild test -project Thesis.xcodeproj -scheme Thesis \

@@ -193,7 +193,7 @@ Tests: `deno test` in the function's folder (the decoding matches `@thesis/chain
 `fixtures/webhook-events.expected.json`, and the signature check), a `packages/chain` test that the
 IDL copy matches, and `supabase/tests/chain_events.sql` for the database side.
 
-Built on it: notifications, posting that waits for `takeCreated`, and on-chain scores
+Built on it: notifications, posting that waits for `takeCreated`, and on-chain scores, partial sales included
 (`chain_positions`, `chain_wallet_stats`). Not yet: iMessage group updates and Realtime for the feed.
 
 **Event `data` as JSON** (`thesisEventToJson`): public keys are base58 strings, `u64`/`i64` are
@@ -203,36 +203,20 @@ basis points.
 
 | `name` | `data` fields |
 | --- | --- |
-| `takeCreated` | `take`, `author`, `claimHash`, `risk` (`low`/`medium`/`high`), `horizonEnd` (Unix s), `legs`, `stake` |
-| `positionOpened` | `take`, `position`, `owner`, `side` (`back`/`fade`), `stake`, `legsMask`, `fee`, `creatorFee`, `scored` |
+| `takeCreated` | `take`, `author`, `claimHash`, `risk` (`low`/`medium`/`high`), `horizonEnd` (Unix s: posting + 365 days), `legs`, `stake` |
+| `positionOpened` | `take`, `position`, `owner`, `side` (`back`/`fade`), `stake`, `legsMask`, `fee`, `creatorFee`, `scored`, `escrowed` (the paper legs' share) |
+| `tradeProved` | `position`, `owner`, `spent`, `outputsMask`, `outputs`, `received`: what one proof-of-trade bracket measured |
 | `entryPricesRecorded` | `take`, `position`, `legs` (bit mask), `sourceHash` |
-| `exitPricesRecorded` | `take`, `position`, `legs`, `sourceHash` (prices at the horizon) |
-| `positionExited` | `take`, `position`, `owner`, `side`, `exitedAt` (Unix s): the owner sold before the horizon |
-| `takeClosed` | `take`, `author`, `closedAt` (Unix s): the author sold their buy-in, so the take takes no new backs or fades and settles on the sale |
+| `exitPricesRecorded` | `take`, `position`, `legs`, `sourceHash` (prices at the 365-day mark) |
+| `positionExited` | `take`, `position`, `owner`, `side`, `exitedAt` (Unix s), `escrowReturned`, `stake`: the owner sold all of it |
+| `positionPartSold` | `take`, `position`, `owner`, `side`, `seq`, `bps`, `stakeSold`, `remainingStake`, `escrowReturned`, `soldAt`: a partial sale |
+| `takeClosed` | `take`, `author`, `closedAt` (Unix s): the author sold all of their buy-in, so the take takes no new backs or fades and settles on the sale |
 | `salePricesRecorded` | `take`, `position`, `legs`, `sourceHash` (prices at the sale) |
+| `partPricesRecorded` | `take`, `position`, `seq`, `legs`, `sourceHash` (prices at a partial sale) |
 | `takeSettled` | `take`, `author`, `resultBps` |
-| `positionSettled` | `take`, `position`, `owner`, `side`, `returnBps`, `pnl`, `scored`, `exited` (scored at its sale) |
+| `partSettled` | `take`, `position`, `owner`, `side`, `seq`, `stake`, `returnBps`, `pnl`, `scored` |
+| `positionSettled` | `take`, `position`, `owner`, `side`, `returnBps`, `pnl`, `scored`, `exited` (scored at its sale), `escrowReturned`, `stake` |
 | `creatorFeesClaimed` | `take`, `author`, `amount` |
 | `badgeMinted` | `owner`, `kind`, `mint` |
-| `configUpdated` | `admin`, `settler`, `params` |
+| `configUpdated` | `admin`, `allowlistAdmin`, `pendingAdmin`, `pendingAllowlistAdmin`, `settler`, `params`, `tradePrograms`, `badgeUriBase` |
 | `feesWithdrawn` | `destination`, `amount` |
-
-## Section for the root README
-
-Paste this into the root `README.md`:
-
-```markdown
-## QuickNode Streams
-
-Thesis's live feed, notification inbox, posting confirmations and on-chain scores come from a
-QuickNode Stream on the Thesis program.
-
-| | |
-| --- | --- |
-| **Network** | Solana mainnet (`solana-mainnet`) |
-| **Dataset** | Block (`block`): full `getBlock` data, batched 5 slots at a time with elastic batching |
-| **Filter** | [`infra/quicknode/thesis-filter.js`](infra/quicknode/thesis-filter.js) (JavaScript). Keeps successful transactions that invoke the Thesis program (`HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe`), top-level or through CPI, and returns per transaction its signature, slot, block time, Thesis instruction names and its Anchor events (self-CPI inner instructions, `emit_cpi!`). Batches with no Thesis activity deliver nothing. |
-| **Destination** | Webhook → a Supabase Edge Function that checks QuickNode's HMAC signature, decodes the events with [`decodeThesisStream`](packages/chain/src/stream.ts) and upserts them into `chain_events`, which drives the feed, the notification inbox, posting and on-chain scores |
-
-Setup steps, costs and the webhook contract: [`infra/quicknode/README.md`](infra/quicknode/README.md).
-```

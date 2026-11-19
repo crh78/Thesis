@@ -31,12 +31,13 @@ The user's own wallet does the trading (Jupiter swaps, Jupiter Lend, Phoenix). I
 | Yield legs | Count in the score: priced as one Jupiter Lend vault share's value in USDC (`totalAssets / totalSupply`) |
 | Prices | Settler-signed. Token first, at any hour: the issuer token's Jupiter price when it has a $50k pool and a $100 buy moves it under 1%; the stock's Alpaca price only as a fallback. Prices are the first at or after the moment |
 | Badges | Author only, each once per user: first take posted, first take at +50%, first at +100%, ten takes at +50%, a take at +1,000% |
-| Selling | A sale exits the whole position; `exit_position` records it in the same transaction, while the take is open or closed and before the 365-day mark; the settler signs prices at or after the sale and the position settles right away. No fee. The author's sale also closes the take (above). No partial sales |
+| Selling all | `exit_position` records it in the same transaction as the swaps back to USDC, while the take is open or closed and before the 365-day mark, and returns the escrowed paper share; the settler signs prices at or after the sale and the position settles right away. No fee. The author's sale of all of their buy-in also closes the take (above) |
+| Partial sales | `sell_part` sells `bps` of what's left (1–9,999), with the swaps of that fraction, and returns that fraction of the escrow. What stays must be at least the minimum stake, and at most 8 parts of a position wait to settle (`MAX_OPEN_PARTS`). Each part is priced at or after its sale (`record_part_prices`), scores on the cost basis sold, and settles on its own (`settle_part`, in order, before the position). Never closes the take, even for the author. No fee |
 | Proof of trade | `begin_trade` / `trade_step` brackets, a program allowlist with its own key, exact USDC drop, output accounts that grow, settler-side asset and 90% value checks ([`hardening-plan.md`](hardening-plan.md) §1) |
 | Paper legs | Gemini prediction legs ([`gemini-plan.md`](gemini-plan.md)) and Collector Crypt card legs ([`cards-plan.md`](cards-plan.md)): share escrowed and returned in full, P&L in the score only |
 | Fades | Prediction legs (the other side) and Phoenix shorts ([`phoenix-plan.md`](phoenix-plan.md)); card legs and unlisted names are left out |
 | Scores | Two raw scores, computed off-chain from events: own P&L, and what an account's takes made for backers. Ranked by dollars or percent, plus a faders board |
-| Mainnet gate | A private mainnet program for the judges is allowed (phase 2); real users only after the whole product is dogfooded on the fork (phase 3) |
+| Mainnet gate | A private mainnet program with no users is allowed (phase 2); real users only after the whole product is dogfooded on the fork (phase 3) |
 
 ## Technology
 
@@ -61,7 +62,7 @@ Solana Actions/Blinks were step 9 until the Blink was closed; the code stays in 
 
 - **LiteSVM:** most program logic, offline (`cargo test` in `anchor/`).
 - **The shared mainnet fork (Surfpool)** on the Oracle VM ([`infra/executor`](../infra/executor/README.md)): real venues, routes and transaction sizes. Never start a second fork.
-- **Mainnet:** phase 2 (a private program for the judges) and phase 3. No devnet: the venues aren't there.
+- **Mainnet:** phase 2 (a private program, team trades only) and phase 3. No devnet: the venues aren't there.
 
 ## Roadmap
 
@@ -77,7 +78,8 @@ Solana Actions/Blinks were step 9 until the Blink was closed; the code stays in 
 | 7. Live data: events, the QuickNode filter and decoder, the fork relay | Done |
 | 8. Asset bank and venues: best-issuer routing, Jupiter, Jupiter Lend, Gemini, Phoenix, Collector Crypt, the composer | Done on the fork |
 | 9. The X Blink | Closed |
-| 10. Dogfood on the fork | Ongoing: iOS fork mode and the web app run on the shared fork; iMessage trading and the X agent wait on Privy session signers |
+| 10. Dogfood on the fork | Ongoing: the web app (public at `yourthesis.xyz`) and the iOS development build run on the shared fork; iMessage trading and the X agent wait on Privy session signers |
+| 10b. No-timeline takes, then partial sales | Done (program changes reach the fork through a fresh-fork reset: [`cards-reset.md`](cards-reset.md)) |
 | 11. Hardening: proof of trade, security review, property tests, verifiable build, self-CPI events | Done ([`hardening-plan.md`](hardening-plan.md)); M-3 open ([`security-review.md`](security-review.md)) |
 | 12. Mainnet launch | Phase 2 (private program), then phase 3 (real users) |
 
@@ -96,7 +98,7 @@ Accounts are sized to their basket: on a 3-leg take a position is 190 bytes (~0.
 
 - **Positions are temporary:** `settle_position` folds the result into the owner's profile, closes the position and refunds the rent to whoever paid it.
 - **Trade tickets** (641 bytes) live only while a trade runs; the receipt refunds them, `cancel_trade` refunds abandoned ones.
-- **Exit accounts** (111 bytes on a 3-leg take) close with their position.
+- **Exit accounts** (111 bytes on a 3-leg take) close with their position; **part accounts** (one per partial sale) close when the part settles, refunding whoever paid.
 - **Takes and profiles stay:** they're the permanent record.
 - **Later:** Light Protocol compressed positions (needs a compression-aware RPC such as Helius Photon).
 
