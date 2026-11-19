@@ -9,7 +9,7 @@
 
 with people as (
   select id, handle from public.profiles
-  where handle in ('jake', 'priya', 'lena', 'mo_fades', 'kai', 'dev_chips')
+  where handle in ('johnny', 'priya', 'nina', 'danny', 'dev_chips')
 ),
 deposits as (
   select p.id, gen_random_uuid() as tid from people p
@@ -22,27 +22,23 @@ select tid, null, 'deposit', -200, 'transfer', now() - interval '3 days' from de
 
 with picks (handle, claim, side, hours_ago) as (values
   ('priya',     'AI power demand is underrated.',          'trade', 30),
-  ('lena',      'AI power demand is underrated.',          'trade', 26),
-  ('mo_fades',  'AI power demand is underrated.',          'trade', 20),
-  ('kai',       'AI power demand is underrated.',          'trade', 9),
+  ('nina',      'AI power demand is underrated.',          'trade', 26),
+  ('danny',     'AI power demand is underrated.',          'trade', 20),
   ('dev_chips', 'AI power demand is underrated.',          'fade',  14),
-  ('jake',      'The Fed cuts in December.',               'trade', 40),
-  ('lena',      'The Fed cuts in December.',               'trade', 33),
-  ('kai',       'The Fed cuts in December.',               'trade', 12),
-  ('mo_fades',  'The Fed cuts in December.',               'fade',  18),
-  ('jake',      'Nuclear restarts get fast-tracked.',      'trade', 22),
+  ('johnny',    'The Fed cuts in December.',               'trade', 40),
+  ('nina',      'The Fed cuts in December.',               'trade', 33),
+  ('danny',     'The Fed cuts in December.',               'fade',  18),
+  ('johnny',    'Nuclear restarts get fast-tracked.',      'trade', 22),
   ('priya',     'Nuclear restarts get fast-tracked.',      'trade', 16),
-  ('lena',      'Nuclear restarts get fast-tracked.',      'trade', 7),
+  ('nina',      'Nuclear restarts get fast-tracked.',      'trade', 7),
   ('dev_chips', 'Nuclear restarts get fast-tracked.',      'fade',  11),
-  ('kai',       'Chip stocks lead the next leg up.',       'trade', 28),
-  ('jake',      'Chip stocks lead the next leg up.',       'fade',  25),
+  ('johnny',    'Chip stocks lead the next leg up.',       'fade',  25),
   ('priya',     'Chip stocks lead the next leg up.',       'fade',  19),
-  ('mo_fades',  'Chip stocks lead the next leg up.',       'fade',  6),
+  ('danny',     'Chip stocks lead the next leg up.',       'fade',  6),
   ('priya',     'Mortgage rates dip under 6% by spring.',  'trade', 21),
-  ('jake',      'Mortgage rates dip under 6% by spring.',  'trade', 15),
-  ('kai',       'Mortgage rates dip under 6% by spring.',  'fade',  5),
+  ('johnny',    'Mortgage rates dip under 6% by spring.',  'trade', 15),
   ('dev_chips', 'Data-center spending slows in 2027.',     'trade', 17),
-  ('jake',      'Data-center spending slows in 2027.',     'fade',  10),
+  ('johnny',    'Data-center spending slows in 2027.',     'fade',  10),
   ('priya',     'Data-center spending slows in 2027.',     'fade',  4)
 ),
 rows as (

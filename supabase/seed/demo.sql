@@ -1,5 +1,6 @@
 -- Demo callers and takes (the ones from the mockups), so a fresh account has a
--- feed to look at. Safe to re-run: fixed ids, "on conflict do nothing".
+-- feed to look at. The cast: Dev, Johnny, Nina, Priya and Danny (demo_cast.sql
+-- moves a database seeded with the earlier cast over). Safe to re-run: fixed ids, "on conflict do nothing".
 -- Demo profiles have no account (nobody can sign in as them) and is_demo = true.
 -- Their avatars ship in the app: avatar_url 'asset:<name>' means a bundled image.
 --
@@ -9,12 +10,11 @@
 -- Stats are illustrative until paper trading computes real ones.
 
 insert into public.profiles (id, handle, display_name, bio, avatar_url, is_demo, created_at) values
-  ('00000000-0000-4000-8000-000000000001', 'jake',     'Jake',  'Power, compute, the grid. Long the boring stuff.', 'asset:avatar-jake', true, now() - interval '60 days'),
+  ('00000000-0000-4000-8000-000000000001', 'johnny',   'Johnny', 'Power, compute, the grid. Long the boring stuff.', 'asset:avatar-johnny', true, now() - interval '60 days'),
   ('00000000-0000-4000-8000-000000000002', 'priya',    'Priya', 'Rates and macro. I read the Fed minutes so you don''t have to.', 'asset:avatar-priya', true, now() - interval '90 days'),
   ('00000000-0000-4000-8000-000000000003', 'dev_chips', 'Dev',   'Semis maximalist. Occasionally right.', 'asset:avatar-dev', true, now() - interval '45 days'),
-  ('00000000-0000-4000-8000-000000000004', 'lena',     'Lena',  'Housing, consumer, anything with a receipt.', 'asset:avatar-lena', true, now() - interval '120 days'),
-  ('00000000-0000-4000-8000-000000000005', 'mo_fades', 'Mo',    'Professional fader. Nothing personal.', 'asset:avatar-mo', true, now() - interval '75 days'),
-  ('00000000-0000-4000-8000-000000000006', 'kai',      'Kai',   'Small bets, big conviction.', 'asset:avatar-kai', true, now() - interval '20 days')
+  ('00000000-0000-4000-8000-000000000004', 'nina',     'Nina',  'Housing, consumer, anything with a receipt.', 'asset:avatar-nina', true, now() - interval '120 days'),
+  ('00000000-0000-4000-8000-000000000005', 'danny',    'Danny', 'Professional fader. Nothing personal.', 'asset:avatar-danny', true, now() - interval '75 days')
 -- Only skip rows that already exist; a handle clash with a real user should fail loudly.
 on conflict (id) do nothing;
 
@@ -33,10 +33,7 @@ insert into public.profile_stats (profile_id, period, cash, pct) values
   ('00000000-0000-4000-8000-000000000004', 'all', 48200, 41.0),
   ('00000000-0000-4000-8000-000000000005', 'week', 1455, 44.2),
   ('00000000-0000-4000-8000-000000000005', 'month', 3100, 33.0),
-  ('00000000-0000-4000-8000-000000000005', 'all', 22810, 58.7),
-  ('00000000-0000-4000-8000-000000000006', 'week', 320, 61.0),
-  ('00000000-0000-4000-8000-000000000006', 'month', 880, 52.3),
-  ('00000000-0000-4000-8000-000000000006', 'all', 2950, 88.4)
+  ('00000000-0000-4000-8000-000000000005', 'all', 22810, 58.7)
 on conflict do nothing;
 
 insert into public.follows (follower_id, followee_id) values
@@ -44,8 +41,7 @@ insert into public.follows (follower_id, followee_id) values
   ('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001'),
   ('00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000001'),
   ('00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000002'),
-  ('00000000-0000-4000-8000-000000000005', '00000000-0000-4000-8000-000000000001'),
-  ('00000000-0000-4000-8000-000000000006', '00000000-0000-4000-8000-000000000005')
+  ('00000000-0000-4000-8000-000000000005', '00000000-0000-4000-8000-000000000001')
 on conflict do nothing;
 
 -- Takes (stats rows are created by trigger; updated below).
@@ -65,7 +61,7 @@ insert into public.takes (id, author_id, claim, topic, risk, horizon, tags, crea
   ('00000000-0000-4000-8000-000000000105', '00000000-0000-4000-8000-000000000004',
    'Mortgage rates dip under 6% by spring.', 'topic-house', 'low', '6mo', '{Housing,Rates}',
    now() - interval '26 hours', now() - interval '26 hours' + interval '6 months'),
-  ('00000000-0000-4000-8000-000000000106', '00000000-0000-4000-8000-000000000006',
+  ('00000000-0000-4000-8000-000000000106', '00000000-0000-4000-8000-000000000005',
    'Data-center spending slows in 2027.', 'topic-computer', 'high', '3mo', '{AI}',
    now() - interval '2 days', now() - interval '2 days' + interval '3 months')
 on conflict do nothing;
@@ -123,13 +119,10 @@ on conflict do nothing;
 
 insert into public.comment_likes (comment_id, profile_id) values
   ('00000000-0000-4000-8000-000000000201', '00000000-0000-4000-8000-000000000003'),
-  ('00000000-0000-4000-8000-000000000201', '00000000-0000-4000-8000-000000000006'),
   ('00000000-0000-4000-8000-000000000202', '00000000-0000-4000-8000-000000000002'),
   ('00000000-0000-4000-8000-000000000202', '00000000-0000-4000-8000-000000000004'),
-  ('00000000-0000-4000-8000-000000000202', '00000000-0000-4000-8000-000000000006'),
   ('00000000-0000-4000-8000-000000000203', '00000000-0000-4000-8000-000000000001'),
   ('00000000-0000-4000-8000-000000000203', '00000000-0000-4000-8000-000000000004'),
   ('00000000-0000-4000-8000-000000000203', '00000000-0000-4000-8000-000000000005'),
-  ('00000000-0000-4000-8000-000000000203', '00000000-0000-4000-8000-000000000006'),
   ('00000000-0000-4000-8000-000000000204', '00000000-0000-4000-8000-000000000005')
 on conflict do nothing;

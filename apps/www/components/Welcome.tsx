@@ -16,11 +16,10 @@ const STORIES: Story[] = [
 
 const EVENTS = [
   { who: "priya", side: "back", amount: 50 },
-  { who: "lena", side: "back", amount: 20 },
+  { who: "nina", side: "back", amount: 20 },
   { who: "dev", side: "fade", amount: 25 },
-  { who: "mo", side: "back", amount: 100 },
-  { who: "kai", side: "back", amount: 40 },
-  { who: "jake", side: "back", amount: 30 },
+  { who: "danny", side: "back", amount: 100 },
+  { who: "johnny", side: "back", amount: 40 },
 ] as const;
 
 const CYCLE = 11500;
