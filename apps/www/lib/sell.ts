@@ -47,18 +47,20 @@ export const remainingOf = (p: { stakeUsd: number; remainingStakeUsd?: number })
 
 /**
  * The largest part of a holding that can be sold now, in bps of the whole: one position's own
- * figure; across several, every position but the largest plus the largest's own most (the API
- * sells whole positions first, then one part). An estimate the API has the last word on: a refused
- * part comes back as `remainder_below_minimum` with the API's own figure.
+ * figure; across several, every other position whole plus the last one's own most. The API sells
+ * whole positions first, smallest first, then one part, and the author's buy-in
+ * (`closesTakeIfSoldAll`) always comes last and is never sold whole short of all of it, so the
+ * last one is the buy-in when there is one, else the largest. An estimate the API has the last
+ * word on: a refused part comes back as `remainder_below_minimum` with the API's own figure.
  */
 export function holdingMaxBps(ps: Position[]): number | null {
   if (!ps.length) return null;
   if (ps.length === 1) return ps[0].maxPartialBps ?? null;
-  const sorted = [...ps].sort((a, b) => remainingOf(a) - remainingOf(b));
+  const sorted = [...ps].sort((a, b) => Number(!!a.closesTakeIfSoldAll) - Number(!!b.closesTakeIfSoldAll) || remainingOf(a) - remainingOf(b));
   const total = sorted.reduce((s, p) => s + remainingOf(p), 0);
-  const largest = sorted[sorted.length - 1];
-  const part = largest.maxPartialBps ? (remainingOf(largest) * largest.maxPartialBps) / ALL_BPS : 0;
-  const bps = total > 0 ? Math.floor(((total - remainingOf(largest) + part) / total) * ALL_BPS) : 0;
+  const last = sorted[sorted.length - 1];
+  const part = last.maxPartialBps ? (remainingOf(last) * last.maxPartialBps) / ALL_BPS : 0;
+  const bps = total > 0 ? Math.floor(((total - remainingOf(last) + part) / total) * ALL_BPS) : 0;
   return bps >= 1 && bps < ALL_BPS ? bps : null;
 }
 

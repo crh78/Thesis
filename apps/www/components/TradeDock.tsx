@@ -209,8 +209,13 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
   const overMax = partial && !!saleAmount && !isAll(saleAmount) && saleBps != null && (maxBps == null || saleBps > maxBps);
   const quoteNow = quote && quote.key === saleKeyNow ? quote.built : null;
   const refusalNow = refusal && refusal.key === saleKeyNow ? refusal : null;
-  // Selling all of the author's buy-in closes the take: said before the tap, from the position (or the build).
-  const closing = step.kind === "sell" && (!!step.closing || !!quoteNow?.closesTake || ((!partial || isAll(saleAmount)) && !!sellHolding?.closesTakeIfSoldAll));
+  // Selling all of the author's buy-in closes the take: said before the tap, from the position (or
+  // the build). Only a sale of all of the holding sells all of the buy-in (a part never sells it
+  // whole); an older API sells one position whole, so it's that position's own flag.
+  const soldWhole = !sellHolding ? false
+    : partial ? isAll(saleAmount) && !!sellHolding.closesTakeIfSoldAll
+    : !!sellHolding.positions.find((p) => p.address === legacyPosition)?.closesTakeIfSoldAll;
+  const closing = step.kind === "sell" && (!!step.closing || !!quoteNow?.closesTake || soldWhole);
 
   /** Open the Sell tab on a side's holding (`position`: the one an older API sells whole). */
   const openSell = (side: Side, position?: string) => {
