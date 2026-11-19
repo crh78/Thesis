@@ -16,6 +16,8 @@ export class ApiError extends Error {
   headers?: Record<string, string>;
   /** Extra fields in the error's JSON body, next to `error` and `message` (e.g. `incomplete`). */
   body?: Record<string, unknown>;
+  /** A preflight refusal that failed inside a Jupiter swap (`failedInSwap`): the route failed, not the trade. Not sent to clients. */
+  inSwap?: boolean;
   constructor(status: number, code: string, message?: string) {
     super(message ?? code);
     this.status = status;
@@ -367,6 +369,31 @@ export function base58(bytes: Uint8Array): string {
     if (b !== 0) break;
     out = "1" + out;
   }
+  return out;
+}
+
+/** Jupiter v6, whose swaps are the only top-level instructions that call the AMMs. */
+const JUPITER_V6 = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+
+/**
+ * Whether a refused transaction failed inside a Jupiter swap: the first failing program ran under
+ * a top-level Jupiter instruction (Jupiter's own error, or an AMM's it called, such as a Meteora
+ * pool whose bins moved: 6037 CannotFindNonZeroLiquidityBinArrayId). A fresh quote routes around it.
+ */
+export function failedInSwap(e: unknown): boolean {
+  const logs: string[] = (e as { logs?: string[] })?.logs ?? [];
+  const failed = logs.findIndex((l) => / failed: /.test(l));
+  for (let i = failed; i >= 0; i--) {
+    const top = /^Program (\w+) invoke \[1\]$/.exec(logs[i]);
+    if (top) return top[1] === JUPITER_V6;
+  }
+  return false;
+}
+
+/** An ApiError for a transaction its preflight refused, marked when it failed inside a swap. */
+export function refusedError(e: unknown): ApiError {
+  const out = new ApiError(502, "send_failed", errorText(e));
+  if (failedInSwap(e)) out.inSwap = true;
   return out;
 }
 

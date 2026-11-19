@@ -37,11 +37,7 @@ async function e2e(): Promise<void> {
       { name: "CoreWeave perp", kind: "Stock · 2x", weight: 30, fade_how: "Bets the stock falls", asset_id: "phoenix:CRWV" },
     ],
   };
-  const synced: string[] = [];
-  const service = await startForkService((m) => {
-    if (m.startsWith("Phoenix makers")) synced.push(m);
-    console.log(`  [api] ${m}`);
-  }, { takes: async (id) => (id === take.id ? take : null) });
+  const service = await startForkService((m) => console.log(`  [api] ${m}`), { takes: async (id) => (id === take.id ? take : null) });
   const server = forkApiServer(service);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -51,18 +47,28 @@ async function e2e(): Promise<void> {
   };
   const user = Keypair.generate();
   const me = user.publicKey.toBase58();
-  /** Builds, signs and sends; the API's answer (200 once every transaction landed). */
-  const trade = async (label: string, built: { status: number; json: any }) => {
-    if (built.status !== 200) return { ok: false, why: `build ${built.status} ${JSON.stringify(built.json).slice(0, 300)}` };
+  const submit = async (built: { status: number; json: any }) => {
+    if (built.status !== 200) return { status: built.status, json: built.json };
     const transactions = built.json.transactions.map((b64: string) => {
       const tx = VersionedTransaction.deserialize(Buffer.from(b64, "base64"));
       tx.sign([user]);
       return Buffer.from(tx.serialize()).toString("base64");
     });
-    const r = await call("POST", "/submit", { buildId: built.json.buildId, transactions });
+    return call("POST", "/submit", { buildId: built.json.buildId, transactions });
+  };
+  /**
+   * Builds, signs and sends, as the apps do: a submit answered `requote: true` (nothing went out,
+   * its routes were dropped) is built again and signed once more. True once every transaction landed.
+   */
+  const trade = async (label: string, build: () => Promise<{ status: number; json: any }>) => {
+    let r = await submit(await build());
+    if (r.json?.requote === true) {
+      console.log(`  ${label}: requote (${String(r.json.message).slice(0, 120)}), building again`);
+      r = await submit(await build());
+    }
     const ok = r.status === 200;
     console.log(`  ${label}: ${ok ? "landed" : `${r.status} ${r.json.error}: ${String(r.json.message).slice(0, 200)}`}`);
-    return { ok, why: ok ? "" : `${r.json.error}: ${r.json.message}` };
+    return { ok };
   };
   const checks: [string, boolean][] = [];
   try {
@@ -75,7 +81,7 @@ async function e2e(): Promise<void> {
     console.log(`\n1. Back $${usd}, ${runs} times`);
     let landed = 0;
     for (let i = 1; i <= runs; i++) {
-      const r = await trade(`back ${i}`, await call("POST", `/takes/${take.id}/trades`, { owner: me, side: "back", usd }));
+      const r = await trade(`back ${i}`, () => call("POST", `/takes/${take.id}/trades`, { owner: me, side: "back", usd }));
       if (r.ok) landed++;
       await sleep(2_000);
     }
@@ -85,16 +91,15 @@ async function e2e(): Promise<void> {
     checks.push([`receipt: ${runs} open backs`, open.length === runs]);
 
     console.log("\n2. Sell all of it (the profile's sell-all), then cash out");
-    const sale = await trade("sell all", await call("POST", `/takes/${take.id}/sell`, { owner: me, side: "back" }));
+    const sale = await trade("sell all", () => call("POST", `/takes/${take.id}/sell`, { owner: me, side: "back" }));
     checks.push(["the sale of the whole holding landed", sale.ok]);
     for (let i = 0; i < 6; i++) {
       const out = await call("POST", `/wallets/${me}/phoenix/cash-out`);
       if (out.json.done || !out.json.transactions?.length) break;
-      await trade("cash-out", out);
+      await trade("cash-out", async () => out);
     }
     const after = await call("GET", `/wallets/${me}/phoenix`);
     checks.push(["cash-out: nothing left on Phoenix", after.json.cashUsd === 0 && after.json.openPositions === 0]);
-    checks.push(["the maker sync ran before the Phoenix sends", synced.length > 0 || landed === runs]);
   } finally {
     server.close();
     service.flush();

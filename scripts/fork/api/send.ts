@@ -16,7 +16,7 @@
 // trade_incomplete (retry: true), and one that sent nothing carries `requote: true`.
 import type { Connection, VersionedTransaction } from "@solana/web3.js";
 import { JUPITER_V6_PROGRAM } from "@thesis/venues/jupiter";
-import { ApiError, base58, errorText, type Timings } from "./common.ts";
+import { ApiError, base58, errorText, refusedError, type Timings } from "./common.ts";
 
 /**
  * How often, and at most how long, an unconfirmed transaction's status is polled; the first look
@@ -47,6 +47,7 @@ export class SendFailed extends ApiError {
     super(e.status, e.code, e.message);
     this.headers = e.headers;
     this.body = e.body;
+    this.inSwap = e.inSwap;
     this.landed = landed;
     this.unknown = unknown;
     this.nothingSent = nothingSent;
@@ -58,6 +59,14 @@ export class SendFailed extends ApiError {
  * A refusal for slippage: Jupiter's route filled under its minimum out (SlippageToleranceExceeded,
  * custom error 0x1771). A 0x1771 that another program names (any Anchor program's error 6001) isn't.
  */
+/**
+ * A refusal a fresh quote is expected to get past: slippage (`slippageRefusal`), or any other
+ * failure inside a Jupiter swap (a pool whose state the kept route no longer fits).
+ */
+export function routeRefusal(e: unknown): boolean {
+  return slippageRefusal(e) || (e instanceof ApiError && e.inSwap === true);
+}
+
 export function slippageRefusal(e: unknown): boolean {
   const text = e instanceof Error ? e.message : String(e);
   if (/SlippageToleranceExceeded|slippage tolerance exceeded/i.test(text)) return true;
@@ -164,7 +173,7 @@ export async function sendBackToBack(
         if (refusedByPreflight(e)) {
           nothingSent = i === 0;
           preflight = true;
-          return new ApiError(502, "send_failed", errorText(e));
+          return refusedError(e);
         }
         o.log?.(`sending ${sigs[i]} failed (${errorText(e)}); waiting to see if it landed`);
         const [fate] = await fates(conn, [sigs[i]], lastValidBlockHeight);
