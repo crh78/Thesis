@@ -71,7 +71,7 @@ export function displayName(raw: string): string {
     .trim();
 }
 
-type BuiltLeg = { id: string; key?: string | null; name: string; kind: string; role: string; weight: number; why: string; can_short: boolean; side?: string | null; leverage?: number | null;
+type BuiltLeg = { id: string; key?: string | null; name: string; kind: string; role: string; weight: number; why: string; /** Whether a fade can short it (the take builder's `canShort`). */ canShort?: boolean; can_short?: boolean; side?: string | null; leverage?: number | null;
   /** Card legs: sent in camelCase, unlike the other fields; either spelling is read. */
   insuredValueUsd?: number | null; imageUrl?: string | null };
 export type Built = { verdict: string; summary?: string | null; reason?: string | null; legs: BuiltLeg[]; note?: string | null };
@@ -90,7 +90,9 @@ export function fromBuilt(b: BuiltLeg, slot: number): Leg {
     weight: b.weight,
     why: b.why,
     slot,
-    fadeHow: b.can_short ? (b.kind === "prediction" ? "Bets No" : "Bets the stock falls") : null,
+    // The take builder answers `canShort` (legJSON); `can_short` was read here before, so every web
+    // post went on-chain with no leg a fade could take.
+    fadeHow: (b.canShort ?? b.can_short) ? (b.kind === "prediction" ? "Bets No" : "Bets the stock falls") : null,
     assetId: b.id,
     assetKey: b.key ?? b.id,
     ...(b.kind === "card" ? { insuredValueUsd: b.insuredValueUsd ?? null, imageUrl: b.imageUrl ?? null } : {}),
