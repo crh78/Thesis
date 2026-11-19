@@ -227,26 +227,71 @@ test("a back seeds its tokens' sell routes when the budget has room, so the firs
   assert.equal(use.quotes + use.instructions, 0);
   assert.equal(router.jupiterStats().sells.seeded, 2);
 
-  // Right after a back's own calls the budget is kept for trades: the seed is refused, quietly,
-  // and tried again once it has refilled. The fork's budget shape (10 at once, 6 kept for trades),
-  // on a clock the test moves.
+  // Right after a back's own calls the budget is kept for trades: the seed waits, quietly, and
+  // goes once it has refilled. The fork's old default shape (10 at once, 6 kept for trades), on a
+  // clock the test moves.
   let budgetClock = Date.now();
   const busy = new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null } as any, {
     budget: new JupiterBudget({ perMinute: 30, burst: 10, reserve: 6 }, () => budgetClock),
     readMints: null,
     prices: new PriceCache(PRICE_TTL_MS, () => clock),
-    seedRetryMs: [150],
+    seedPaceMs: 20,
   });
   await busy.sellSwaps(sells(1_000n, 1_000n), wallet, payer); // a sale's 5 calls: 5 left
   const before = calls.length;
-  await busy.seedSells([{ mint: Keypair.generate().publicKey.toBase58(), amount: 1_000n }], wallet);
-  assert.equal(calls.length, before, "no call made");
-  assert.equal(busy.jupiterStats().sells.seedsRefused, 1);
+  const seeding = busy.seedSells([{ mint: Keypair.generate().publicKey.toBase58(), amount: 1_000n }], wallet);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(calls.length, before, "no call made while the budget is short");
   budgetClock += 20_000; // refilled
-  await new Promise((r) => setTimeout(r, 400));
+  await seeding;
   await busy.routesLearned();
-  assert.equal(calls.length, before + 2, "the retry quoted it");
+  assert.equal(calls.length, before + 2, "then it quoted it");
   assert.equal(busy.jupiterStats().sells.seeded, 1);
+  assert.equal(busy.jupiterStats().sells.seedsRefused, 0);
+});
+
+test("as on the fork (50 a minute, bursts of 3): a back's seeds wait their turn until every token is seeded, so the first sale makes no quote", async (t) => {
+  // Before: three tries 15, 30 and 60 s after the back each seeded one token (the route checks'
+  // lane gets two calls from a full bucket of 3), so a 3–4-leg take's first sale still quoted
+  // afresh, 8–14 s at the tap. The budget's clock runs 100x real time here.
+  clock = Date.now();
+  const calls = jupiter(t);
+  const start = Date.now();
+  const router = new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null } as any, {
+    budget: new JupiterBudget({ perMinute: 50, burst: 3, reserve: 1 }, () => start + (Date.now() - start) * 100),
+    readMints: null,
+    prices: new PriceCache(PRICE_TTL_MS, () => clock),
+    seedPaceMs: 5,
+  });
+  const [wallet, payer] = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+  // The back's own calls emptied the bucket.
+  await router.sellSwaps([{ mint: Keypair.generate().publicKey.toBase58(), amount: 10n, label: "x" }], wallet, payer).catch(() => {});
+  await router.seedSells(TOKENS.map((x, i) => ({ mint: x.mint, amount: BigInt(1_000_000 * (i + 1)) })), wallet);
+  await router.routesLearned();
+  const stats = router.jupiterStats().sells;
+  assert.equal(stats.seeded, 3, "every token seeded");
+  assert.equal(stats.kept, 3, "and kept, with a price read waited for like the quotes");
+  assert.equal(stats.seedsRefused, 0);
+  const use = newUse(1);
+  const sale = await router.sellSwaps(three(900_000n, 1_800_000n, 2_700_000n), wallet, payer, { use });
+  assert.deepEqual(sale.map((s) => s.repriced), [true, true, true]);
+  assert.equal(use.quotes + use.instructions, 0, "no quote at the tap");
+  assert.ok(calls.length <= 2 + 3 * 2, "a quote and swap instructions per token, none wasted");
+});
+
+test("a seed gives up once SEED_DEADLINE_MS has passed with the budget still short", async (t) => {
+  clock = Date.now();
+  const calls = jupiter(t);
+  const router = new Router({ bank, appPayer: Keypair.generate(), jupiterApiKey: null } as any, {
+    budget: new JupiterBudget({ perMinute: 6_000, burst: 1_000, reserve: 999_999 }, () => Date.now()),
+    readMints: null,
+    prices: new PriceCache(PRICE_TTL_MS, () => clock),
+    seedDeadlineMs: 80,
+    seedPaceMs: 10,
+  });
+  await router.seedSells(TOKENS.slice(0, 2).map((x) => ({ mint: x.mint, amount: 1_000n })), Keypair.generate().publicKey);
+  assert.equal(calls.length, 0);
+  assert.equal(router.jupiterStats().sells.seedsRefused, 2);
 });
 
 const three = (a: bigint, b: bigint, c: bigint) => [...sells(a, b), { mint: TOKENS[2].mint, amount: c, label: "Sell IRENx" }];

@@ -64,8 +64,8 @@
 // repriced, followed by the tap's own build, and every token was quoted afresh at the tap.) Every
 // token a sale quotes afresh although it was sold lately says why in the log, at most once a
 // minute per token. After a back lands, the tokens it bought with no sell route kept are quoted
-// back to USDC once (`seedSells`, in the route checks' lane: refused whenever the budget is
-// short), so the first sale is repriced too.
+// back to USDC once (`seedSells`, in the route checks' lane, waiting its turn behind taps and
+// prebuilds until all are seeded), so the first sale is repriced too.
 import type { PublicKey } from "@solana/web3.js";
 import { PRICEABLE_MIN_POOLED_USD, bestIssuer, effectiveMultiplier, issuerPool, type BestIssuerResult, type ReadMints } from "@thesis/venues/bank";
 import { ineligible, otherSide, type GeminiContract } from "@thesis/venues/gemini";
@@ -131,12 +131,13 @@ const MAX_ROUTES = 4;
 /** A template is kept with a price read at most PRICE_TTL_MS before its quote or this long after. */
 const ROUTE_PRICE_AFTER_MS = 20_000;
 /**
- * When a sell route seeded after a back (Router.seedSells) was refused by the budget, as it
- * usually is right after the back's own calls, it's tried again this long after, then after the
- * next: the bucket refills at the free plan's rate meanwhile. The route checks' lane gets about
- * four calls from a full bucket (10, 6 kept for trades), so a try seeds about two tokens.
+ * How long a back's sell seeds (Router.seedSells) keep waiting for room in the budget. They wait
+ * in the lowest lane, so taps and prebuilds go first; on the fork's budget (50 a minute, bursts of
+ * 3) a 4-leg back's eight calls are done within about 10–15 s when nothing else is trading.
  */
-export const SEED_RETRY_MS = [15_000, 30_000, 60_000];
+export const SEED_DEADLINE_MS = 120_000;
+/** A seed's quote whose swap-instructions call the budget turned away is reused this long. */
+const SEED_QUOTE_REUSE_MS = 10_000;
 /** When the price for a template couldn't be read at once (the budget kept it for trades), it's tried once more this much later. */
 const ROUTE_PRICE_RETRY_MS = 5_000;
 
@@ -263,12 +264,15 @@ export class Router {
   /** Price reads for templates still running (routesLearned waits for them). */
   #learning = new Set<Promise<void>>();
 
-  /** `routeTtlMs`: how long routes are kept (default: routeTtlFromEnv). `now`: the price cache's clock. */
-  /** Waits before each retry of a refused seed (SEED_RETRY_MS unless a test passes its own). */
-  readonly #seedRetryMs: number[];
+  /** How long a back's sell seeds keep waiting for the budget (SEED_DEADLINE_MS unless a test passes its own). */
+  readonly #seedDeadlineMs: number;
+  /** Tests: how long a refused seed waits, instead of the refusal's retry-after. */
+  readonly #seedPaceMs: number | undefined;
 
-  constructor(o: ServiceOpts, deps: { budget?: JupiterBudget; readMints?: ReadMints | null; routeTtlMs?: number; prices?: PriceCache; seedRetryMs?: number[] } = {}) {
-    this.#seedRetryMs = deps.seedRetryMs ?? SEED_RETRY_MS;
+  /** `routeTtlMs`: how long routes are kept (default: routeTtlFromEnv). `now`: the price cache's clock. */
+  constructor(o: ServiceOpts, deps: { budget?: JupiterBudget; readMints?: ReadMints | null; routeTtlMs?: number; prices?: PriceCache; seedDeadlineMs?: number; seedPaceMs?: number } = {}) {
+    this.#seedDeadlineMs = deps.seedDeadlineMs ?? SEED_DEADLINE_MS;
+    this.#seedPaceMs = deps.seedPaceMs;
     this.#o = o;
     this.route = { ...ROUTE, dexes: o.dexes };
     this.budget = deps.budget ?? jupiterBudget;
@@ -1001,52 +1005,90 @@ export class Router {
    * Seeds sell routes after a back lands (see "Sales" in the header): for each token it bought
    * (`amount`: about what it bought) with no sell route kept, one quote back to USDC and its swap
    * instructions, kept like a sale's, so the first sale of it is repriced too. In the route
-   * checks' lane (3): refused, never waited for, whenever the budget is short or trades queue. The
-   * budget is usually short right after the back's own calls, so what was refused is tried again
-   * after each of SEED_RETRY_MS. At most once per token per FORK_API_ROUTE_TTL_MS once it's done
-   * (kept, or no route). Never throws.
+   * checks' lane (3), so taps and prebuilds always go first: a call the budget turns away waits as
+   * long as the budget says (its retry-after) and goes again, token after token, until every one is
+   * seeded or SEED_DEADLINE_MS has passed. (It used to retry three times, 15, 30 and 60 s later:
+   * with the fork's small burst (FORK_API_JUPITER_BURST=3) each try seeded one token, so a 4-leg
+   * back's first sale still quoted some afresh, 8–14 s at the tap.) Each token is kept as soon as a
+   * price for it is read, in batches before each wait; a quote whose swap-instructions call was
+   * turned away is reused while SEED_QUOTE_REUSE_MS young. At most once per token per
+   * FORK_API_ROUTE_TTL_MS once it's done (kept, or no route). Never throws.
    */
-  async seedSells(items: { mint: string; amount: bigint }[], user: PublicKey, attempt = 0): Promise<void> {
+  async seedSells(items: { mint: string; amount: bigint }[], user: PublicKey): Promise<void> {
     if (this.routeTtlMs <= 0) return;
     const now = Date.now();
     const todo = [...new Map(items.filter((i) => i.amount > 0n).map((i) => [i.mint, i])).values()]
-      .filter((i) => !this.#keptSells(i.mint, now).length && !((this.#seeded.get(i.mint) ?? 0) > now - this.routeTtlMs) && (attempt > 0 || !this.#seeding.has(i.mint)));
+      .filter((i) => !this.#keptSells(i.mint, now).length && !((this.#seeded.get(i.mint) ?? 0) > now - this.routeTtlMs) && !this.#seeding.has(i.mint));
     if (!todo.length) return;
     for (const i of todo) this.#seeding.add(i.mint);
     if (this.#seeded.size >= 1_000) for (const [k, at] of this.#seeded) if (at <= now - this.routeTtlMs) this.#seeded.delete(k);
-    let refused: typeof todo = [];
+    const deadline = now + this.#seedDeadlineMs;
     const job = (async () => {
-      const use = newUse(LANE.routeCheck);
-      const jupiter = this.jupiter(LANE.routeCheck, use);
-      const quoted: { mint: string; template: SwapTemplate | null; at: number }[] = [];
-      for (const [k, i] of todo.entries()) {
-        const { quote } = await jupiter.quoteExactIn(i.mint, USDC_MINT, i.amount, this.route).catch(() => ({ quote: null }));
-        const res = quote && quote.inputMint === i.mint && quote.outputMint === USDC_MINT && !use.refused
-          ? await jupiterSwapInstructions({ ...jupiter, quote, user }).catch(() => null)
-          : null;
-        // The budget turned it away: this one and the rest wait for the next try.
-        if (use.refused) {
-          refused = todo.slice(k);
+      let pending: { mint: string; template: SwapTemplate | null; at: number }[] = [];
+      let left = todo.length;
+      // Keeps what's quoted so far, with one price read (waited for like the quotes).
+      const keep = async () => {
+        if (!pending.length) return;
+        const batch = pending;
+        pending = [];
+        const mints = [...new Set(batch.map((q) => q.mint))];
+        let prices = new Map<string, CachedPrice>();
+        for (;;) {
+          const use = newUse(LANE.routeCheck);
+          prices = await this.prices.get(mints, (ms) => jupiterPrices(ms, this.jupiter(LANE.routeCheck, use))).catch(() => new Map<string, CachedPrice>());
+          if (!use.refused || Date.now() >= deadline || Date.now() - batch[0].at > ROUTE_PRICE_AFTER_MS / 2) break;
+          await this.#seedPause(use.refused);
+        }
+        await this.#keepSells(batch, LANE.routeCheck, newUse(LANE.routeCheck), prices);
+      };
+      for (const i of todo) {
+        let quote: Awaited<ReturnType<typeof jupiterQuote>>["quote"] = null;
+        let quotedAt = 0;
+        for (;;) {
+          // A sale of it may have quoted and kept it meanwhile.
+          if (this.#keptSells(i.mint, Date.now()).length) break;
+          const use = newUse(LANE.routeCheck);
+          const jupiter = this.jupiter(LANE.routeCheck, use);
+          if (!quote || Date.now() - quotedAt > SEED_QUOTE_REUSE_MS) {
+            quote = (await jupiter.quoteExactIn(i.mint, USDC_MINT, i.amount, this.route).catch(() => ({ quote: null }))).quote;
+            quotedAt = Date.now();
+          }
+          const res = quote && quote.inputMint === i.mint && quote.outputMint === USDC_MINT && !use.refused
+            ? await jupiterSwapInstructions({ ...jupiter, quote, user }).catch(() => null)
+            : null;
+          if (use.refused) {
+            // The budget turned it away: keep what's done, wait as long as it says, go again.
+            if (Date.now() >= deadline) {
+              this.#sellStats.seedsRefused += left;
+              await keep();
+              return;
+            }
+            await keep();
+            await this.#seedPause(use.refused);
+            continue;
+          }
+          this.#seeded.set(i.mint, Date.now());
+          if (quote && res) {
+            pending.push({ mint: i.mint, template: swapTemplate({ res, quote: quote as typeof quote & { outputMint: string; inputMint: string } }, user), at: quotedAt });
+            this.#sellStats.seeded++;
+          }
           break;
         }
-        this.#seeded.set(i.mint, Date.now());
-        if (quote && res) quoted.push({ mint: i.mint, template: swapTemplate({ res, quote: quote as typeof quote & { outputMint: string; inputMint: string } }, user), at: Date.now() });
+        left--;
       }
-      this.#sellStats.seeded += quoted.length;
-      await this.#keepSells(quoted, LANE.routeCheck, use);
-    })().catch(() => {});
+      await keep();
+    })().catch(() => {}).finally(() => {
+      for (const i of todo) this.#seeding.delete(i.mint);
+    });
     this.#learning.add(job);
     void job.finally(() => this.#learning.delete(job));
     await job;
-    for (const i of todo) if (!refused.includes(i)) this.#seeding.delete(i.mint);
-    const wait = this.#seedRetryMs[attempt];
-    if (!refused.length) return;
-    this.#sellStats.seedsRefused += refused.length;
-    if (wait === undefined) {
-      for (const i of refused) this.#seeding.delete(i.mint);
-      return;
-    }
-    setTimeout(() => void this.seedSells(refused, user, attempt + 1), wait).unref();
+  }
+
+  /** Waits as long as a refusal's retry-after says (or the test's pace), within 0.5–15 s. */
+  #seedPause(refused: ApiError): Promise<void> {
+    const ms = this.#seedPaceMs ?? Math.min(15_000, Math.max(500, Number(refused.headers?.["retry-after"] ?? 1) * 1000));
+    return new Promise((resolve) => setTimeout(resolve, ms).unref());
   }
 
   /**
@@ -1083,7 +1125,7 @@ export class Router {
    * it was read moments before. A template that couldn't serve another wallet or be rewritten, or
    * whose price isn't from its moment, isn't kept (each reason is logged once a minute).
    */
-  async #keepSells(quoted: { mint: string; template: SwapTemplate | null; at: number }[], lane: Lane, use: JupiterUse) {
+  async #keepSells(quoted: { mint: string; template: SwapTemplate | null; at: number }[], lane: Lane, use: JupiterUse, read?: Map<string, CachedPrice>) {
     if (this.routeTtlMs <= 0 || !quoted.length) return;
     const ready: { mint: string; template: SwapTemplate; at: number }[] = [];
     for (const q of quoted) {
@@ -1092,7 +1134,7 @@ export class Router {
       else ready.push(q as { mint: string; template: SwapTemplate; at: number });
     }
     if (!ready.length) return;
-    const prices = await this.#readPrices([...new Set(ready.map((q) => q.mint))], lane, use).catch(() => new Map<string, CachedPrice>());
+    const prices = read ?? await this.#readPrices([...new Set(ready.map((q) => q.mint))], lane, use).catch(() => new Map<string, CachedPrice>());
     for (const { mint, template, at } of ready) {
       const p = prices.get(mint);
       if (!p || p.at < at - PRICE_TTL_MS || p.at > at + ROUTE_PRICE_AFTER_MS) {
