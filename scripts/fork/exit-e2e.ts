@@ -15,6 +15,11 @@
 // Then an author posts a take of the same legs and a holder backs it. The author's sale closes the
 // take: the quote says so, the receipt shows it closed, new backs and fades get 409 take_closed,
 // and the holder can still sell (through the holding route, `/takes/:id/sell`).
+// Then a wallet backs a four-stock take twice and sells its holding of the two positions through
+// the holding route: half (the smaller position whole and part of the bigger one), then the rest.
+// Each token is swapped once per sale however many positions sell it, the records ride last (in
+// the last transaction when the sale needs several), and the second sale reuses the sell routes
+// the first one kept: at most one Jupiter call.
 // With `--settle` it then runs the real settler until the sales are priced and settled, before the
 // take's horizon: the partial sale settles first, then the first position and its exit account
 // close into a scored profile, and the
@@ -25,12 +30,13 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { USDC_MINT_MAINNET, exitAddress, partSaleAddress, profileAddress, thesisProgram, TAKE_LIFETIME_SECS } from "@thesis/chain";
 import { forkApiServer } from "./api/server.ts";
 import type { AppTake } from "./api/service.ts";
 import { startForkService } from "./api.ts";
+import { planHoldingSale } from "./api/sales.ts";
 import { REPO_ROOT, RPC_URL, connection, main, syncClock } from "./lib.ts";
 
 /** One tick of the real settler against this fork. */
@@ -60,6 +66,25 @@ const TAKE: AppTake = {
     { name: "Cash", kind: "Earns interest", weight: 20, fade_how: null, asset_id: "yield:9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D" },
   ],
 };
+/** Four stocks, a quarter each: a holding of two backs of it sells eight token amounts as four swaps. */
+const FOUR: AppTake = {
+  ...TAKE,
+  id: randomUUID(),
+  claim: "Exit e2e: four stocks",
+  risk: "medium",
+  author: { handle: "exit-e2e-four" },
+  legs: [
+    { name: "NVIDIA", kind: "Stock", weight: 25, fade_how: "Bets the stock falls", asset_id: "jup:Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh" },
+    { name: "Microsoft", kind: "Stock", weight: 25, fade_how: "Bets the stock falls", asset_id: "jup:XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX" },
+    { name: "Amazon", kind: "Stock", weight: 25, fade_how: "Bets the stock falls", asset_id: "jup:Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg" },
+    { name: "S&P 500", kind: "Index fund", weight: 25, fade_how: null, asset_id: "jup:XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W" },
+  ],
+};
+/** The Jupiter calls a build's Server-Timing reports (its `jupiter` note), or null without one. */
+const jupiterCalls = (timing: string | null) => {
+  const m = timing?.match(/jupiter;desc="lane [0-9]+, ([0-9]+) calls/);
+  return m ? Number(m[1]) : null;
+};
 /** The same legs, posted by a wallet the run holds (set below), so its author can sell. */
 const AUTHORED: AppTake = { ...TAKE, id: randomUUID(), claim: "Exit e2e: the author sells", author: { handle: "exit-e2e-author" } };
 const SETTLE = args.includes("--settle");
@@ -67,13 +92,13 @@ const SETTLE = args.includes("--settle");
 async function e2e(): Promise<void> {
   const lead = await syncClock();
   if (lead > 120) throw new Error(`The fork's clock is ${lead}s ahead of real time: restart the fork.`);
-  const service = await startForkService((m) => console.log(`  [api] ${m}`), { takes: async (id) => [TAKE, AUTHORED].find((t) => t.id === id) ?? null });
+  const service = await startForkService((m) => console.log(`  [api] ${m}`), { takes: async (id) => [TAKE, AUTHORED, FOUR].find((t) => t.id === id) ?? null });
   const server = forkApiServer(service);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const r = await fetch(base + path, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-    return { status: r.status, json: (await r.json()) as any };
+    return { status: r.status, json: (await r.json()) as any, timing: r.headers.get("server-timing") };
   };
   const user = Keypair.generate();
   const me = user.publicKey.toBase58();
@@ -90,8 +115,8 @@ async function e2e(): Promise<void> {
   };
   const conn = connection();
   const thesis = thesisProgram(conn);
-  const usdc = async () => {
-    const ata = getAssociatedTokenAddressSync(USDC_MINT_MAINNET, user.publicKey, true);
+  const usdc = async (owner = user.publicKey) => {
+    const ata = getAssociatedTokenAddressSync(USDC_MINT_MAINNET, owner, true);
     return Number((await conn.getTokenAccountBalance(ata, "confirmed")).value.amount) / 1e6;
   };
   const checks: [string, boolean][] = [];
@@ -200,6 +225,63 @@ async function e2e(): Promise<void> {
     const holderQuote = await call("POST", `/takes/${AUTHORED.id}/sell`, { owner: h, side: "back", bps: 10_000 });
     checks.push(["holder's quote: sells their one position, doesn't close anything", holderQuote.json.closesTake === false && holderQuote.json.positions?.length === 1 && holderQuote.json.positions[0] === held?.address]);
     await submit("holder's sale", holderQuote, holder);
+
+    // A holding of two positions on a four-stock take, sold in two goes through the holding route.
+    const seller = Keypair.generate();
+    const s = seller.publicKey.toBase58();
+    await call("POST", `/wallets/${s}/deposits`, { usd: 200 });
+    const firstBack = await call("POST", `/takes/${FOUR.id}/trades`, { owner: s, side: "back", usd: 20 });
+    await submit("four-stock back ($20)", firstBack, seller);
+    await submit("four-stock back ($30)", await call("POST", `/takes/${FOUR.id}/trades`, { owner: s, side: "back", usd: 30 }), seller);
+    const bought = firstBack.json.included.length as number;
+    console.log(`four-stock take: backed $20 and $30, ${bought} legs bought`);
+    const fourView = await call("GET", `/takes/${FOUR.id}?viewer=${s}`);
+    const [small, big] = [20, 30].map((usd) => fourView.json.viewerPositions.find((p: any) => !p.exited && p.stakeUsd === usd)?.address as string);
+    const labelsOf = (q: { json: any }) => q.json.steps.flatMap((x: any) => x.labels) as string[];
+    const swapsIn = (q: { json: any }) => labelsOf(q).filter((l) => l.startsWith("Sell ")).length;
+    // Every record after every swap, the receipt last in the last transaction.
+    const recordsLast = (q: { json: any }) => {
+      const labels = labelsOf(q);
+      const isRecord = (l: string) => l.startsWith("Record") || l === "thesis receipt";
+      const first = labels.findIndex(isRecord);
+      return first !== -1 && labels.slice(first).every(isRecord) && q.json.steps.at(-1).labels.at(-1) === "thesis receipt";
+    };
+    const beforeHalf = await usdc(seller.publicKey);
+    const half = await call("POST", `/takes/${FOUR.id}/sell`, { owner: s, side: "back", bps: 5_000 });
+    if (half.status !== 200) throw new Error(`holding half quote: ${half.status} ${JSON.stringify(half.json)}`);
+    console.log(`holding half: ${half.json.transactions.length} transaction(s), Jupiter ${jupiterCalls(half.timing)} calls`);
+    for (const x of half.json.steps) console.log(`  ${x.labels.join(" + ")}: ${x.bytes} bytes`);
+    // Half of $50 is $25: the $20 position whole, then the $5 left as a part of the $30 one. A part
+    // is whole bps of its position (5/30 rounds to 1,667 bps, $5.001), so the planner says exactly
+    // what sells and what's left.
+    const plan = planHoldingSale([{ address: small, remaining: 20_000_000n, openParts: 0 }, { address: big, remaining: 30_000_000n, openParts: 0 }], 5_000, 10_000_000n);
+    if ("error" in plan) throw new Error(`the planner refused the half: ${plan.error}`);
+    const halfSold = Number(plan.sold) / 1e6;
+    const bigLeft = 30_000_000 - (Number(plan.sold) - 20_000_000);
+    const halfGot = { full: half.json.full, stakeUsd: half.json.sale?.stakeUsd, remainingStakeUsd: half.json.sale?.remainingStakeUsd, positions: half.json.positions, small, big, plan: { whole: plan.whole, part: plan.part, sold: halfSold } };
+    const halfOk = half.json.full === false && half.json.sale.stakeUsd === halfSold && plan.whole[0] === small && plan.part?.address === big && half.json.positions?.length === 2 && half.json.positions[0] === small && half.json.positions[1] === big;
+    if (!halfOk) console.log(`  holding half got: ${JSON.stringify(halfGot)}`);
+    checks.push([`holding half: $${halfSold} of $50, the $20 position whole and part of the $30 one`, halfOk]);
+    checks.push(["holding half: one swap per token, the records last", swapsIn(half) === bought && recordsLast(half)]);
+    await submit("holding half", half, seller);
+    const afterHalf = await usdc(seller.publicKey);
+    checks.push(["holding half: USDC back, at least the quoted minimum", afterHalf - beforeHalf >= half.json.minimumUsd - 0.005]);
+    const [smallAfter, bigAfter] = await thesis.account.position.fetchMultiple([new PublicKey(small), new PublicKey(big)], "confirmed");
+    const chainOk = smallAfter?.exited === true && bigAfter?.remaining.toNumber() === bigLeft && bigAfter?.parts === 1 && !bigAfter?.exited;
+    if (!chainOk) console.log(`  chain got: $20 exited ${smallAfter?.exited}; $30 remaining ${bigAfter?.remaining.toString()} (want ${bigLeft}), parts ${bigAfter?.parts}, exited ${bigAfter?.exited}`);
+    checks.push([`chain: the $20 position sold, $${bigLeft / 1e6} left of the $30 one with one partial sale`, chainOk]);
+    const rest = await call("POST", `/takes/${FOUR.id}/sell`, { owner: s, side: "back", bps: 10_000 });
+    if (rest.status !== 200) throw new Error(`holding rest quote: ${rest.status} ${JSON.stringify(rest.json)}`);
+    console.log(`holding rest: ${rest.json.transactions.length} transaction(s), Jupiter ${jupiterCalls(rest.timing)} calls (${rest.timing})`);
+    const restOk = rest.json.full === true && rest.json.sale.stakeUsd === bigLeft / 1e6 && rest.json.positions?.length === 1 && rest.json.positions[0] === big && swapsIn(rest) === bought;
+    if (!restOk) console.log(`  holding rest got: ${JSON.stringify({ full: rest.json.full, stakeUsd: rest.json.sale?.stakeUsd, want: bigLeft / 1e6, positions: rest.json.positions, swaps: swapsIn(rest), bought })}`);
+    checks.push([`holding rest: the $${bigLeft / 1e6} left, whole, one swap per token`, restOk]);
+    checks.push(["holding rest: the sell routes kept, at most one Jupiter call", (jupiterCalls(rest.timing) ?? 99) <= 1]);
+    await submit("holding rest", rest, seller);
+    const bigSold = await thesis.account.position.fetch(new PublicKey(big), "confirmed");
+    checks.push(["chain: the $30 position sold too", bigSold.exited === true]);
+    const leftover = await conn.getParsedTokenAccountsByOwner(seller.publicKey, { programId: TOKEN_2022_PROGRAM_ID }, "confirmed");
+    checks.push(["wallet: none of the four stocks left", leftover.value.every((a) => Number(a.account.data.parsed.info.tokenAmount.amount) === 0)]);
 
     if (SETTLE) {
       // A tick prices the sale, the next settles it. Token prices need the trade's transactions

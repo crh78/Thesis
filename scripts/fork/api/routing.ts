@@ -42,6 +42,19 @@
 // A repriced estimate that's wrong fails at preflight (the fill is below the slippage limit or a
 // pool needs other accounts), never mistrades; the retry rule above applies, so the wallet's next
 // build of that trade and stake quotes afresh and replaces the kept routes.
+//
+// Sales: routes back to USDC are kept the same way, per token (the token in, USDC out), for
+// FORK_API_ROUTE_TTL_MS (`sellSwaps`). A sale's swap of a token sold in that time by any wallet
+// rewrites the kept template: in_amount exactly the tokens to sell, quoted_out_amount in
+// proportion and at the token's price now (the price now over the price then: the USDC out moves
+// with the price), the same 1% slippage, impact, shortfall and 3% move limits. So a sale whose
+// tokens all have kept sell routes costs one price read, or none. Any other token is quoted
+// afresh (a quote and a swap-instructions call) and its template kept, with a price read in the
+// sale build's own turn: a read left for later, in a prebuild's turn, is refused while trades
+// queue (that's how the first version of this kept nothing on the fork). A wallet's repeat of the
+// same sale moments after a repriced answer quotes afresh, as for trades. After a back lands, the
+// tokens it bought with no sell route kept are quoted back to USDC once (`seedSells`, in the
+// route checks' lane: refused whenever the budget is short), so the first sale is repriced too.
 import type { PublicKey } from "@solana/web3.js";
 import { PRICEABLE_MIN_POOLED_USD, bestIssuer, effectiveMultiplier, issuerPool, type BestIssuerResult, type ReadMints } from "@thesis/venues/bank";
 import { ineligible, otherSide, type GeminiContract } from "@thesis/venues/gemini";
@@ -62,14 +75,16 @@ import {
   PRICE_TTL_MS,
   SCALE_LIMITS,
   TEMPLATE_OWNER,
+  USDC_MINT,
   type CachedPrice,
   type JupSwapInstructions,
   type JupiterAccess,
+  type JupiterBuy,
   type SwapTemplate,
   type VenueLeg,
 } from "@thesis/venues/jupiter";
 import { ApiError, MIN_STAKE_USD, USD, type ServiceOpts } from "./common.ts";
-import { jupiterBudget, newUse, type JupiterBudget, type JupiterUse, type Lane } from "./guard.ts";
+import { LANE, jupiterBudget, newUse, type JupiterBudget, type JupiterUse, type Lane } from "./guard.ts";
 import { isPaper, type MappedLeg } from "./legs.ts";
 import { cardIdHex } from "@thesis/venues/collector-crypt";
 import type { PhoenixDesk, PhoenixLeg } from "./phoenix.ts";
@@ -102,6 +117,13 @@ export const ROUTE_TTL_MS = 10 * 60_000;
 const MAX_ROUTES = 4;
 /** A template is kept with a price read at most PRICE_TTL_MS before its quote or this long after. */
 const ROUTE_PRICE_AFTER_MS = 20_000;
+/**
+ * When a sell route seeded after a back (Router.seedSells) was refused by the budget, as it
+ * usually is right after the back's own calls, it's tried again this long after, then after the
+ * next: the bucket refills at the free plan's rate meanwhile. The route checks' lane gets about
+ * four calls from a full bucket (10, 6 kept for trades), so a try seeds about two tokens.
+ */
+export const SEED_RETRY_MS = [15_000, 30_000, 60_000];
 /** When the price for a template couldn't be read at once (the budget kept it for trades), it's tried once more this much later. */
 const ROUTE_PRICE_RETRY_MS = 5_000;
 
@@ -132,6 +154,10 @@ type Way = Winner | "lend" | "phoenix";
  * `at`, the token's Jupiter price then, and its scaled-UI multiplier then.
  */
 type KeptRoute = { at: number; winner: Winner; template: SwapTemplate; price: number; multiplier: number };
+/** A token's sell route kept to reprice (see "Sales" in the header): its template (the token in, USDC out) as quoted at `at`, the token's price then, and its multiplier then. */
+type KeptSell = { at: number; template: SwapTemplate; price: number; multiplier: number };
+/** One token a sale swaps back to USDC: exactly `amount` in, its quote (repriced or fresh) and the wallet's instructions. */
+export type SellSwap = { mint: string; amount: bigint; quote: { inAmount: string; outAmount: string; otherAmountThreshold: string }; venue: JupiterBuy; repriced: boolean };
 const isQuote = (w: Way | null | undefined): w is Winner => typeof w === "object" && w !== null;
 /** A USDC-in quote as Jupiter returned it (with its mints and route), as buyInstructions reads it. */
 const routeQuote = (q: Winner["quote"]) => q as Winner["quote"] & { outputMint: string; inputMint?: string };
@@ -224,7 +250,11 @@ export class Router {
   #learning = new Set<Promise<void>>();
 
   /** `routeTtlMs`: how long routes are kept (default: routeTtlFromEnv). `now`: the price cache's clock. */
-  constructor(o: ServiceOpts, deps: { budget?: JupiterBudget; readMints?: ReadMints | null; routeTtlMs?: number; prices?: PriceCache } = {}) {
+  /** Waits before each retry of a refused seed (SEED_RETRY_MS unless a test passes its own). */
+  readonly #seedRetryMs: number[];
+
+  constructor(o: ServiceOpts, deps: { budget?: JupiterBudget; readMints?: ReadMints | null; routeTtlMs?: number; prices?: PriceCache; seedRetryMs?: number[] } = {}) {
+    this.#seedRetryMs = deps.seedRetryMs ?? SEED_RETRY_MS;
     this.#o = o;
     this.route = { ...ROUTE, dexes: o.dexes };
     this.budget = deps.budget ?? jupiterBudget;
@@ -258,6 +288,7 @@ export class Router {
       noRoute: this.#noRoute.size,
       templates: { size: this.#plans.size, ...this.#templateStats },
       routes: { size: this.#routes.size, ...this.#routeStats, prices: this.prices.stats },
+      sells: { size: this.#sells.size, ...this.#sellStats },
     };
   }
 
@@ -773,17 +804,10 @@ export class Router {
       const ready = (await Promise.all(quoted.map(async (q) => ({ ...q, template: await q.template }))))
         .filter((q): q is typeof q & { template: SwapTemplate } => q.template !== null && !unscalable(q.template, BigInt(q.template.quote.inAmount)));
       if (!ready.length) return;
-      const mints = [...new Set(ready.map((q) => q.way.mint))];
-      const inTime = (p: CachedPrice | null | undefined): p is CachedPrice => !!p && p.at >= quotedAt - PRICE_TTL_MS && p.at <= quotedAt + ROUTE_PRICE_AFTER_MS;
-      const read = () => this.prices.get(mints, (ms) => jupiterPrices(ms, this.jupiter(2)));
-      let prices = await read();
-      if (!mints.every((m) => inTime(prices.get(m)))) {
-        await new Promise((resolve) => setTimeout(resolve, ROUTE_PRICE_RETRY_MS));
-        prices = await read();
-      }
+      const prices = await this.#pricesAt([...new Set(ready.map((q) => q.way.mint))], quotedAt);
       for (const q of ready) {
         const p = prices.get(q.way.mint);
-        if (!inTime(p)) {
+        if (!p) {
           this.#routeStats.unpriced++;
           continue;
         }
@@ -798,6 +822,218 @@ export class Router {
     })().catch(() => {});
     this.#learning.add(job);
     void job.finally(() => this.#learning.delete(job));
+  }
+
+  /**
+   * The tokens' Jupiter prices when something was quoted at `quotedAt`: from the cache when read
+   * at most PRICE_TTL_MS before or ROUTE_PRICE_AFTER_MS after, else read now in a prebuild's turn
+   * (and once more ROUTE_PRICE_RETRY_MS later if the budget kept it for trades). Mints with no
+   * price in time are missing.
+   */
+  async #pricesAt(mints: string[], quotedAt: number): Promise<Map<string, CachedPrice>> {
+    const inTime = (p: CachedPrice | null | undefined): p is CachedPrice => !!p && p.at >= quotedAt - PRICE_TTL_MS && p.at <= quotedAt + ROUTE_PRICE_AFTER_MS;
+    const read = () => this.prices.get(mints, (ms) => jupiterPrices(ms, this.jupiter(2)));
+    let prices = await read();
+    if (!mints.every((m) => inTime(prices.get(m)))) {
+      await new Promise((resolve) => setTimeout(resolve, ROUTE_PRICE_RETRY_MS));
+      prices = await read();
+    }
+    return new Map(mints.flatMap((m) => {
+      const p = prices.get(m);
+      return inTime(p) ? [[m, p] as const] : [];
+    }));
+  }
+
+  /** Token → its kept sell routes (templates at different sizes, newest first; see "Sales" in the header). */
+  #sells = new Map<string, KeptSell[]>();
+  /** Wallet, token and amount → when that wallet's sale of it was last answered from a kept sell route (a repeat quotes afresh). */
+  #sellRepeats = new Map<string, number>();
+  /** Sell swaps repriced from kept routes and quoted afresh; sell templates kept and not kept (any reason); routes seeded after backs. */
+  #sellStats = { repriced: 0, quoted: 0, kept: 0, unkept: 0, seeded: 0, seedsRefused: 0 };
+
+  /** The sell routes kept for `mint` and still in time, newest first. */
+  #keptSells(mint: string, now: number): KeptSell[] {
+    if (this.routeTtlMs <= 0) return [];
+    return (this.#sells.get(mint) ?? []).filter((r) => r.at > now - this.routeTtlMs);
+  }
+
+  /**
+   * A sale's swaps back to USDC (see "Sales" in the header): each token's exact `amount` in, from
+   * a kept sell route repriced at the token's price now (one batched price read for all of them,
+   * none when the shared cache has it), else a fresh quote and swap-instructions call whose
+   * template is kept. `fresh`: quote every one afresh (and drop their kept routes). Throws 422
+   * `no_exit_route` when a token has no route, 503 `busy` when its quote failed or the budget
+   * refused a call.
+   */
+  async sellSwaps(
+    sells: { mint: string; amount: bigint; label: string }[],
+    user: PublicKey,
+    payer: PublicKey,
+    o: { lane?: Lane; use?: JupiterUse; maxAccounts?: number; fresh?: boolean } = {},
+  ): Promise<SellSwap[]> {
+    const use = o.use ?? newUse(o.lane ?? 1);
+    const lane = (use.lane = o.lane ?? use.lane);
+    const now = Date.now();
+    const maxAccounts = o.maxAccounts ?? this.route.maxAccounts;
+    const mine = (s: { mint: string; amount: bigint }) => `${user.toBase58()} ${s.mint} ${s.amount}`;
+    // A wallet selling the same tokens again moments after a repriced answer (a refused submit): afresh.
+    for (const s of sells) {
+      if (!o.fresh && !((this.#sellRepeats.get(mine(s)) ?? 0) > now - TEMPLATE_TTL_MS)) continue;
+      this.#sells.delete(s.mint);
+      this.#sellRepeats.delete(mine(s));
+    }
+    // With any kept route: every token's price now, in one read in the build's own turn. It
+    // reprices the kept routes, and the fresh quotes' routes are kept with it (cached).
+    const mints = [...new Set(sells.map((s) => s.mint))];
+    const anyKept = mints.some((m) => this.#keptSells(m, now).length);
+    const pricesNow = anyKept ? this.#readPrices(mints, lane, use) : null;
+    const jupiter = this.jupiter(lane, use);
+    const quoted: { mint: string; template: SwapTemplate | null; at: number }[] = [];
+    const out = await Promise.all(sells.map(async (s): Promise<SellSwap> => {
+      const repriced = pricesNow && this.#keptSells(s.mint, now).length ? this.#repriceSell(s.mint, s.amount, await pricesNow, now) : null;
+      if (repriced) {
+        this.#sellRepeats.set(mine(s), now);
+        this.#sellStats.repriced++;
+        use.templatedLegs++;
+        return { mint: s.mint, amount: s.amount, quote: repriced.quote, venue: fromTemplate(repriced, user, payer, s.label), repriced: true };
+      }
+      const { quote, error } = await jupiter.quoteExactIn(s.mint, USDC_MINT, s.amount, { ...this.route, maxAccounts });
+      if (use.refused) throw use.refused;
+      if (!quote && error && TRANSIENT_QUOTE.test(error)) throw busy(s.label);
+      if (!quote || quote.inputMint !== s.mint || quote.outputMint !== USDC_MINT || quote.inAmount !== s.amount.toString()) {
+        throw new ApiError(422, "no_exit_route", "No route to sell every token in this position.");
+      }
+      const at = Date.now();
+      const res = await jupiterSwapInstructions({ ...jupiter, quote, user }).catch((e: unknown) => {
+        throw use.refused ?? e;
+      });
+      const q = quote as typeof quote & { outputMint: string; inputMint: string };
+      this.#sellStats.quoted++;
+      quoted.push({ mint: s.mint, template: swapTemplate({ res, quote: q }, user), at });
+      return { mint: s.mint, amount: s.amount, quote: q, venue: buyInstructions(res, q, user, payer, s.label), repriced: false };
+    }));
+    // The fresh routes are kept now, with prices read in this build's turn (from the read above
+    // when it's recent, else one more read): a read left for later, in a prebuild's turn, is
+    // refused while trades queue, and the route wouldn't be kept.
+    await this.#keepSells(quoted, lane, use);
+    if (this.#sellRepeats.size >= 1_000) for (const [k, at] of this.#sellRepeats) if (at <= now - TEMPLATE_TTL_MS) this.#sellRepeats.delete(k);
+    return out;
+  }
+
+  /** Tokens whose sell route was seeded lately, or found to have none (see seedSells): when, so each is quoted at most once per route lifetime. */
+  #seeded = new Map<string, number>();
+  /** Tokens being seeded now, or waiting for a seed's retry. */
+  #seeding = new Set<string>();
+
+  /**
+   * Seeds sell routes after a back lands (see "Sales" in the header): for each token it bought
+   * (`amount`: about what it bought) with no sell route kept, one quote back to USDC and its swap
+   * instructions, kept like a sale's, so the first sale of it is repriced too. In the route
+   * checks' lane (3): refused, never waited for, whenever the budget is short or trades queue. The
+   * budget is usually short right after the back's own calls, so what was refused is tried again
+   * after each of SEED_RETRY_MS. At most once per token per FORK_API_ROUTE_TTL_MS once it's done
+   * (kept, or no route). Never throws.
+   */
+  async seedSells(items: { mint: string; amount: bigint }[], user: PublicKey, attempt = 0): Promise<void> {
+    if (this.routeTtlMs <= 0) return;
+    const now = Date.now();
+    const todo = [...new Map(items.filter((i) => i.amount > 0n).map((i) => [i.mint, i])).values()]
+      .filter((i) => !this.#keptSells(i.mint, now).length && !((this.#seeded.get(i.mint) ?? 0) > now - this.routeTtlMs) && (attempt > 0 || !this.#seeding.has(i.mint)));
+    if (!todo.length) return;
+    for (const i of todo) this.#seeding.add(i.mint);
+    if (this.#seeded.size >= 1_000) for (const [k, at] of this.#seeded) if (at <= now - this.routeTtlMs) this.#seeded.delete(k);
+    let refused: typeof todo = [];
+    const job = (async () => {
+      const use = newUse(LANE.routeCheck);
+      const jupiter = this.jupiter(LANE.routeCheck, use);
+      const quoted: { mint: string; template: SwapTemplate | null; at: number }[] = [];
+      for (const [k, i] of todo.entries()) {
+        const { quote } = await jupiter.quoteExactIn(i.mint, USDC_MINT, i.amount, this.route).catch(() => ({ quote: null }));
+        const res = quote && quote.inputMint === i.mint && quote.outputMint === USDC_MINT && !use.refused
+          ? await jupiterSwapInstructions({ ...jupiter, quote, user }).catch(() => null)
+          : null;
+        // The budget turned it away: this one and the rest wait for the next try.
+        if (use.refused) {
+          refused = todo.slice(k);
+          break;
+        }
+        this.#seeded.set(i.mint, Date.now());
+        if (quote && res) quoted.push({ mint: i.mint, template: swapTemplate({ res, quote: quote as typeof quote & { outputMint: string; inputMint: string } }, user), at: Date.now() });
+      }
+      this.#sellStats.seeded += quoted.length;
+      await this.#keepSells(quoted, LANE.routeCheck, use);
+    })().catch(() => {});
+    this.#learning.add(job);
+    void job.finally(() => this.#learning.delete(job));
+    await job;
+    for (const i of todo) if (!refused.includes(i)) this.#seeding.delete(i.mint);
+    const wait = this.#seedRetryMs[attempt];
+    if (!refused.length) return;
+    this.#sellStats.seedsRefused += refused.length;
+    if (wait === undefined) {
+      for (const i of refused) this.#seeding.delete(i.mint);
+      return;
+    }
+    setTimeout(() => void this.seedSells(refused, user, attempt + 1), wait).unref();
+  }
+
+  /**
+   * `mint` sold for exactly `amount` from a kept sell route at the token's price now, or null when
+   * none can be: none in time, no price now, the token paused, its multiplier changed, or scale.ts
+   * refuses (size, impact, shortfall, a price that moved over 3%). The nearest size is tried first.
+   */
+  #repriceSell(mint: string, amount: bigint, prices: Map<string, CachedPrice>, now: number): SwapTemplate | null {
+    const price = prices.get(mint);
+    if (!price || this.#o.bank().tokens[mint]?.paused) return null;
+    const size = (r: KeptSell) => Math.abs(Math.log(Number(amount) / Number(r.template.quote.inAmount)));
+    for (const r of this.#keptSells(mint, now).sort((x, y) => size(x) - size(y))) {
+      if (this.#multiplier(mint, now) !== r.multiplier) continue;
+      // Selling, the USDC out moves with the token's price: the price now over the price then.
+      const template = scaleTemplate(r.template, amount, SCALE_LIMITS, price.usd / r.price);
+      if (template) return template;
+    }
+    return null;
+  }
+
+  /**
+   * Keeps freshly quoted sells' templates (as #keep does a buy's), each with the token's price when
+   * it was quoted: one read for all of them in `lane` (counted in `use`), from the shared cache when
+   * it was read moments before. A template that couldn't serve another wallet or be rewritten, or
+   * whose price isn't from its moment, isn't kept (each reason is logged once a minute).
+   */
+  async #keepSells(quoted: { mint: string; template: SwapTemplate | null; at: number }[], lane: Lane, use: JupiterUse) {
+    if (this.routeTtlMs <= 0 || !quoted.length) return;
+    const ready: { mint: string; template: SwapTemplate; at: number }[] = [];
+    for (const q of quoted) {
+      const why = q.template ? unscalable(q.template, BigInt(q.template.quote.inAmount)) : "Jupiter's answer can't serve other wallets";
+      if (why) this.#unkept(q.mint, why);
+      else ready.push(q as { mint: string; template: SwapTemplate; at: number });
+    }
+    if (!ready.length) return;
+    const prices = await this.#readPrices([...new Set(ready.map((q) => q.mint))], lane, use).catch(() => new Map<string, CachedPrice>());
+    for (const { mint, template, at } of ready) {
+      const p = prices.get(mint);
+      if (!p || p.at < at - PRICE_TTL_MS || p.at > at + ROUTE_PRICE_AFTER_MS) {
+        this.#unkept(mint, "no price from when it was quoted");
+        continue;
+      }
+      const route: KeptSell = { at, template, price: p.usd, multiplier: this.#multiplier(mint, at) };
+      const near = (r: KeptSell) => Math.abs(Math.log(Number(template.quote.inAmount) / Number(r.template.quote.inAmount))) < Math.log(1.5);
+      this.#sells.set(mint, [route, ...this.#keptSells(mint, Date.now()).filter((r) => !near(r))].slice(0, MAX_ROUTES));
+      this.#sellStats.kept++;
+    }
+    if (this.#sells.size >= 500) for (const k of [...this.#sells.keys()]) if (!this.#keptSells(k, Date.now()).length) this.#sells.delete(k);
+  }
+
+  /** Token → when a sell route of it last went unkept (the log says why at most once a minute per token). */
+  #unkeptLogged = new Map<string, number>();
+  #unkept(mint: string, why: string) {
+    this.#sellStats.unkept++;
+    const now = Date.now();
+    if ((this.#unkeptLogged.get(mint) ?? 0) > now - 60_000) return;
+    this.#unkeptLogged.set(mint, now);
+    if (this.#unkeptLogged.size >= 1_000) for (const [k, at] of this.#unkeptLogged) if (at <= now - 60_000) this.#unkeptLogged.delete(k);
+    this.#o.log?.(`sell route for ${this.#o.bank().tokens[mint]?.symbol ?? mint} not kept: ${why}`);
   }
 
   /** Resolves once the routes being kept have their prices (or gave up): for tests and benches. */

@@ -53,7 +53,7 @@ import {
 } from "@thesis/chain";
 import { cardLeg, underlyingIdHex, type BankState } from "@thesis/venues/bank";
 import { cardIdHex } from "@thesis/venues/collector-crypt";
-import { jupiterBuy, jupiterLendRedeem, type VenueLeg } from "@thesis/venues/jupiter";
+import { jupiterBuy, jupiterLendRedeem, type JupiterBuy, type VenueLeg } from "@thesis/venues/jupiter";
 import { PHOENIX_LEG_CU } from "@thesis/venues/phoenix";
 import {
   ApiError,
@@ -82,29 +82,37 @@ import {
   type AppTake,
   type ExitReceipt,
   type IncompleteTrade,
+  type SaleStep,
   type SavedSubmission,
   type ServiceOpts,
+  type StoppedSale,
 } from "./common.ts";
 import { CreatorFees } from "./creator-fees.ts";
 import { dailyDigests } from "./digests.ts";
 import { PortfolioHistory } from "./history.ts";
 import { contractResolver, escrowedKind, mapLegs, nameResolver, onChainLegs, perpResolver, sameLegs, type AppLeg, type ContractResolver, type MappedLeg, type NameResolver, type PerpResolver } from "./legs.ts";
-import { PhoenixDesk } from "./phoenix.ts";
+import { PhoenixDesk, type PhoenixClose } from "./phoenix.ts";
 import { LANE, newUse, type JupiterUse, type Lane } from "./guard.ts";
 import { Router, TEMPLATE_TTL_MS, escrowShare, type TradeLeg } from "./routing.ts";
 import { SendFailed, fates, refusedByPreflight, resendIfStale, sendBackToBack, type Fate } from "./send.ts";
 import { SplitTrades, afterFailure, deserializeIx, incompleteView, serializeIx, sweepLegs } from "./split.ts";
 import { StateStore } from "./store.ts";
 import {
+  STOPPED_SALE_TTL_MS,
   escrowReturned,
   holdingMaxPartialBps,
+  mergeInventory,
   planHoldingSale,
   positionMaxPartialBps,
   positionSale,
   saleBps,
   saleError,
+  saleIncompleteError,
+  saleLeft,
+  stepsByTx,
   tokensToSell,
   type PositionSale,
+  type TxFate,
 } from "./sales.ts";
 import { Valuation } from "./valuation.ts";
 import { Wallets } from "./wallets.ts";
@@ -265,6 +273,10 @@ type Build = {
   marketFreshMs?: number;
   /** What the build answered (the build route's whole response), for a refresh to answer the same. */
   response?: Record<string, unknown>;
+  /** A sale: what each transaction carries, so one that stops partway can be finished. */
+  sale?: SaleBuild;
+  /** A back or publish: the tokens its swaps buy (about how many), to seed their sell routes once it lands. */
+  seeds?: { mint: string; amount: bigint }[];
 };
 
 /**
@@ -281,7 +293,28 @@ export type SaleAmount = { bps?: unknown; usd?: unknown };
  * One position a sale build sells: its partial sale's seq (the PDA it creates) and whether it sells
  * all of it; `exit` for a whole sale (what the receipt shows once it's settled).
  */
-type SaleRecord = { address: PublicKey; seq: number; full: boolean; horizonEnd: number; exit?: ExitReceipt };
+type SaleRecord = { address: PublicKey; seq: number; full: boolean; horizonEnd: number; bps?: number; exit?: ExitReceipt };
+
+/**
+ * A sale build's steps (api/sales.ts): per transaction, what it carries; each position's record
+ * as built; and, for a build that finishes a stopped sale, that sale's key.
+ */
+type SaleBuild = { takeId: string; txSteps: SaleStep[][]; records: StoppedSale["records"]; finish?: string };
+/** What a sale build gives #compose: each venue leg's step (by index), the receipt's, and the records. */
+type SaleSteps = { takeId: string; steps: (SaleStep | null)[]; receipt: SaleStep; records: StoppedSale["records"]; finish?: string };
+/** The parts of a sale build's answer a stopped sale answers again when it's finished. */
+const SALE_SUMMARY = ["bps", "full", "sale", "positions", "escrowUsd", "closesTake", "expectedUsd", "minimumUsd", "phoenixCashOut"] as const;
+type SaleSummary = {
+  bps: number;
+  full: boolean;
+  sale: { stakeUsd: number; remainingStakeUsd: number; valueUsd: number; remainingValueUsd: number };
+  positions?: string[];
+  escrowUsd: number;
+  closesTake: boolean;
+  expectedUsd: number;
+  minimumUsd: number;
+  phoenixCashOut: boolean;
+};
 
 /** A position a sale reads: its account, and what's left of it with its unsettled partial sales. */
 type SaleHolding = { address: PublicKey; account: PositionAccount; view: { remaining: bigint; openParts: number } };
@@ -300,6 +333,12 @@ type SaleContext = {
 type SaleTarget = { holding: SaleHolding; bps: number; sale: Extract<PositionSale, { ok: true }> };
 
 const FULL_BPS = 10_000;
+/** A sale record's compute: exit_position for all of a position, sell_part for part. */
+const recordCu = (full: boolean) => (full ? THESIS_COMPUTE_UNITS.exitPosition : THESIS_COMPUTE_UNITS.sellPart);
+/** A position's sale record riding as a leg before the receipt (a sale of several positions). */
+const recordLeg = (ix: TransactionInstruction, full: boolean): VenueLeg => ({ label: full ? "Record sale" : "Record partial sale", instructions: [ix], lookupTables: [], marketAccounts: [] });
+/** composeTransactions' refusal of a leg (or receipt) too big for a transaction on its own. */
+const tooBig = (e: unknown) => e instanceof Error && !(e instanceof ApiError) && /doesn't fit in a transaction/.test(e.message);
 const hasUsd = (o: SaleAmount) => o.usd !== undefined && o.usd !== null;
 /** Runs `f` once, the first time it's asked for. */
 function lazy<T>(f: () => Promise<T>): () => Promise<T> {
@@ -917,6 +956,10 @@ export class ForkService {
     return this.#timed(`sale build ${takeId.slice(0, 8)}`, t, async () => {
       const owner = parseKey(wallet);
       const position = parseKey(address);
+      // A sale of this position that stopped partway: selling it again finishes that sale.
+      await t.time("pending", () => this.#afterPending(owner.toBase58()));
+      const stopped = this.#stoppedSale(owner.toBase58(), [position.toBase58()]);
+      if (stopped) return this.#keep(await this.#finishSale(...stopped, t, o));
       const ctx = await this.#saleContext(takeId, owner, [position], t);
       const holding = ctx.holdings[0];
       // What it's worth is read only to size a dollar amount, or to say how much can be sold.
@@ -957,6 +1000,10 @@ export class ForkService {
       const held = (await this.#positionsOf(takeKey)).filter((p) =>
         p.account.owner.equals(owner) && !p.account.exited && ("back" in p.account.side ? "back" : "fade") === side);
       if (!held.length) throw new ApiError(404, "position_missing", "You hold nothing on that side of this take.");
+      // A sale of these positions that stopped partway: selling again finishes that sale.
+      await t.time("pending", () => this.#afterPending(owner.toBase58()));
+      const stopped = this.#stoppedSale(owner.toBase58(), held.map((p) => p.publicKey.toBase58()));
+      if (stopped) return this.#keep(await this.#finishSale(...stopped, t, o));
       const ctx = await this.#saleContext(takeId, owner, held.map((p) => p.publicKey), t);
       const total = lazy(async () => (await this.#saleValues(ctx, ctx.holdings)).reduce((n, v) => n + v, 0));
       const bps = saleBps(o, hasUsd(o) ? await total() : 0);
@@ -1031,21 +1078,20 @@ export class ForkService {
 
   /**
    * One build selling each target's share: its Phoenix closes, swaps and redeems, then its
-   * `exit_position` or `sell_part`. The last target's instruction is the build's receipt; the
-   * others ride as legs before it, each after its own swaps.
+   * `exit_position` or `sell_part`, the swaps of a token several targets sell merged into one
+   * (api/sales.ts). The last target's instruction is the build's receipt; the others ride as legs
+   * before it, after every swap. It may take several transactions (records last).
    */
   async #buildSale(ctx: SaleContext, targets: SaleTarget[], t: Timings, o: BuildOpts) {
     const { owner, take, takeKey, config } = ctx;
     const inventoryStarted = Date.now();
     const tokens = this.#o.bank().tokens;
     const payer = this.#o.appPayer.publicKey;
-    const usdc = USDC_MINT_MAINNET.toBase58();
     const appLegs = targets.some((x) => this.#onPhoenix(take, x.holding.account.side, x.holding.account.legsMask).length)
       ? (await this.#appTake(ctx.takeId).catch(() => null))?.legs
       : undefined;
     const names = new Map(take.legs.map((_, i) => [i, appLegs?.[i]?.name ?? `Leg ${i + 1}`] as const));
-    // What each target sells of each token it bought (a share of the trade's tokens), checked
-    // against the wallet's balance (summed when two positions hold the same token).
+    // What each target sells of each token it bought (a share of the trade's tokens).
     const pieces = await Promise.all(targets.map(async ({ holding, bps, sale }) => {
       const { address: position, account } = holding;
       const legs = take.legs.filter((_, i) => account.legsMask & (1 << i));
@@ -1090,15 +1136,11 @@ export class ForkService {
         closesTake: sale.full && account.id.isZero() && account.owner.equals(take.author) && "open" in take.status,
       };
     }));
-    const need = new Map<string, bigint>();
-    for (const p of pieces) for (const l of p.inventory) need.set(l.mint, (need.get(l.mint) ?? 0n) + l.amount);
-    await Promise.all([...need].map(async ([mint, amount]) => {
-      const isYield = pieces.some((p) => p.inventory.some((l) => l.mint === mint && l.isYield));
-      const program = isYield ? "spl" : tokens[mint].program;
-      if (program === "unknown") throw new ApiError(422, "inventory_unavailable", "The token program for this position is unknown.");
-      const ata = getAssociatedTokenAddressSync(new PublicKey(mint), owner, false, program === "token-2022" ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID);
-      const balance = await this.#o.connection.getTokenAccountBalance(ata, "confirmed").then((r) => BigInt(r.value.amount)).catch(() => 0n);
-      if (balance < amount) throw new ApiError(409, "insufficient_tokens", "Your wallet no longer holds all the tokens this position bought.");
+    // One swap (or redeem) per token, however many of the positions sell it, checked against the
+    // wallet's balance.
+    const merged = mergeInventory(pieces.map((p) => p.inventory));
+    await Promise.all(merged.map(async ({ mint, amount, isYield }) => {
+      if ((await this.#tokenBalance(owner, mint, isYield)) < amount) throw new ApiError(409, "insufficient_tokens", "Your wallet no longer holds all the tokens this position bought.");
     }));
     t.add("inventory", Date.now() - inventoryStarted);
     // Every Jupiter call of the sale goes through the budget, in the build's lane.
@@ -1108,20 +1150,10 @@ export class ForkService {
     // Redeeming jlUSDC has no slippage: it's worth its shares at the vault's rate, read exactly
     // from Jupiter Lend (totalAssets / totalSupply), with Jupiter's token price as a fallback. Each
     // read is tried twice, then the last value known stands in (it only sizes the proceeds shown).
-    const redeems = pieces.flatMap((p) => p.inventory.filter((l) => l.isYield));
-    const redeemValue = async () => {
-      let usd = 0;
-      for (const { mint, amount } of redeems) {
-        const perShare = await this.#valuation.lendShareValue(mint, { retry: true });
-        if (perShare === null) return this.#valuation.tokensUsd(redeems.map((l) => [l.mint, l.amount]));
-        usd += (Number(amount) / 1e6) * perShare; // vault shares have USDC's 6 decimals
-      }
-      return usd;
-    };
+    const redeems = merged.filter((l) => l.isYield);
     const [shareValue, redeemLegs] = await t.time("redeems", () => Promise.all([
-      redeems.length ? redeemValue() : Promise.resolve(0),
-      Promise.all(pieces.map((p) => Promise.all(p.inventory.filter((l) => l.isYield).map(({ amount }) =>
-        jupiterLendRedeem({ ...access, user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey! }))))),
+      this.#redeemValue(redeems),
+      Promise.all(redeems.map(({ amount }) => jupiterLendRedeem({ ...access, user: owner, payer, shares: amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey! }))),
     ]));
     if (shareValue == null) throw new ApiError(422, "no_exit_route", "Couldn't price this position's yield shares.");
     // Phoenix legs: close each child's position, or the sale's share of its lots. After a whole
@@ -1131,7 +1163,7 @@ export class ForkService {
     // the cash-out withdraws it from there.
     const noPrice = () => new ApiError(422, "no_exit_route", "Phoenix has no price for one of this position's markets right now.");
     const phoenix = await t.time("phoenix", () => Promise.all(pieces.map(async (p) => {
-      if (!p.onPhoenix.length) return { closes: [] as VenueLeg[], usd: 0, notional: 0, cashOut: false };
+      if (!p.onPhoenix.length) return { closes: [] as PhoenixClose[], usd: 0, notional: 0, cashOut: false };
       if (!p.sale.full) {
         const part = await this.#phoenix!.reduceLegs(p.position, owner, names, p.bps);
         if (part === null) throw noPrice();
@@ -1144,29 +1176,33 @@ export class ForkService {
     const closes = phoenix.reduce((n, x) => n + x.closes.length, 0);
     const escrowUsd = pieces.reduce((n, p) => n + p.escrowUsd, 0);
     const last = pieces[pieces.length - 1];
-    const quoteExit = async (maxAccounts: number) => {
-      const swaps = await t.time("quotes", () => Promise.all(pieces.map((p) => Promise.all(p.inventory.filter((l) => !l.isYield).map(async ({ mint, amount }) => {
-        const { quote } = await jupiter.quoteExactIn(mint, usdc, amount, { ...this.#router.route, maxAccounts });
-        if (!quote || quote.inputMint !== mint || quote.outputMint !== usdc || quote.inAmount !== amount.toString()) throw new ApiError(422, "no_exit_route", "No route to sell every token in this position.");
-        return { quote, venue: await jupiterBuy({ ...access, quote, user: owner, payer, label: `Sell ${tokens[mint].symbol}` }) };
-      })))));
+    const records = pieces.map((p) => ({ position: p.position.toBase58(), ix: serializeIx(p.ix), cu: recordCu(p.sale.full) }));
+    const quoteExit = async (maxAccounts: number, fresh: boolean) => {
+      // Each token's swap back to USDC: repriced from a kept sell route, or quoted afresh (api/routing.ts).
+      const swaps = await t.time("quotes", () => this.#router.sellSwaps(
+        merged.filter((l) => !l.isYield).map(({ mint, amount }) => ({ mint, amount, label: `Sell ${tokens[mint].symbol}` })),
+        owner, payer, { lane: use.lane, use, maxAccounts, fresh },
+      ));
       t.quotedAt ??= Date.now();
-      // Each target's legs, then its sale record; the last target's record is the receipt.
-      const venues: VenueLeg[] = pieces.flatMap((p, i) => [
-        ...phoenix[i].closes,
-        ...swaps[i].map((q) => q.venue),
-        ...redeemLegs[i],
-        ...(p === last ? [] : [{ label: p.sale.full ? "Record sale" : "Record partial sale", instructions: [p.ix], lookupTables: [], marketAccounts: [] }]),
-      ]);
-      const sales = pieces.map((p) => ({ address: p.position, seq: p.seq, full: p.sale.full, horizonEnd: take.horizonEnd.toNumber(), ...(p.exit ? { exit: p.exit } : {}) }));
-      // A sale with Phoenix closes, or of several positions, may take several transactions (each
-      // order is ~640 bytes); the last sale is recorded in the last one.
+      // Phoenix closes, swaps and redeems first, then each position's record; the last record is
+      // the receipt. When it takes several transactions the records ride in the last one(s).
+      const legs: { venue: VenueLeg; step: SaleStep | null }[] = [
+        ...pieces.flatMap((p, i) => phoenix[i].closes.map((c) => ({ venue: c as VenueLeg, step: { kind: "phoenix" as const, position: p.position.toBase58(), leg: c.leg } }))),
+        ...swaps.map((s) => ({ venue: s.venue as VenueLeg, step: { kind: "sell" as const, mint: s.mint, amount: s.amount.toString() } })),
+        ...redeems.map((r, i) => ({ venue: redeemLegs[i] as VenueLeg, step: { kind: "redeem" as const, mint: r.mint, amount: r.amount.toString() } })),
+        ...pieces.filter((p) => p !== last).map((p) => ({ venue: recordLeg(p.ix, p.sale.full), step: { kind: "record" as const, position: p.position.toBase58() } })),
+      ];
+      const sales = pieces.map((p) => ({ address: p.position, seq: p.seq, full: p.sale.full, bps: p.bps, horizonEnd: take.horizonEnd.toNumber(), ...(p.exit ? { exit: p.exit } : {}) }));
       const built = await this.#compose(
-        venues, last.ix, last.sale.full ? THESIS_COMPUTE_UNITS.exitPosition : THESIS_COMPUTE_UNITS.sellPart, owner, "exit",
+        legs.map((l) => l.venue), last.ix, recordCu(last.sale.full), owner, "exit",
         { take: takeKey, address: last.position, ...(last.exit ? { exit: last.exit } : {}), sales },
-        false, closes > 0 || pieces.length > 1, { timings: t, quotedAt: t.quotedAt, prebuilt: o.prebuild },
+        false, closes > 0,
+        {
+          timings: t, quotedAt: t.quotedAt, prebuilt: o.prebuild,
+          sale: { takeId: ctx.takeId, steps: legs.map((l) => l.step), receipt: { kind: "record", position: last.position.toBase58() }, records },
+        },
       );
-      const swapped = (k: "outAmount" | "otherAmountThreshold") => Number(swaps.flat().reduce((n, q) => n + BigInt(q.quote[k]), 0n)) / USD;
+      const swapped = (k: "outAmount" | "otherAmountThreshold") => Number(swaps.reduce((n, s) => n + BigInt(s.quote[k]), 0n)) / USD;
       // The sale pays its share of the escrow back, in the same transaction. Phoenix legs close at
       // most 1% from the mid (DEFAULT_SLIPPAGE).
       const phx = phoenix.reduce((n, x) => ({ expected: n.expected + x.usd, minimum: n.minimum + x.usd - 0.01 * x.notional }), { expected: 0, minimum: 0 });
@@ -1185,14 +1221,162 @@ export class ForkService {
       };
     };
     try {
-      return await quoteExit(this.#router.route.maxAccounts);
+      return await quoteExit(this.#router.route.maxAccounts, false);
     } catch (error) {
-      if (!(error instanceof ApiError) || error.code !== "exit_too_large") throw error;
-      // Try simpler Jupiter routes before giving up on an atomic exit.
-      return await quoteExit(20);
+      if (!tooBig(error)) throw error;
+      // A swap too big for a transaction on its own: simpler Jupiter routes, quoted afresh.
+      return await quoteExit(20, true).catch((e: unknown) => {
+        throw tooBig(e) ? new ApiError(422, "exit_too_large", "A swap in this sale doesn't fit in a transaction.") : e;
+      });
     } finally {
       noteUse(t, use);
     }
+  }
+
+  /** What `owner` holds of `mint` (vault shares when `isYield`), 0 without an account. */
+  async #tokenBalance(owner: PublicKey, mint: string, isYield: boolean): Promise<bigint> {
+    const program = isYield ? "spl" : this.#o.bank().tokens[mint]?.program;
+    if (!program || program === "unknown") throw new ApiError(422, "inventory_unavailable", "The token program for this position is unknown.");
+    const ata = getAssociatedTokenAddressSync(new PublicKey(mint), owner, false, program === "token-2022" ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID);
+    return this.#o.connection.getTokenAccountBalance(ata, "confirmed").then((r) => BigInt(r.value.amount)).catch(() => 0n);
+  }
+
+  /** What redeeming these vault shares brings in (USD), null when it can't be priced. */
+  async #redeemValue(redeems: { mint: string; amount: bigint }[]): Promise<number | null> {
+    let usd = 0;
+    for (const { mint, amount } of redeems) {
+      const perShare = await this.#valuation.lendShareValue(mint, { retry: true });
+      if (perShare === null) return this.#valuation.tokensUsd(redeems.map((l) => [l.mint, l.amount]));
+      usd += (Number(amount) / 1e6) * perShare; // vault shares have USDC's 6 decimals
+    }
+    return usd;
+  }
+
+  /** The owner's stopped sale (api/sales.ts) that sells any of `positions`, with its key; drops ones past their time. */
+  #stoppedSale(owner: string, positions: string[]): [string, StoppedSale] | null {
+    const all = this.#state.stoppedSales ?? {};
+    const now = Date.now();
+    for (const [key, s] of Object.entries(all)) {
+      if (s.at <= now - STOPPED_SALE_TTL_MS) {
+        delete all[key];
+        this.#save();
+        continue;
+      }
+      if (s.owner === owner && s.sales.some((x) => positions.includes(x.address))) return [key, s];
+    }
+    return null;
+  }
+
+  /**
+   * Finishes a sale that stopped partway (api/sales.ts): what its transactions that didn't land
+   * carried (Phoenix closes, swaps and redeems at the same sizes, at most what the wallet still
+   * holds), then the records still needed (the positions on-chain say which), in one build. It
+   * answers what the sale first answered, with `finishing: true`. 409 `sale_pending` while one of
+   * its transactions may still land; 409 `sale_complete` when every record landed after all.
+   */
+  async #finishSale(key: string, rec: StoppedSale, t: Timings, o: BuildOpts) {
+    const owner = new PublicKey(rec.owner);
+    const take = new PublicKey(rec.take);
+    for (const x of rec.sales) if (this.#pendingExits.has(x.address)) throw new ApiError(409, "already_exited", "This position is being sold.");
+    const conn = this.#o.connection;
+    const [height, statuses, accounts, takeAccount] = await t.time("position", () => Promise.all([
+      conn.getBlockHeight("confirmed"),
+      conn.getSignatureStatuses(rec.txs.map((x) => x.signature), { searchTransactionHistory: true }).then((r) => r.value),
+      this.#program.account.position.fetchMultiple(rec.sales.map((x) => new PublicKey(x.address)), "confirmed"),
+      this.#program.account.take.fetchNullable(take, "confirmed"),
+    ]));
+    const fates: TxFate[] = rec.txs.map((x, i) => {
+      const s = statuses[i];
+      if (s?.confirmationStatus === "confirmed" || s?.confirmationStatus === "finalized") return s.err ? "failed" : "landed";
+      return s || height <= x.lastValid ? "pending" : "failed";
+    });
+    const left = saleLeft(rec.txs, fates);
+    if (!left) throw new ApiError(409, "sale_pending", "This sale is still going through. Try again in a moment.");
+    // A record is still needed while its position is open and, for a part, still at its seq.
+    const needed = rec.sales.filter((x, i) => {
+      const a = accounts[i];
+      return a && !a.exited && (x.full || a.parts === x.seq);
+    });
+    const done = rec.sales.filter((x) => !needed.includes(x));
+    // Whole sales whose record landed: noted now (their positions are exited, or settled and closed).
+    this.#noteSold(take, done.filter((x) => x.exit && accounts[rec.sales.indexOf(x)]?.exited !== false).map((x) => ({ address: x.address, exit: x.exit! })));
+    if (!needed.length) {
+      delete this.#state.stoppedSales?.[key];
+      this.#save();
+      const leftover = left.sells.size + left.redeems.size + left.phoenix.length > 0;
+      throw new ApiError(409, "sale_complete", leftover
+        ? "This sale went through after all. Some of the tokens it sold didn't swap back to cash and are still in your wallet."
+        : "This sale went through after all.");
+    }
+    if (!takeAccount || takeAccount.horizonEnd.toNumber() <= Date.now() / 1000) throw new ApiError(409, "take_closed", TAKE_ENDED);
+    const payer = this.#o.appPayer.publicKey;
+    const tokens = this.#o.bank().tokens;
+    const atMost = async (mint: string, amount: bigint, isYield: boolean) => {
+      const held = await this.#tokenBalance(owner, mint, isYield).catch(() => 0n);
+      return held < amount ? held : amount;
+    };
+    const [sells, redeems] = await Promise.all([
+      Promise.all([...left.sells].map(async ([mint, amount]) => ({ mint, amount: await atMost(mint, amount, false) }))),
+      Promise.all([...left.redeems].map(async ([mint, amount]) => ({ mint, amount: await atMost(mint, amount, true) }))),
+    ]);
+    const use = newUse(laneOf(o.prebuild));
+    try {
+      const jupiter = this.#router.jupiter(use.lane, use);
+      const redeemLegs = await Promise.all(redeems.filter((r) => r.amount > 0n).map(async (r) => ({
+        r,
+        venue: await jupiterLendRedeem({ fetchFn: jupiter.fetchFn, max429WaitMs: jupiter.max429WaitMs, user: owner, payer, shares: r.amount, label: "Withdraw jlUSDC", apiKey: this.#o.jupiterApiKey! }),
+      })));
+      // Phoenix legs whose close didn't land, rebuilt for positions whose record is still needed.
+      const names = new Map(((await this.#appTake(rec.takeId).catch(() => null))?.legs ?? []).map((l, i) => [i, l.name] as const));
+      const closes = (await Promise.all(needed.map(async (x) => {
+        const legs = new Set(left.phoenix.filter((p) => p.position === x.address).map((p) => p.leg));
+        if (!legs.size || !this.#phoenix) return [];
+        const position = new PublicKey(x.address);
+        const built = x.full ? await this.#phoenix.closeLegs(position, owner, names) : (await this.#phoenix.reduceLegs(position, owner, names, x.bps ?? FULL_BPS))?.legs;
+        if (!built) throw new ApiError(422, "no_exit_route", "Phoenix has no price for one of this position's markets right now.");
+        return built.filter((c) => legs.has(c.leg)).map((c) => ({ venue: c as VenueLeg, step: { kind: "phoenix" as const, position: x.address, leg: c.leg } }));
+      }))).flat();
+      const swaps = await t.time("quotes", () => this.#router.sellSwaps(
+        sells.filter((s) => s.amount > 0n).map((s) => ({ ...s, label: `Sell ${tokens[s.mint]?.symbol ?? s.mint.slice(0, 4)}` })),
+        owner, payer, { lane: use.lane, use },
+      ));
+      t.quotedAt ??= Date.now();
+      const recordOf = new Map(rec.records.map((r) => [r.position, r]));
+      const last = needed[needed.length - 1];
+      const legs: { venue: VenueLeg; step: SaleStep | null }[] = [
+        ...closes,
+        ...swaps.map((s) => ({ venue: s.venue as VenueLeg, step: { kind: "sell" as const, mint: s.mint, amount: s.amount.toString() } })),
+        ...redeemLegs.map(({ r, venue }) => ({ venue: venue as VenueLeg, step: { kind: "redeem" as const, mint: r.mint, amount: r.amount.toString() } })),
+        ...needed.slice(0, -1).map((x) => ({ venue: recordLeg(deserializeIx(recordOf.get(x.address)!.ix), x.full), step: { kind: "record" as const, position: x.address } })),
+      ];
+      const sales = needed.map((x) => ({ ...x, address: new PublicKey(x.address) }));
+      const built = await this.#compose(
+        legs.map((l) => l.venue), deserializeIx(recordOf.get(last.address)!.ix), recordOf.get(last.address)!.cu, owner, "exit",
+        { take, address: new PublicKey(last.address), ...(last.exit ? { exit: last.exit } : {}), sales },
+        false, closes.length > 0,
+        {
+          timings: t, quotedAt: t.quotedAt, prebuilt: o.prebuild,
+          sale: { takeId: rec.takeId, steps: legs.map((l) => l.step), receipt: { kind: "record", position: last.address }, records: rec.records, finish: key },
+        },
+      );
+      this.#log(`finishing a stopped sale of ${rec.owner.slice(0, 6)}… (${needed.length} record(s), ${swaps.length} swap(s), ${redeemLegs.length} redeem(s), ${closes.length} Phoenix close(s))`);
+      return { ...(rec.summary as SaleSummary), ...built, finishing: true as const };
+    } finally {
+      noteUse(t, use);
+    }
+  }
+
+  /** Notes sales that landed whole, so the receipt still shows them after their positions settle and close. */
+  #noteSold(take: PublicKey, sold: { address: PublicKey | string; exit: ExitReceipt }[]) {
+    if (!sold.length) return;
+    const byTake = ((this.#state.exits ??= {})[take.toBase58()] ??= {});
+    for (const x of sold) {
+      const address = x.address.toString();
+      byTake[address] = { ...x.exit, exitedAt: Math.floor(Date.now() / 1000) };
+      // A position sold whole is no longer held (the next read of the take confirms it).
+      this.#positions.get(take.toBase58())?.owners.delete(address);
+    }
+    this.#save();
   }
 
   /** Sales this service submitted whose positions have since settled and closed. */
@@ -1493,7 +1677,8 @@ export class ForkService {
    * it as incomplete and answers 422 `trade_incomplete`, so the client retries or sweeps.
    * Otherwise the error stands.
    */
-  #stopped(build: Build, e: unknown): unknown {
+  #stopped(build: Build, e: unknown, txs: VersionedTransaction[] = []): unknown {
+    if (build.kind === "exit") return this.#saleStopped(build, e, txs);
     const trade = build.trade;
     if (!trade || (build.kind !== "back" && build.kind !== "publish")) return e;
     const landed = e instanceof SendFailed ? e.landed : [];
@@ -1531,6 +1716,35 @@ export class ForkService {
     this.#wallets.forgetActivity(build.owner);
     this.#log(`split trade of ${build.owner.slice(0, 6)}… stopped after ${record.signatures.length} landed transaction(s) (position ${position}, next: ${record.next}): ${errorText(e)}`);
     return incompleteError(position, record);
+  }
+
+  /**
+   * A sale's send failed. When it went out over several transactions (or it was finishing a stopped
+   * sale) and something was sent, keeps it as a stopped sale (api/sales.ts): what each transaction
+   * carried, so selling again finishes it, and answers 422 `sale_incomplete`. Otherwise the error
+   * stands: nothing landed, and selling again builds afresh.
+   */
+  #saleStopped(build: Build, e: unknown, txs: VersionedTransaction[]): unknown {
+    const sale = build.sale;
+    if (!sale || !(e instanceof SendFailed) || e.nothingSent || (txs.length < 2 && !sale.finish)) return e;
+    const key = sale.finish ?? build.position.address.toBase58();
+    const prev = this.#state.stoppedSales?.[key];
+    const rec: StoppedSale = {
+      owner: build.owner,
+      take: build.position.take.toBase58(),
+      takeId: sale.takeId,
+      // A finish keeps the sale as first built: its positions, records and answer.
+      sales: prev?.sales ?? salesOf(build).map((x) => ({ address: x.address.toBase58(), seq: x.seq, full: x.full, horizonEnd: x.horizonEnd, ...(x.bps ? { bps: x.bps } : {}), ...(x.exit ? { exit: x.exit } : {}) })),
+      records: prev?.records ?? sale.records,
+      txs: txs.map((tx, i) => ({ signature: base58(tx.signatures[0]), lastValid: this.#blockhashes.get(tx.message.recentBlockhash) ?? 0, steps: sale.txSteps[i] ?? [] })),
+      summary: prev?.summary ?? Object.fromEntries(SALE_SUMMARY.flatMap((k) => (build.response && k in build.response ? [[k, build.response[k]]] : []))),
+      at: Date.now(),
+    };
+    (this.#state.stoppedSales ??= {})[key] = rec;
+    this.#store.saveNow();
+    this.#wallets.forgetActivity(build.owner);
+    this.#log(`sale of ${build.owner.slice(0, 6)}… stopped after ${e.landed.length} of ${txs.length} transaction(s) landed (${key}): ${errorText(e)}`);
+    return saleIncompleteError(key, rec);
   }
 
   /** The wallet's incomplete trades (newest first), for the app to offer a retry or a sweep. */
@@ -2043,22 +2257,20 @@ export class ForkService {
       } catch (e) {
         // The cleanup rides after the trade, so it wasn't sent: look again on the next build.
         if (cleanup.length) this.#split.suspect(build.owner);
-        throw this.#stopped(build, e);
+        throw this.#stopped(build, e, txs);
       }
       this.#wallets.forgetActivity(build.owner);
       const bookkeeping = Date.now();
       // A retry's position opened over the transactions that landed first, too.
       const confirmed = [...(build.retry?.signatures ?? []), ...sent];
       this.#split.delete(positionKey);
-      const sold = build.kind === "exit" ? salesOf(build).filter((x) => x.exit) : [];
-      if (sold.length) {
-        const byTake = ((this.#state.exits ??= {})[build.position.take.toBase58()] ??= {});
-        for (const x of sold) byTake[x.address.toBase58()] = { ...x.exit!, exitedAt: Math.floor(Date.now() / 1000) };
+      // A stopped sale this finished is over.
+      if (build.sale?.finish && this.#state.stoppedSales?.[build.sale.finish]) {
+        delete this.#state.stoppedSales[build.sale.finish];
         this.#save();
       }
       this.#notePosition(build.position.take, build.position.address, build.owner, build.kind === "publish");
-      // A position sold whole is no longer held (the next read of the take confirms it).
-      for (const x of sold) this.#positions.get(build.position.take.toBase58())?.owners.delete(x.address.toBase58());
+      if (build.kind === "exit") this.#noteSold(build.position.take, salesOf(build).flatMap((x) => (x.exit ? [{ address: x.address, exit: x.exit }] : [])));
       // A back or fade paid the take's author a creator share: their fee summary is out of date.
       if (build.kind === "back") {
         const takeAddress = build.position.take.toBase58();
@@ -2087,6 +2299,8 @@ export class ForkService {
     }
     if (cleanup.length) t.add("cleanup", Date.now() - cleanupStarted);
     void this.#history.snapshot(build.owner).catch(() => {});
+    // The tokens it bought get sell routes now, when the budget has room, so their first sale is quick.
+    if (build.seeds?.length) void this.#router.seedSells(build.seeds, new PublicKey(build.owner));
     // The take goes live when the backend sees its takeCreated: deliver it now rather than
     // waiting for the relay, so the author's "posting…" clears as soon as this returns.
     if (build.position.publishTakeId) await t.time("relay", () => this.#relay(signatures));
@@ -2157,17 +2371,17 @@ export class ForkService {
     position: Build["position"],
     /** A create_take or back: wrap it in proof-of-trade checks (sales need none). */
     proof = false,
-    /** A sale that may take several transactions (Phoenix closes first, the exit last). */
-    splitExit = false,
+    /** Phoenix legs ride in it (closes of a sale): its market accounts are all refreshed before the send. */
+    phoenixLegs = false,
     /**
      * A create_take, back or fade (`trade`); the retry of an incomplete one (`retry`: its ticket is
      * open). `quotedAt`: when its quotes were made; `prebuilt`: built ahead of the tap.
      */
-    extra: { trade?: TradeContext; retry?: IncompleteTrade; quotedAt?: number; prebuilt?: boolean; timings?: Timings } = {},
+    extra: { trade?: TradeContext; retry?: IncompleteTrade; quotedAt?: number; prebuilt?: boolean; timings?: Timings; sale?: SaleSteps } = {},
   ) {
     const t = extra.timings ?? new Timings();
     const market = venue.flatMap((v) => v.marketAccounts);
-    const phoenix = kind === "phoenix" || splitExit || venue.some((v) => (v as Partial<TradeLeg>).how === "phoenix");
+    const phoenix = kind === "phoenix" || phoenixLegs || venue.some((v) => (v as Partial<TradeLeg>).how === "phoenix");
     // Fresh pools and books now, at quote time (the simulation below reads them too), so the
     // submit needn't wait for them; only accounts not refreshed in the last MARKET_FRESH_MS.
     if (market.length) await t.time("markets", () => this.#o.fork.refreshMarkets(market, { freshMs: MARKET_FRESH_MS }));
@@ -2185,7 +2399,7 @@ export class ForkService {
     });
     t.add("compose", Date.now() - composeStarted);
     const txLegs = txs.map((c) => c.legs.map((j) => (venue[j] as Partial<TradeLeg>).output?.leg ?? -1));
-    if (kind === "exit" && txs.length !== 1 && !splitExit) throw new ApiError(422, "exit_too_large", "This position cannot be sold in one transaction.");
+    // A sale too big for one transaction is a sequence too (api/sales.ts): its records ride last.
     // A trade the owner signs anyway also cancels their abandoned tickets. Not a sale: the app
     // expects exactly one transaction there. Each look is a getProgramAccounts, so it runs only
     // when the wallet is known to have one, or every TICKET_SCAN_MS (api/split.ts).
@@ -2217,6 +2431,13 @@ export class ForkService {
       quotedAt: extra.quotedAt,
       prebuilt: Boolean(extra.prebuilt),
       marketFreshMs: phoenix ? 0 : SUBMIT_MARKET_FRESH_MS,
+      seeds: venue.flatMap((v) => ((v as Partial<TradeLeg>).how === "swap" ? [{ mint: (v as JupiterBuy).mint, amount: (v as JupiterBuy).minOutAmount }] : [])),
+      sale: extra.sale && {
+        takeId: extra.sale.takeId,
+        txSteps: stepsByTx(txs.map((c) => c.legs), extra.sale.steps, extra.sale.receipt),
+        records: extra.sale.records,
+        finish: extra.sale.finish,
+      },
     });
     this.#expireLater(buildId);
     return {

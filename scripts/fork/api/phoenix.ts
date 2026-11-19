@@ -26,6 +26,8 @@ import type { StateStore } from "./store.ts";
 
 /** One Phoenix leg of one position: the take leg, its child subaccount and market. */
 export type PhoenixLeg = { leg: number; sub: number; symbol: string };
+/** A sale's close (or reduction) of one Phoenix leg, tagged with its take leg. */
+export type PhoenixClose = VenueLeg & { leg: number };
 /**
  * Position → its Phoenix legs. `draft`: recorded for a build not submitted (yet): its children
  * may go to the owner's next build instead (a rebuild as the amount changes), and `commit` checks
@@ -323,16 +325,16 @@ export class PhoenixDesk {
   }
 
   /** Market orders closing every open Phoenix position of a position's legs (a sale of all of it). */
-  async closeLegs(position: PublicKey, owner: PublicKey, names: Map<number, string>): Promise<VenueLeg[]> {
+  async closeLegs(position: PublicKey, owner: PublicKey, names: Map<number, string>): Promise<PhoenixClose[]> {
     const legs = this.legsOf(position);
     const traders = await this.#traders(owner, legs.map((l) => l.sub));
-    const out: VenueLeg[] = [];
+    const out: PhoenixClose[] = [];
     for (const [i, l] of legs.entries()) {
       const p = traders[i]?.positions[0];
       if (!p) continue; // already closed (an earlier sale attempt, or liquidated)
       const mid = await this.venue.mid(l.symbol);
       if (!mid) throw new ApiError(422, "no_exit_route", `Phoenix has no price for ${l.symbol} right now.`);
-      out.push(await this.venue.closeLeg({ owner, sub: l.sub, symbol: l.symbol, baseLots: p.baseLots, price: mid, label: names.get(l.leg) ?? l.symbol }));
+      out.push({ ...(await this.venue.closeLeg({ owner, sub: l.sub, symbol: l.symbol, baseLots: p.baseLots, price: mid, label: names.get(l.leg) ?? l.symbol })), leg: l.leg });
     }
     return out;
   }
@@ -348,10 +350,10 @@ export class PhoenixDesk {
    * (what the 1% slippage applies to), `released`: whether any margin moves (then the app should
    * cash out). Null when a market has no price now.
    */
-  async reduceLegs(position: PublicKey, owner: PublicKey, names: Map<number, string>, bps: number): Promise<{ legs: VenueLeg[]; usd: number; notional: number; released: boolean } | null> {
+  async reduceLegs(position: PublicKey, owner: PublicKey, names: Map<number, string>, bps: number): Promise<{ legs: PhoenixClose[]; usd: number; notional: number; released: boolean } | null> {
     const legs = this.legsOf(position);
     const traders = await this.#traders(owner, legs.map((l) => l.sub));
-    const out: VenueLeg[] = [];
+    const out: PhoenixClose[] = [];
     let usd = 0;
     let notional = 0;
     let released = false;
@@ -377,7 +379,7 @@ export class PhoenixDesk {
         usd += freed.usd;
         released = true;
       }
-      out.push(close);
+      out.push({ ...close, leg: l.leg });
     }
     return { legs: out, usd, notional, released };
   }

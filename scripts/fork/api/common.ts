@@ -74,6 +74,8 @@ export type State = {
   phoenix?: PhoenixPositions;
   /** Split trades that stopped partway, by position (api/split.ts). */
   incomplete?: Record<string, IncompleteTrade>;
+  /** Sales over several transactions that stopped partway, by the position their last record sells (api/sales.ts). */
+  stoppedSales?: Record<string, StoppedSale>;
   /** Recent submits by build id, so GET /submissions and repeats still answer after a restart. */
   submissions?: Record<string, SavedSubmission>;
 };
@@ -130,6 +132,33 @@ export type IncompleteTrade = {
   /** Publishing an app take: its id. */
   publishTakeId?: string;
   /** When it stopped (ms). */
+  at: number;
+};
+
+/** One step of a sale build, as a stopped sale remembers what its transactions carried (api/sales.ts). */
+export type SaleStep =
+  | { kind: "phoenix"; position: string; leg: number }
+  | { kind: "sell"; mint: string; amount: string }
+  | { kind: "redeem"; mint: string; amount: string }
+  | { kind: "record"; position: string };
+
+/**
+ * A sale over several transactions (swaps first, the positions' records last) that stopped after
+ * some of them went out. Selling any of its positions again finishes it instead of starting a new
+ * sale: what didn't land, at the same sizes (api/sales.ts).
+ */
+export type StoppedSale = {
+  owner: string;
+  take: string;
+  takeId: string;
+  /** Each position it sells: its partial sale's seq (or all of it), with the receipt of a whole sale. */
+  sales: { address: string; seq: number; full: boolean; horizonEnd: number; bps?: number; exit?: ExitReceipt }[];
+  /** Each position's record instruction (exit_position or sell_part) as built, and its compute. */
+  records: { position: string; ix: IncompleteTrade["receipt"]; cu: number }[];
+  /** Every transaction of its last attempt: its id, the last block it can land at, and what it carried. */
+  txs: { signature: string; lastValid: number; steps: SaleStep[] }[];
+  /** What the sale's build answered (bps, sizes, proceeds), answered again by the build that finishes it. */
+  summary: Record<string, unknown>;
   at: number;
 };
 
