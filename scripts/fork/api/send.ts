@@ -6,7 +6,16 @@
 // the caller hears "accepted" when all were, and then they're confirmed together. A split trade
 // whose later transaction is refused still answers trade_incomplete: the ones accepted first are
 // confirmed before the failure is reported, with the ones that landed (SendFailed).
+//
+// A transaction refused by its preflight for slippage (Jupiter's SlippageToleranceExceeded) is sent
+// once more, the same signed bytes, after the build's market accounts are copied from mainnet again
+// (`resendOnce`): the fork copies pools lazily, account by account, so a pool can be an
+// inconsistent snapshot of a mainnet that moved between reads, or one the trade's own earlier
+// transaction just moved. That needs no new signature. Only the wallet can sign a rebuilt swap, so
+// when the same bytes are refused again the client rebuilds: a split trade answers
+// trade_incomplete (retry: true), and one that sent nothing carries `requote: true`.
 import type { Connection, VersionedTransaction } from "@solana/web3.js";
+import { JUPITER_V6_PROGRAM } from "@thesis/venues/jupiter";
 import { ApiError, base58, errorText, type Timings } from "./common.ts";
 
 /**
@@ -27,33 +36,69 @@ export class SendFailed extends ApiError {
   readonly landed: string[];
   /** The failed transaction's fate is unknown (it may still land): never counted as not landed. */
   readonly unknown: boolean;
-  /** The first transaction was refused by its preflight: nothing went out (`resendIfStale` may send it again). */
+  /** The first transaction was refused by its preflight: nothing went out (`resendOnce` may send it again). */
   readonly nothingSent: boolean;
-  constructor(e: ApiError, landed: string[], unknown = false, nothingSent = false) {
+  /**
+   * The transaction that failed was refused by its preflight after every one before it (`landed`)
+   * landed: it and the ones after it never went out, so they can be sent again as they are.
+   */
+  readonly refused: boolean;
+  constructor(e: ApiError, landed: string[], unknown = false, nothingSent = false, refused = nothingSent) {
     super(e.status, e.code, e.message);
     this.headers = e.headers;
     this.body = e.body;
     this.landed = landed;
     this.unknown = unknown;
     this.nothingSent = nothingSent;
+    this.refused = refused;
   }
 }
 
 /**
- * Sends with `send`. If its first transaction's preflight refused it (so nothing went out) while
- * some of the build's market accounts were left as they were (`stale`: the submit skipped
- * accounts copied from mainnet less than a minute ago), resets them all (`reset`) and sends the
- * same signed bytes once more: a pool that moved on mainnet since its copy is the usual cause.
- * Any other failure, or a second refusal, is thrown as it was.
+ * A refusal for slippage: Jupiter's route filled under its minimum out (SlippageToleranceExceeded,
+ * custom error 0x1771). A 0x1771 that another program names (any Anchor program's error 6001) isn't.
  */
-export async function resendIfStale<T>(send: () => Promise<T>, o: { stale: boolean; reset: () => Promise<unknown>; log?: (m: string) => void }): Promise<T> {
+export function slippageRefusal(e: unknown): boolean {
+  const text = e instanceof Error ? e.message : String(e);
+  if (/SlippageToleranceExceeded|slippage tolerance exceeded/i.test(text)) return true;
+  const named = /Program (\w+) failed: custom program error: 0x1771\b/.exec(text);
+  if (named) return named[1] === JUPITER_V6_PROGRAM;
+  return /custom program error: 0x1771\b/.test(text);
+}
+
+/**
+ * Sends `txs` with `send` (which throws SendFailed), and once more when it makes sense: the same
+ * signed bytes, after resetting the build's market accounts from mainnet (`reset`), when
+ * - the first transaction's preflight refused it (nothing went out) while some market accounts
+ *   were left as they were (`stale`: the submit skipped accounts copied from mainnet less than a
+ *   minute ago): a pool that moved on mainnet since its copy is the usual cause; or
+ * - a transaction's preflight refused it for slippage (`slippageRefusal`), the first one or a
+ *   later one after the ones before it landed: it and the ones after it are sent again.
+ * Any other failure, or a second refusal, is thrown, with every transaction that landed, in order.
+ */
+export async function resendOnce(
+  send: (txs: VersionedTransaction[]) => Promise<string[]>,
+  txs: VersionedTransaction[],
+  o: { stale: boolean; reset: () => Promise<unknown>; log?: (m: string) => void },
+): Promise<string[]> {
+  let first: SendFailed;
   try {
-    return await send();
+    return await send(txs);
   } catch (e) {
-    if (!o.stale || !(e instanceof SendFailed) || !e.nothingSent) throw e;
-    o.log?.(`preflight refused with markets copied under a minute ago (${e.message.slice(0, 160)}); resetting them and sending again`);
-    await o.reset();
-    return send();
+    if (!(e instanceof SendFailed) || !e.refused || !(slippageRefusal(e) || (o.stale && e.nothingSent))) throw e;
+    first = e;
+  }
+  const n = first.landed.length;
+  o.log?.(slippageRefusal(first)
+    ? `preflight refused transaction ${n + 1} of ${txs.length} for slippage (${first.message.slice(0, 160)}); resetting the markets and sending it again`
+    : `preflight refused with markets copied under a minute ago (${first.message.slice(0, 160)}); resetting them and sending again`);
+  await o.reset();
+  try {
+    return [...first.landed, ...(await send(txs.slice(n)))];
+  } catch (e) {
+    if (!(e instanceof SendFailed) || !n) throw e;
+    // What landed before the first refusal counts too.
+    throw new SendFailed(e, [...first.landed, ...e.landed], e.unknown, false, e.refused);
   }
 }
 
@@ -109,6 +154,8 @@ export async function sendBackToBack(
   let unknown = false;
   /** The first one's preflight refused it: nothing went out. */
   let nothingSent = false;
+  /** What stopped it was a preflight refusal (that one never went out). */
+  let preflight = false;
   for (const [i, tx] of txs.entries()) {
     const started = Date.now();
     const refused = await conn.sendTransaction(tx, { skipPreflight: false, preflightCommitment: "processed" }).then(
@@ -116,6 +163,7 @@ export async function sendBackToBack(
       async (e: unknown) => {
         if (refusedByPreflight(e)) {
           nothingSent = i === 0;
+          preflight = true;
           return new ApiError(502, "send_failed", errorText(e));
         }
         o.log?.(`sending ${sigs[i]} failed (${errorText(e)}); waiting to see if it landed`);
@@ -144,8 +192,9 @@ export async function sendBackToBack(
   if (!stop && failed === -1) return sigs;
   if (failed !== -1) {
     unknown ||= known[failed] === "unknown";
+    preflight = false;
     // The first one that didn't land is what stopped the trade.
     stop = new ApiError(502, "transaction_failed", `${sigs[failed]}: ${known[failed] === "unknown" ? "not confirmed yet" : "not confirmed"}`);
   }
-  throw new SendFailed(stop!, sigs.slice(0, failed === -1 ? sent : failed), unknown, nothingSent);
+  throw new SendFailed(stop!, sigs.slice(0, failed === -1 ? sent : failed), unknown, nothingSent, preflight);
 }

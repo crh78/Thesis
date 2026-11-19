@@ -42,7 +42,10 @@
 // holds up the build), and only when the template could be rewritten at all.
 // A repriced estimate that's wrong fails at preflight (the fill is below the slippage limit or a
 // pool needs other accounts), never mistrades; the retry rule above applies, so the wallet's next
-// build of that trade and stake quotes afresh and replaces the kept routes.
+// build of that trade and stake quotes afresh and replaces the kept routes. A swap the submit
+// still finds refused for slippage after resetting the markets (api/send.ts) has its underlying's
+// kept routes, and the shared and scalable routings holding it, dropped (`dropBuys`): the next
+// build of it by any wallet, the client's rebuild or a split trade's retry, quotes it afresh.
 //
 // Sales: routes back to USDC are kept the same way, per token (the token in, USDC out), for
 // FORK_API_ROUTE_TTL_MS (`sellSwaps`). A sale's swap of a token sold in that time by any wallet
@@ -153,8 +156,9 @@ export type Route = typeof ROUTE & { dexes?: string[] };
 /**
  * A venue leg tagged with the take leg it buys and the owner's account it fills (proof of trade),
  * and how it buys it (a split trade's sweep redeems Jupiter Lend shares instead of swapping them).
+ * `key`: a swap leg's underlying, whose reused routing `dropBuys` drops when its swap was refused.
  */
-export type TradeLeg = VenueLeg & { output: { leg: number; account: PublicKey }; how: "swap" | "lend" | "phoenix"; phoenix?: PhoenixLeg };
+export type TradeLeg = VenueLeg & { output: { leg: number; account: PublicKey }; how: "swap" | "lend" | "phoenix"; phoenix?: PhoenixLeg; key?: string };
 type Winner = NonNullable<Awaited<ReturnType<typeof bestIssuer>>["winner"]>;
 type Excluded = { index: number; name: string; reason: string };
 /** How a traded leg is bought: the winning issuer's quote, a Lend deposit, or Phoenix. */
@@ -960,6 +964,34 @@ export class Router {
     this.#o.log?.(`sell routes dropped for ${gone.map((m) => this.#o.bank().tokens[m]?.symbol ?? m).join(", ")}: ${why}`);
   }
 
+  /**
+   * Drops what a buy of underlyings `keys` would reuse (a trade's swap of them was refused for
+   * slippage: the reused estimate may be what failed): their kept routes, and the shared and
+   * scalable routings of every trade holding one of them. So the next build of each, the client's
+   * rebuild or a split trade's retry, quotes it afresh and keeps that route instead.
+   */
+  dropBuys(keys: string[], why: string) {
+    const drop = new Set(keys);
+    if (!drop.size) return;
+    const holds = (shape: string) => {
+      try {
+        return (JSON.parse(shape)[1] as unknown[][]).some((l) => drop.has(l[2] as string));
+      } catch {
+        return false;
+      }
+    };
+    let gone = 0;
+    for (const k of drop) if (this.#routes.delete(k)) gone++;
+    // A plan's key is [stake, shape]; a root's is the shape (see venueLegs).
+    for (const k of this.#plans.keys()) {
+      if (holds(JSON.parse(k)[1]) && this.#plans.delete(k)) gone++;
+    }
+    for (const k of this.#roots.keys()) {
+      if (holds(k) && this.#roots.delete(k)) gone++;
+    }
+    if (gone) this.#o.log?.(`buy routes dropped for ${[...drop].join(", ")}: ${why}`);
+  }
+
   /** Tokens whose sell route was seeded lately, or found to have none (see seedSells): when, so each is quoted at most once per route lifetime. */
   #seeded = new Map<string, number>();
   /** Tokens being seeded now, or waiting for a seed's retry. */
@@ -1137,7 +1169,8 @@ export class Router {
       : await this.#swap(l, w, user, payer, jupiter, use, shared);
     // Proof of trade: the receipt checks this account grew (the take leg it buys, by index).
     if (!leg.outputAccount) throw new ApiError(502, "routing_failed", `Jupiter's route for ${l.name} doesn't deliver to your wallet's token account.`);
-    return [{ ...leg, output: { leg: l.index, account: leg.outputAccount }, how: w === "lend" ? "lend" : "swap" }];
+    if (w === "lend") return [{ ...leg, output: { leg: l.index, account: leg.outputAccount }, how: "lend" }];
+    return [{ ...leg, output: { leg: l.index, account: leg.outputAccount }, how: "swap", key: l.key ?? undefined }];
   }
 
   /**
