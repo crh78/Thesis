@@ -20,7 +20,7 @@ The shared fork will be public once the product opens up. A reset (a fresh fork)
 - **No clock-moving suites without the maintainer's OK.** `fork:settler-e2e` jumps the clock days ahead (`surfnet_timeTravel`), after which swaps fail until the fork is reset; it refuses to start without `-- --move-clock`. Every other suite only adds throwaway wallets and test trades.
 - **Clean up the old fork's data after every reset**. Supabase keeps the old fork's rows, so pre-reset takes stay `live` with a Trade button that only gets `409 take_missing`. Once the fresh fork is up, with the maintainer's OK:
   1. **Back up** the rows you're about to delete.
-  2. **Delete** takes posted before the reset (with their legs, stats and comments), and the old fork's chain events, positions and notifications.
+  2. **Delete** takes posted before the reset (with their legs, stats and comments), and the old fork's chain events, positions (`chain_positions` and their partial sales, `chain_position_parts`) and notifications.
   3. **Check** the feeds show only takes posted since the reset, and every Trade button works.
 
   The cards reset did this first ([`docs/cards-reset.md`](../../docs/cards-reset.md)); reuse its backup and queries.

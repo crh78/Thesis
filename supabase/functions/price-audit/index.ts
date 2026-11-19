@@ -9,6 +9,7 @@
 // `canonical` must already be in canonical form (keys sorted at every level), so the stored jsonb
 // and the hashed text are the same document. Idempotent on hash. Reading is public (price_audit
 // and price_events() through PostgREST); nothing else writes the table.
+// A partial sale's document has moment "part" and partSeq (its seq), stored as part_seq.
 // Secrets: PRICE_AUDIT_TOKEN (+ platform SUPABASE_*).
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -51,6 +52,8 @@ type Entry = { hash?: unknown; canonical?: unknown; network?: unknown };
 type Row = {
   hash: string; network: string | null; program: string | null; take: string | null; position: string | null;
   moment: string | null; moment_at: number | null; canonical: string; doc: unknown;
+  /** Only on a partial sale's document, so other rows store fine before the column exists. */
+  part_seq?: number;
 };
 
 /** The row to store for one entry, or why it's refused. */
@@ -69,6 +72,9 @@ export async function checkEntry(e: Entry): Promise<{ ok: true; row: Row } | { o
   if (canonicalJson(doc) !== e.canonical) return { ok: false, reason: "canonical isn't in canonical form (sorted keys, no spaces)" };
   const str = (v: unknown) => (typeof v === "string" ? v : null);
   const moment = str(doc.moment);
+  const known = moment && ["entry", "exit", "sale", "part"].includes(moment) ? moment : null;
+  // A partial sale's prices name which of the position's partial sales they are.
+  const partSeq = known === "part" && Number.isInteger(doc.partSeq) && (doc.partSeq as number) >= 0 ? doc.partSeq as number : null;
   return {
     ok: true,
     row: {
@@ -77,10 +83,11 @@ export async function checkEntry(e: Entry): Promise<{ ok: true; row: Row } | { o
       program: str(doc.program),
       take: str(doc.take),
       position: str(doc.position),
-      moment: moment && ["entry", "exit", "sale"].includes(moment) ? moment : null,
+      moment: known,
       moment_at: typeof doc.momentAt === "number" ? doc.momentAt : null,
       canonical: e.canonical,
       doc,
+      ...(partSeq !== null ? { part_seq: partSeq } : {}),
     },
   };
 }
