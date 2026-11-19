@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { isDeleted, DELETED_NAME, pct, topicImage } from "@/lib/data";
 import LOGOS from "@/lib/logos.json";
+import { useAssetKeys } from "@/lib/assetKeys";
+import TakeLogo from "./TakeLogo";
 import type { FeedTake } from "./TakeRow";
 
 export type Asset = {
@@ -140,13 +142,19 @@ function MiniSpark({ values, up }: { values: number[]; up: boolean }) {
 
 const RISK: Record<string, string> = { low: "LOW", medium: "MED", high: "HIGH" };
 
-/** A compact take with its topic tile: Search and an asset's takes. */
+/** A compact take with its logo (the pie of its picks, else its topic tile): Search and an asset's takes. */
 export function TakeListRow({ take }: { take: FeedTake }) {
   const up = take.ret >= 0;
+  const legs = take.legs ?? [];
+  const keys = useAssetKeys(legs.map((l) => l.asset_id));
   return (
     <Link href={`/t/${take.id}`} className="tlrow">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img className="tile tile-sq" src={topicImage(take.topic)} alt="" />
+      {legs.length ? (
+        <TakeLogo size={50} legs={legs.map((l) => ({ key: (l.asset_id && keys[l.asset_id]) || null, name: l.name, kind: l.kind, weight: l.weight }))} />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className="tile tile-sq" src={topicImage(take.topic)} alt="" />
+      )}
       <span className="tlrow-main">
         <span className="tlrow-claim">{take.claim}</span>
         <span className="mono muted" style={{ fontSize: 11 }}>

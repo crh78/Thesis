@@ -1,14 +1,16 @@
 /* The called-it studio: a rail of themed cards, filter swatches, and the share row. */
 .page.studio { padding-bottom: 48px; overflow-x: hidden; }
 
+/* Spacers before the first card and after the last let either end reach the middle, so every
+   card (and its swatch) can be picked: half the rail less half a card, less the gap. */
 .studio-rail {
-  display: flex; gap: 14px; margin: 14px -16px 0; padding: 6px 7vw 18px;
+  display: flex; gap: 14px; margin: 14px -16px 0; padding: 6px 0 18px;
   overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; -webkit-overflow-scrolling: touch;
 }
 .studio-rail::-webkit-scrollbar { display: none; }
-.studio-slide { flex: 0 0 86%; max-width: 420px; scroll-snap-align: center; transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.35s; transform: scale(0.94); opacity: 0.55; }
+.studio-rail::before, .studio-rail::after { content: ""; flex: 0 0 max(calc(7% - 14px), calc(50% - 224px)); }
+.studio-slide { flex: 0 0 min(86%, 420px); scroll-snap-align: center; transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.35s; transform: scale(0.94); opacity: 0.55; }
 .studio-slide.on { transform: scale(1); opacity: 1; }
-@media (min-width: 560px) { .studio-rail { padding-left: calc(50% - 210px); padding-right: calc(50% - 210px); } .studio-slide { flex-basis: 420px; } }
 
 .studio-name { text-align: center; margin-top: 2px; color: var(--text); letter-spacing: 1.5px; }
 .studio-swatches { display: flex; justify-content: center; gap: 12px; margin: 12px 0 4px; }

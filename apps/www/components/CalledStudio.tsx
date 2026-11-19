@@ -33,42 +33,70 @@ const fmt = (x: number, final: string, done: boolean) => {
 export default function CalledStudio({ d, initial }: { d: CardData; initial: ThemeId }) {
   const [theme, setTheme] = useState<ThemeId>(initial);
   const rail = useRef<HTMLDivElement>(null);
+  const settleTimer = useRef<number | undefined>(undefined);
+  /** The swatch tapped, while the rail scrolls to it. */
+  const picking = useRef<number | null>(null);
   const n = useCountUp(d.ret);
   const shown = fmt(n, d.pct, Math.abs(n - d.ret) < 1e-6);
 
+  /** How far card `i`'s middle is from the rail's middle, in px (measured on screen, so the rail's
+   * own position and the cards' scaling don't skew it). */
+  function offCenter(i: number): number | null {
+    const r = rail.current;
+    const el = r?.children[i] as HTMLElement | undefined;
+    if (!r || !el) return null;
+    const rr = r.getBoundingClientRect(), er = el.getBoundingClientRect();
+    return er.left + er.width / 2 - (rr.left + rr.width / 2);
+  }
+
   // Start on the theme from the link.
   useEffect(() => {
-    const i = THEMES.findIndex((t) => t.id === initial);
-    const el = rail.current?.children[i] as HTMLElement | undefined;
-    if (el && rail.current) rail.current.scrollLeft = el.offsetLeft - (rail.current.clientWidth - el.clientWidth) / 2;
+    const d = offCenter(THEMES.findIndex((t) => t.id === initial));
+    if (d != null && rail.current) rail.current.scrollLeft += d;
   }, [initial]);
 
-  // Whichever card is centered is the theme; keep it in the URL so Share sends that one.
-  function onScroll() {
-    const r = rail.current;
-    if (!r) return;
-    const mid = r.scrollLeft + r.clientWidth / 2;
+  /** The card nearest the middle. */
+  function centered(): number {
     let best = 0;
     let dist = Infinity;
-    Array.from(r.children).forEach((c, i) => {
-      const el = c as HTMLElement;
-      const dd = Math.abs(el.offsetLeft + el.clientWidth / 2 - mid);
+    THEMES.forEach((_, i) => {
+      const dd = Math.abs(offCenter(i) ?? Infinity);
       if (dd < dist) { dist = dd; best = i; }
     });
-    const next = THEMES[best].id;
-    if (next !== theme) {
-      setTheme(next);
-      const url = new URL(window.location.href);
-      if (next === "glow") url.searchParams.delete("theme");
-      else url.searchParams.set("theme", next);
-      window.history.replaceState(null, "", url);
+    return best;
+  }
+
+  // Once the rail stops: the centered card is the theme, and the link follows so Share sends that
+  // one. Rewriting the URL mid-scroll cut a smooth scroll short (a tapped swatch snapped back).
+  function settle() {
+    picking.current = null;
+    const next = THEMES[centered()].id;
+    setTheme(next);
+    const url = new URL(window.location.href);
+    if (next === "glow") url.searchParams.delete("theme");
+    else url.searchParams.set("theme", next);
+    if (url.href !== window.location.href) window.history.replaceState(window.history.state, "", url);
+  }
+
+  // Swiping: the swatch follows the card passing the middle. Scrolling to a tapped swatch: that
+  // swatch stays lit on the way, not each card it passes.
+  function onScroll() {
+    if (picking.current == null) {
+      const next = THEMES[centered()].id;
+      if (next !== theme) setTheme(next);
     }
+    window.clearTimeout(settleTimer.current);
+    settleTimer.current = window.setTimeout(settle, 160);
   }
 
   function pick(i: number) {
-    const r = rail.current;
-    const el = r?.children[i] as HTMLElement | undefined;
-    if (r && el) r.scrollTo({ left: el.offsetLeft - (r.clientWidth - el.clientWidth) / 2, behavior: "smooth" });
+    picking.current = i;
+    setTheme(THEMES[i].id);
+    const d = offCenter(i);
+    if (d) rail.current?.scrollBy({ left: d, behavior: "smooth" });
+    // Settles even if no scroll comes (already there, or a smooth scroll that never ran).
+    window.clearTimeout(settleTimer.current);
+    settleTimer.current = window.setTimeout(settle, 900);
   }
 
   // A holder's P&L card says whose take it is; the take's own card brags for its author.
