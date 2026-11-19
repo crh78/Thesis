@@ -108,6 +108,20 @@ input { font: inherit; color: inherit; }
 .chip { height: 42px; border-radius: 999px; background: var(--tile); font-family: var(--font-mono); font-weight: 500; }
 .chip.on { background: rgba(169, 227, 186, 0.28); }
 .chip.on.fade { background: rgba(243, 182, 204, 0.28); }
+/* Selling (TradeDock's Sell tab): the chip picked is neutral, the ones too big for now greyed out. */
+.chip.on.sell { background: var(--text); color: var(--bg); }
+.chip:disabled { opacity: 0.35; }
+.sheet-tabs { margin: 0 44px 14px 0; }
+.sell-sides { margin-top: 12px; width: max-content; }
+.sell-sides button { font-size: 13px; padding: 7px 12px; }
+.sell-mode { display: flex; justify-content: flex-end; margin: 12px 0 10px; }
+.sell-mode .ranges button { min-width: 40px; font-size: 14px; }
+/* Me's open positions: swipe a row left (touch or mouse), or tap its red arrow, to sell all of it. */
+.swipe { position: relative; overflow: hidden; }
+.swipe-under { position: absolute; top: 4px; bottom: 4px; right: 0; width: 140px; display: flex; align-items: center; justify-content: flex-end; padding-right: 18px; border-radius: 14px; background: var(--down); color: var(--bg); font-weight: 600; font-size: 14px; }
+.swipe-row { position: relative; display: flex; align-items: center; gap: 6px; background: var(--bg); touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.swipe-row > .item { flex: 1; min-width: 0; }
+.sell-arrow { flex: none; width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: var(--down); background: color-mix(in srgb, var(--down) 12%, transparent); }
 .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 7px 0; font-size: 15px; }
 .row.out { color: var(--muted); }
 .row.out .name { text-decoration: line-through; }

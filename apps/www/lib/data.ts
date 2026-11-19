@@ -95,7 +95,27 @@ export type ReceiptLeg = {
   card?: { cardId: string; insuredValueUsd: number | null } | null;
 };
 
-export type Position = {
+/** A partial sale that has landed and waits for its prices (`priced`) and its settlement. */
+export type PendingSale = { seq: number; bps: number; stakeUsd: number; soldAt: number; priced: boolean };
+
+/**
+ * What a fork API with partial sales adds to each position (all missing from an older one):
+ * `remainingStakeUsd` the cost basis still held (`stakeUsd` stays what was bought), `valueUsd` is
+ * then of what remains; `realizedPnlUsd` from settled partial sales; `maxPartialBps` the largest
+ * part that can be sold now (null: only "sell all", since what's left must stay `minStakeUsd`);
+ * `closesTakeIfSoldAll` the author's own buy-in, whose full sale closes the take.
+ */
+export type SaleFields = {
+  remainingStakeUsd?: number;
+  soldStakeUsd?: number;
+  realizedPnlUsd?: number | null;
+  pendingSales?: PendingSale[];
+  minStakeUsd?: number;
+  maxPartialBps?: number | null;
+  closesTakeIfSoldAll?: boolean;
+};
+
+export type Position = SaleFields & {
   address: string;
   side: "back" | "fade";
   exited: boolean;
