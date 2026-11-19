@@ -1,6 +1,7 @@
 // A person's public page: who they are, how their takes are doing, and the ones they called.
 import type { Metadata } from "next";
 import Link from "next/link";
+import TopBar from "@/components/TopBar";
 import { notFound } from "next/navigation";
 import Avatar from "@/components/Avatar";
 import FollowButton from "@/components/FollowButton";
@@ -45,9 +46,7 @@ export default async function ProfilePage({ params }: Props) {
 
   return (
     <main className="page">
-      <div className="top">
-        <Link href="/" className="brand">thesis</Link>
-      </div>
+      <TopBar />
 
       <section className="me">
         <Avatar person={p} size={84} />
@@ -83,11 +82,11 @@ export default async function ProfilePage({ params }: Props) {
 
       {called.length ? (
         <div className="section">
-          <h2>Called it <span className="caps">up since posted</span></h2>
+          <h2>Called it</h2>
           {called.map((t) => (
             <Link className="called-row" key={t.id} href={`/c/${t.id}`}>
               <div>
-                <span className="tag tag-up">✓ Called it</span>
+                <span className="tag tag-up">Called it</span>
                 <div className="called-claim">{t.claim}</div>
                 <div className="caps">posted {shortDate(t.created_at)}</div>
               </div>
@@ -98,7 +97,7 @@ export default async function ProfilePage({ params }: Props) {
       ) : null}
 
       <div className="section">
-        <h2>{called.length ? "Other takes" : "Takes"} <span className="caps">since posted</span></h2>
+        <h2>{called.length ? "Other takes" : "Takes"}</h2>
         {rest.length === 0 && called.length === 0 ? <p className="muted">No takes yet.</p> : null}
         {rest.map((t) => (
           <Link className="card" key={t.id} href={`/t/${t.id}`}>

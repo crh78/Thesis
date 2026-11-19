@@ -7,7 +7,6 @@ import Avatar from "./Avatar";
 
 export type FeedTake = Take & { tags?: string[]; history?: number[]; topic?: string; money_in?: number; posting?: boolean };
 
-const RISK: Record<string, string> = { low: "LOW", medium: "MED", high: "HIGH" };
 
 /** "now", "5m", "2h", "3d", then "Dec 4", like the app's take.age. */
 export function age(iso: string): string {
@@ -73,7 +72,6 @@ export default function TakeRow({ take, saved, onSave, mine = false }: { take: F
             <b>{authorName(take.author)}</b>
             <span className="muted">{gone ? "" : `@${take.author.handle} · `}{age(take.created_at)}</span>
           </Link>
-          <span className="caps trow-tag">{RISK[take.risk] ?? take.risk} · {state.open ? "OPEN" : "CLOSED"}</span>
         </div>
         <Link href={href} className="trow-body">
           <div className="trow-claim">{take.claim}</div>

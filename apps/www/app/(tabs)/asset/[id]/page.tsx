@@ -2,7 +2,7 @@
 // One asset's page, like the iOS AssetView: price and a scrubbable chart over 1D / 1W / 1M / 1Y,
 // what it is, the details that matter for a basket, the takes that hold it, and "Make a take with
 // this" (the composer, with the asset kept in the basket).
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AssetLogo, price as fmtPrice, TakeListRow, type Asset } from "@/components/AssetBits";
 import Chart from "@/components/Chart";
@@ -10,6 +10,7 @@ import { useComposer } from "@/components/Composer";
 import type { FeedTake } from "@/components/TakeRow";
 import { pct, rpcNow } from "@/lib/data";
 import { useSession } from "@/lib/session";
+import TopBar from "@/components/TopBar";
 
 type Range = "1D" | "1W" | "1M" | "1Y";
 const RANGES: Range[] = ["1D", "1W", "1M", "1Y"];
@@ -22,7 +23,6 @@ type Page = { asset: PageAsset; price?: { usd: number; change24hPct?: number | n
 export default function AssetPage() {
   const { id } = useParams<{ id: string }>();
   const assetId = decodeURIComponent(id);
-  const router = useRouter();
   const { assets } = useSession();
   const composer = useComposer();
   const [page, setPage] = useState<Page | null>(null);
@@ -56,7 +56,7 @@ export default function AssetPage() {
   if (failed && !page) {
     return (
       <main className="page">
-        <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
+        <TopBar />
         <div className="empty"><h2>Couldn&apos;t load this</h2><p className="muted">Check your connection and try again.</p></div>
       </main>
     );
@@ -78,7 +78,7 @@ export default function AssetPage() {
 
   return (
     <main className="page asset">
-      <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
+      <TopBar />
       <AssetLogo assetKey={a.key} name={a.name} kind={a.kind} size={52} />
       <h1 className="asset-name">{a.name}</h1>
       <div className="muted small">{a.symbol} · {a.kindLabel} · {a.venue}</div>
