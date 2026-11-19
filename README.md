@@ -124,7 +124,6 @@ Anyone signs up on the web app, replies "@yourthesisxyz back $20" under a post o
 - **The owner's agent code** (`packages/agent`): `horizon` optional (`BasketArgs`, the `build_basket` tool schema and its 3-month default, the prompt, the `/source/drafts` body), sell intents with `bps` / `usd`, and a warning when a sale closes the author's take (`closesTake`). Then `apps/x` drops its `FIXED_HORIZON`. Also the Thesis MCP server.
 - **iOS:** the team's development builds need rebuilding against the fork host (`FORK_API_URL = https:/$()/<fork-host>`). (A split trade that stopped partway is now finished or swept on iOS as on the web: one automatic retry, then Finish / Swap back in the trade sheet and on Cash.)
 - **Speed:** a first sale within about 15 s of a back still quotes Jupiter afresh (its sell routes are seeded 15, 30 and 60 s after the back); a 3- or 4-leg take needs 2–3 transactions, so signing takes longer.
-- **Tailscale Funnel off** once no build uses its old fork API address (it also serves the closed Blink).
 - **Dogfood** every screen at phone and desktop width and every trade path (back, fade, partial and full sale, cash-out, claims; spot, yield, perp, prediction and card legs) on web and iOS, including Phoenix on a phone (the liquidation alert hasn't fired on the fork, which can't move a price that far).
 - **Open the fork:** resets are allowed until it's public; from then, none ([resets](scripts/fork/README.md#resets)).
 
