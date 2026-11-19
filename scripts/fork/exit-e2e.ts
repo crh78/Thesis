@@ -110,9 +110,30 @@ async function e2e(): Promise<void> {
       tx.sign([kp]);
       return Buffer.from(tx.serialize()).toString("base64");
     });
-  const submit = async (what: string, built: { status: number; json: any }, kp: Keypair) => {
+  /** Trades the web app had to finish itself (see `submit`): each is counted and logged. */
+  const recovered: string[] = [];
+  /**
+   * Signs and sends a build. A trade the API couldn't finish is recovered as the web app does,
+   * without asking: a split trade that stopped (`trade_incomplete`, `retry: true`) is finished
+   * with its retry, and one that sent nothing for slippage (`requote: true`) is built again once
+   * (`rebuild`). The API's own resend (the same bytes after a market reset) comes first.
+   */
+  const submit = async (what: string, built: { status: number; json: any }, kp: Keypair, rebuild?: () => Promise<{ status: number; json: any }>) => {
     if (built.status !== 200) throw new Error(`${what}: ${built.status} ${JSON.stringify(built.json)}`);
-    const sent = await call("POST", "/submit", { buildId: built.json.buildId, transactions: sign(built.json.transactions, kp) });
+    let sent = await call("POST", "/submit", { buildId: built.json.buildId, transactions: sign(built.json.transactions, kp) });
+    if (sent.status === 422 && sent.json.error === "trade_incomplete" && sent.json.retry === true) {
+      recovered.push(`${what}: finished by its retry (${sent.json.message})`);
+      console.log(`  ${what}: stopped after ${sent.json.incomplete?.landed} transaction(s); finishing it with the retry, as the web app does`);
+      const retry = await call("POST", `/wallets/${kp.publicKey.toBase58()}/retry`, { position: sent.json.incomplete?.position });
+      if (retry.status !== 200) throw new Error(`${what} retry build: ${retry.status} ${JSON.stringify(retry.json)}`);
+      sent = await call("POST", "/submit", { buildId: retry.json.buildId, transactions: sign(retry.json.transactions, kp) });
+    } else if (sent.json?.requote === true && rebuild) {
+      recovered.push(`${what}: built again (${sent.json.message})`);
+      console.log(`  ${what}: refused for slippage with nothing sent; building it again, as the web app does`);
+      const again = await rebuild();
+      if (again.status !== 200) throw new Error(`${what} rebuild: ${again.status} ${JSON.stringify(again.json)}`);
+      sent = await call("POST", "/submit", { buildId: again.json.buildId, transactions: sign(again.json.transactions, kp) });
+    }
     if (sent.status !== 200) throw new Error(`${what} submit: ${sent.status} ${JSON.stringify(sent.json)}`);
   };
   const conn = connection();
@@ -232,9 +253,11 @@ async function e2e(): Promise<void> {
     const seller = Keypair.generate();
     const s = seller.publicKey.toBase58();
     await call("POST", `/wallets/${s}/deposits`, { usd: 200 });
-    const firstBack = await call("POST", `/takes/${FOUR.id}/trades`, { owner: s, side: "back", usd: 20 });
-    await submit("four-stock back ($20)", firstBack, seller);
-    await submit("four-stock back ($30)", await call("POST", `/takes/${FOUR.id}/trades`, { owner: s, side: "back", usd: 30 }), seller);
+    const backFour = (usd: number) => call("POST", `/takes/${FOUR.id}/trades`, { owner: s, side: "back", usd });
+    const firstBack = await backFour(20);
+    await submit("four-stock back ($20)", firstBack, seller, () => backFour(20));
+    // Seconds after the first: this one used to split, and a later transaction be refused for slippage.
+    await submit("four-stock back ($30)", await backFour(30), seller, () => backFour(30));
     const bought = firstBack.json.included.length as number;
     console.log(`four-stock take: backed $20 and $30, ${bought} legs bought`);
     const fourView = await call("GET", `/takes/${FOUR.id}?viewer=${s}`);
@@ -341,6 +364,8 @@ async function e2e(): Promise<void> {
     server.close();
   }
   for (const [name, ok] of checks) console.log(`${ok ? "ok  " : "FAIL"} ${name}`);
+  // Not a failure (the web app recovers the same way), but worth knowing how often it's needed.
+  console.log(recovered.length ? `recovered as the web app does: ${recovered.join("; ")}` : "no trade needed the client's retry or rebuild");
   if (checks.some(([, ok]) => !ok)) throw new Error("exit e2e failed");
 }
 
