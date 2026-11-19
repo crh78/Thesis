@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// A pick's logo, round: the company's (by its ticker), the coin's, a private company's site icon,
-/// or a symbol for cash, predictions, cards and metals. A monogram while it loads or when there's
+/// Collector Crypt's for cards, or a symbol for cash, predictions and metals. A monogram while it loads or when there's
 /// none. `ring` ties it to the pick's color in the basket donut.
 ///
 /// Logos come from public image endpoints by ticker (no key, nothing about you is sent): stocks and
@@ -76,12 +76,11 @@ struct AssetLogo: View {
         return k
     }
 
-    /// Cash, predictions, cards and metals get a symbol, not a logo.
+    /// Cash, predictions and metals get a symbol, not a logo. Cards get Collector Crypt's logo (`candidates`).
     static func symbol(kind: String, key: String?) -> (name: String, tint: Color)? {
         let k = kind.lowercased()
         if k == "yield" || k.hasPrefix("earns") || k == "cash" { return ("dollarsign", Palette.up) }
         if k.hasPrefix("prediction") { return ("percent", Color(red: 0.55, green: 0.42, blue: 0.94)) }
-        if k == "card" || k == "cards" { return ("rectangle.portrait.on.rectangle.portrait.fill", Color(red: 0.84, green: 0.32, blue: 0.51)) }
         switch ticker(key) {
         case "XAU": return ("circle.hexagongrid.fill", Color(red: 0.86, green: 0.68, blue: 0.22))
         case "XAG": return ("circle.hexagongrid.fill", Color(white: 0.78))
@@ -89,7 +88,13 @@ struct AssetLogo: View {
         }
     }
 
+    /// A Collector Crypt card leg ("card", "Cards", "Card · …"): every one shows Collector Crypt's logo.
+    static func isCard(_ kind: String) -> Bool { kind.range(of: #"^cards?\b"#, options: [.regularExpression, .caseInsensitive]) != nil }
+    /// Collector Crypt's site icon, from the same public icon endpoint as the private companies'.
+    static let collectorCryptLogo = URL(string: "https://www.google.com/s2/favicons?domain=collectorcrypt.com&sz=128")!
+
     static func candidates(key: String?, name: String, kind: String) -> [URL] {
+        if isCard(kind) { return [collectorCryptLogo] }
         guard let t = ticker(key) else { return [] }
         let stock = URL(string: "https://financialmodelingprep.com/image-stock/\(t).png")
         let coin = URL(string: "https://assets.coincap.io/assets/icons/\(t.lowercased())@2x.png")

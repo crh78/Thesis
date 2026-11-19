@@ -2,7 +2,7 @@
 // Assets and compact take rows, after the iOS AssetLogo, AssetRow and TakeListRow.
 import Link from "next/link";
 import { useState } from "react";
-import { isDeleted, DELETED_NAME, pct, topicImage } from "@/lib/data";
+import { isCardKind, isDeleted, DELETED_NAME, pct, topicImage } from "@/lib/data";
 import LOGOS from "@/lib/logos.json";
 import { useAssetKeys } from "@/lib/assetKeys";
 import TakeLogo from "./TakeLogo";
@@ -46,12 +46,14 @@ const SITES: Record<string, string> = {
   STRIPE: "stripe.com", DATABRICKS: "databricks.com", DISCORD: "discord.com", RIPPLING: "rippling.com", REVOLUT: "revolut.com", PERPLEXITY: "perplexity.ai",
 };
 
-/** Cash, predictions, cards and metals get a symbol, not a logo (as the app). */
+/** Collector Crypt's site icon, from the same public icon endpoint as the private companies' (SITES). */
+export const COLLECTOR_CRYPT_LOGO = "https://www.google.com/s2/favicons?domain=collectorcrypt.com&sz=128";
+
+/** Cash, predictions and metals get a symbol, not a logo (as the app). Cards get Collector Crypt's logo. */
 export function symbol(kind: string, key: string | null): { glyph: string; tint: string } | null {
   const k = kind.toLowerCase();
   if (k === "yield" || k.startsWith("earns") || k === "cash") return { glyph: "$", tint: "var(--up)" };
   if (k.startsWith("prediction")) return { glyph: "%", tint: "#8C6BF0" };
-  if (k === "card" || k === "cards") return { glyph: "▣", tint: "#D65282" };
   if (key?.toUpperCase() === "XAU") return { glyph: "Au", tint: "#DBAD38" };
   if (key?.toUpperCase() === "XAG") return { glyph: "Ag", tint: "#C7C7C7" };
   return null;
@@ -62,6 +64,7 @@ const CACHED = LOGOS as Record<string, string>;
 /** The logo by ticker: the app's own copy for stocks and ETFs (`pnpm logos:cache`), else the same
  * public image endpoints the iOS app uses (nothing about you is sent), else null (a monogram). */
 export function logoUrl(key: string | null, kind: string): string | null {
+  if (isCardKind(kind)) return COLLECTOR_CRYPT_LOGO;
   const t = key?.toUpperCase();
   if (!t || !/^[A-Z0-9.]{1,12}$/.test(t)) return null;
   if (CACHED[t] && !kind.toLowerCase().startsWith("pre")) return `/logos/${CACHED[t]}`;
