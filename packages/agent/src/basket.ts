@@ -94,7 +94,8 @@ export async function buildBasket(cfg: BasketConfig, args: BasketArgs, meta: Dra
   return {
     verdict: "basket",
     summary: out.summary,
-    legs: out.legs.map((l) => ({ name: plainName(l.name), weight: l.weight, side: l.side ?? "long", why: l.why })),
+    // A cash pick's catalog name ("jupiter lend USDC (Jupiter Lend Earn)") reads as "Cash" in a reply.
+    legs: out.legs.map((l) => ({ name: l.kind === "yield" ? "Cash" : plainName(l.name), weight: l.weight, side: l.side ?? "long", why: l.why })),
     link: `${cfg.webUrl.replace(/\/$/, "")}/d/${id}`,
   };
 }
