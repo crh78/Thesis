@@ -116,17 +116,18 @@ test("another wallet scales the trade too, to its own accounts", async (t) => {
   }
 });
 
-test("only within 0.4x-2.5x of a routing quoted in the last 20 seconds", async (t) => {
+test("only within 0.1x-10x of a routing quoted in the last 20 seconds", async (t) => {
   const calls = jupiter(t);
   t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
   const router = routerWith();
   const user = () => Keypair.generate().publicKey;
   await router.venueLegs(legs, user(), 20);
-  assert.equal((await router.venueLegs(legs, user(), 100)).jupiter.template, "miss", "5x: quoted afresh");
-  assert.equal((await router.venueLegs(legs, user(), 7)).jupiter.template, "miss", "0.35x: quoted afresh");
-  assert.equal(calls.length, 24);
-  // Either routing serves amounts near it: $50 from $20 or $100, $8 from $7 or $20.
-  for (const usd of [50, 8, 40, 250]) assert.equal((await router.venueLegs(legs, user(), usd)).jupiter.template, "scaled", `$${usd}`);
+  assert.equal(calls.length, 8);
+  // The web's chips from $20 ($50 is exactly 2.5x: missed on rounding under the old 0.4x-2.5x).
+  for (const usd of [50, 100, 10, 7]) assert.equal((await router.venueLegs(legs, user(), usd)).jupiter.template, "scaled", `$${usd}`);
+  assert.equal(calls.length, 8, "no Jupiter call for any of them");
+  assert.equal((await router.venueLegs(legs, user(), 250)).jupiter.template, "miss", "12.5x: quoted afresh");
+  assert.equal((await router.venueLegs(legs, user(), 1.5)).jupiter.template, "miss", "0.075x: quoted afresh");
   assert.equal(calls.length, 24);
   t.mock.timers.tick(TEMPLATE_TTL_MS);
   assert.equal((await router.venueLegs(legs, user(), 30)).jupiter.template, "miss", "past 20 s: quoted afresh");
