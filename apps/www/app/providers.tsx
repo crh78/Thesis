@@ -2,6 +2,7 @@
 import { PrivyProvider } from "@privy-io/react-auth";
 import { ComposerProvider } from "@/components/Composer";
 import SessionScreens from "@/components/SessionScreens";
+import { NavTrail } from "@/components/TopBar";
 import { X_LOGIN } from "@/lib/flags";
 import { SessionProvider } from "@/lib/session";
 
@@ -31,6 +32,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     >
       <SessionProvider>
         <ComposerProvider>
+          <NavTrail />
           {children}
           <SessionScreens />
         </ComposerProvider>

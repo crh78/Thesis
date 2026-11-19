@@ -327,9 +327,9 @@ export function dayLabel(d: Date): string {
 /** "@jake", or "the author" for a deleted account. */
 const byline = (handle: string | null | undefined) => (handle ? `@${handle}` : "the author");
 
-/** "Open · until @jake sells" or "Closed Nov 18 · +4.2%" (take pages, link previews, rows). */
-export function stateLabel(state: TakeState, handle: string | null | undefined, ret?: number | null): string {
-  if (state.open) return `Open · until ${byline(handle)} sells`;
+/** "Closed Nov 18 · +4.2%" for a closed take (the take page); an open take shows nothing. */
+export function stateLabel(state: TakeState, ret?: number | null): string {
+  if (state.open) return "";
   return [state.at ? `Closed ${dayLabel(state.at)}` : "Closed", ret != null ? pct(ret) : null].filter(Boolean).join(" · ");
 }
 

@@ -1,6 +1,7 @@
 // "Called it": a brag card for a take that's up, in a few looks you swipe through like filters.
 import type { Metadata } from "next";
 import Link from "next/link";
+import TopBar from "@/components/TopBar";
 import { notFound } from "next/navigation";
 import CalledStudio from "@/components/CalledStudio";
 import { cardData, themeOf } from "@/lib/called";
@@ -56,10 +57,7 @@ export default async function CalledItPage({ params, searchParams }: Props) {
   if (picture) {
     return (
       <main className="page studio">
-        <div className="top">
-          <Link href="/" className="brand">thesis</Link>
-          {d.handle ? <Link href={`/u/${d.handle}`} className="pill small">@{d.handle}</Link> : null}
-        </div>
+        <TopBar right={d.handle ? <Link href={`/u/${d.handle}`} className="pill small">@{d.handle}</Link> : null} />
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img className="shared-card" src={picture} alt={d.claim} width={1080} height={1920} />
         <div className="actions studio-actions">
@@ -72,10 +70,7 @@ export default async function CalledItPage({ params, searchParams }: Props) {
 
   return (
     <main className="page studio">
-      <div className="top">
-        <Link href="/" className="brand">thesis</Link>
-        {d.handle ? <Link href={`/u/${d.handle}`} className="pill small">@{d.handle}</Link> : null}
-      </div>
+      <TopBar right={d.handle ? <Link href={`/u/${d.handle}`} className="pill small">@{d.handle}</Link> : null} />
       <CalledStudio d={d} initial={themeOf(theme)} />
     </main>
   );

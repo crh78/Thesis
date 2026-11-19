@@ -2,18 +2,18 @@
 // Your followers and who you follow, like the iOS ConnectionsView: unfollow from Following, and
 // remove someone from your followers (they aren't told and can follow again).
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import Avatar from "@/components/Avatar";
 import { money, type Person } from "@/lib/data";
 import { useSession } from "@/lib/session";
+import TopBar from "@/components/TopBar";
 
 type Row = Person & { follows_you?: boolean };
 
 export default function PeoplePage() {
   const { kind } = useParams<{ kind: string }>();
   const tab = kind === "following" ? "following" : "followers";
-  const router = useRouter();
   const { snapshot, social } = useSession();
   const me = snapshot?.profile;
   const [people, setPeople] = useState<Row[] | null>(null);
@@ -43,7 +43,7 @@ export default function PeoplePage() {
   const list = (people ?? []).filter((p) => !gone.has(p.id));
   return (
     <main className="page">
-      <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
+      <TopBar />
       <h1 className="title">{me?.display_name ?? "You"}</h1>
       <div className="segmented" style={{ gridTemplateColumns: "1fr 1fr" }} role="tablist">
         <Link href="/people/following" replace role="tab" aria-selected={tab === "following"} className={`seg-link${tab === "following" ? " on" : ""}`}>Following</Link>

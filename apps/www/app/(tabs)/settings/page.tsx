@@ -10,6 +10,7 @@ import { rpcNow } from "@/lib/data";
 import { X_BOT, X_LOGIN } from "@/lib/flags";
 import { currentSubscription, disablePush, enablePush, isStandalone, pushSupported } from "@/lib/push";
 import { useSession } from "@/lib/session";
+import TopBar from "@/components/TopBar";
 
 type Privacy = { show_following: boolean; show_followers: boolean };
 
@@ -80,7 +81,7 @@ export default function SettingsPage() {
 
   return (
     <main className="page">
-      <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
+      <TopBar />
       <h1 className="title">Settings</h1>
 
       <section className="set-sec">

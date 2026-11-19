@@ -3,6 +3,7 @@
 // someone's take from it is live, the link opens that take instead.
 import type { Metadata } from "next";
 import Link from "next/link";
+import TopBar from "@/components/TopBar";
 import { notFound, redirect } from "next/navigation";
 import Basket from "@/components/Basket";
 import DraftActions from "@/components/DraftActions";
@@ -43,9 +44,7 @@ export default async function DraftPage({ params }: Props) {
 
   return (
     <main className="page">
-      <div className="top">
-        <Link href="/" className="brand">thesis</Link>
-      </div>
+      <TopBar />
 
       <div className="caps">{d.context ?? (d.origin === "x" ? "From X" : "From iMessage")} · not posted yet</div>
       <h1 className="claim">{d.claim}</h1>

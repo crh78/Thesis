@@ -136,9 +136,10 @@ select.field { appearance: none; color: var(--text); }
 .card .claim { font-size: 24px; margin: 8px 0 6px; }
 .check { width: 64px; height: 64px; border-radius: 50%; background: var(--back-fill); color: var(--back-ink); display: grid; place-items: center; font-size: 32px; margin: 20px auto 12px; }
 
-/* Tags: "✓ Called it" wherever a take is up since it was posted. */
+/* Tags: "Called it" wherever a take is up since it was posted. */
 .tag { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.4px; text-transform: uppercase; background: var(--tile); color: var(--muted); white-space: nowrap; }
 .tag-up { background: rgba(169, 227, 186, 0.16); color: var(--up); border: 1px solid rgba(169, 227, 186, 0.3); }
+.tag-icon { width: 14px; height: 14px; margin-top: -1px; }
 a.tag-up:hover { background: rgba(169, 227, 186, 0.24); }
 .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 
@@ -331,7 +332,6 @@ button.menu-item:hover { background: var(--glass-on); }
 .trow-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .trow-who { display: flex; gap: 5px; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trow-who b { font-weight: 600; }
-.trow-tag { margin-left: auto; flex: none; font-size: 11px; }
 .trow-body { display: grid; gap: 10px; }
 .trow-claim { font-family: var(--font-serif); font-size: 24px; line-height: 1.18; overflow-wrap: anywhere; }
 .trow-ret { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
@@ -584,3 +584,5 @@ button.ditem:hover, a.ditem:hover { background: var(--tile); }
 .phx-card { margin: 12px 0 4px; padding: 14px; border-radius: 16px; background: var(--tile); border: 1px solid var(--hairline); }
 .posting-actions { display: flex; gap: 8px; margin-top: 8px; }
 /* --- End money flows. --- */
+/* Back on pages below the tabs (TopBar): no glass, just the arrow. */
+.back-btn { background: none; border: 0; margin-left: -8px; color: var(--text); }

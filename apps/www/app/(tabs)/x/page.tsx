@@ -3,13 +3,13 @@
 // drafted take. The accounts you copy sit in a row of faces (tap one for just its calls), then
 // every call, newest first. Nothing trades by itself (one-tap copy, not auto-copy).
 // Copy on a call opens the composer with that take drafted, its basket built, credited to the post.
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { age } from "@/components/TakeRow";
 import { XAvatar, type XAccount } from "@/components/XTraders";
 import { useComposer } from "@/components/Composer";
 import { fromCall } from "@/lib/compose";
 import { useSession } from "@/lib/session";
+import TopBar from "@/components/TopBar";
 
 
 /** Market accounts to start with when you copy nobody yet (the app's list). */
@@ -25,7 +25,6 @@ function cleanHandle(s: string): string {
 }
 
 export default function XCopyPage() {
-  const router = useRouter();
   const { source } = useSession();
   const composer = useComposer();
   const [accounts, setAccounts] = useState<XAccount[] | null>(null);
@@ -79,7 +78,7 @@ export default function XCopyPage() {
 
   return (
     <main className="page xcopy">
-      <button className="nav-back" onClick={() => router.back()}>‹ Back</button>
+      <TopBar />
       <h1 className="title">Copy from X</h1>
       <p className="muted small">Their market calls become takes. Tap one to build the basket; buying in is up to you.</p>
 

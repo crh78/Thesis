@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import TopBar from "@/components/TopBar";
 import { notFound } from "next/navigation";
 import Avatar from "@/components/Avatar";
 import Basket from "@/components/Basket";
 import Comments from "@/components/Comments";
+import { ShareIcon } from "@/components/Icons";
 import TradeDock from "@/components/TradeDock";
 import { authorName, calledIt, closedReason, getReceipt, getTake, isDeleted, pct, stateLabel, takeReturn, takeState } from "@/lib/data";
 
@@ -45,9 +47,7 @@ export default async function TakePage({ params }: Props) {
 
   return (
     <main className="page">
-      <div className="top">
-        <Link href="/" className="brand">thesis</Link>
-      </div>
+      <TopBar />
 
       {isDeleted(take.author) ? (
         // A deleted account: no handle and no profile to open.
@@ -67,7 +67,7 @@ export default async function TakePage({ params }: Props) {
 
       <h1 className="claim">{take.claim}</h1>
       <div className="caps">
-        {take.risk} risk · {stateLabel(state, handle, ret)}
+        {take.risk} risk{state.open ? "" : ` · ${stateLabel(state, ret)}`}
       </div>
       {take.source && /^https?:\/\//.test(take.source.url) ? (
         <a className="via" href={take.source.url} target="_blank" rel="noopener noreferrer nofollow">
@@ -76,10 +76,9 @@ export default async function TakePage({ params }: Props) {
       ) : null}
 
       <div className={`big ${ret >= 0 ? "up" : "down"}`}>{pct(ret)}</div>
-      <div className="caps">{receipt?.onChain ? "on-chain · " : ""}{state.open ? "since posted" : "final"}</div>
       {calledIt(ret) ? (
         <div className="tags">
-          <Link className="tag tag-up" href={`/c/${take.id}`}>✓ Called it · share ↗</Link>
+          <Link className="tag tag-up" href={`/c/${take.id}`} aria-label="Called it: share">Called it <ShareIcon className="tag-icon" /></Link>
         </div>
       ) : null}
 
