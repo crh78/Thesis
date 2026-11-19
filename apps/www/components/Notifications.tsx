@@ -8,6 +8,7 @@ import { createPortal } from "react-dom";
 import { fromCall } from "@/lib/compose";
 import { useSession } from "@/lib/session";
 import { useComposer } from "./Composer";
+import { PixelIcon, type PixelIconName } from "./PixelIcon";
 import { age } from "./TakeRow";
 
 type Note = {
@@ -22,9 +23,11 @@ type Note = {
 };
 type Inbox = { unread: number; notifications: Note[] };
 
-const GLYPH: Record<string, string> = {
-  new_take: "✦", comment: "💬", take_traded: "↗", take_faded: "↘", take_settled: "⚑", take_closed: "⚑", badge: "✪",
-  daily_positions: "📈", liquidation_risk: "⚠", x_call: "𝕏",
+// Each kind's pixel icon and the tone of its tile (globals.css: .ntone-*).
+const ICON: Record<string, [PixelIconName, string]> = {
+  new_take: ["spark", "gold"], comment: ["comment", "blue"], take_traded: ["up", "up"], take_faded: ["down", "down"],
+  take_settled: ["flag", "plain"], take_closed: ["flag", "plain"], badge: ["medal", "gold"],
+  daily_positions: ["chart", "up"], liquidation_risk: ["warn", "amber"], x_call: ["x", "plain"],
 };
 
 /** The bell on Home: a dot while something's unread; opens the inbox. */
@@ -72,7 +75,10 @@ export default function NotificationsBell() {
             {inbox?.notifications.map((n) => {
               const row = (
                 <>
-                  <span className="nglyph" aria-hidden>{GLYPH[n.kind] ?? "•"}</span>
+                  {(() => {
+                    const [icon, tone] = ICON[n.kind] ?? ["spark", "plain"];
+                    return <span className={`nglyph ntone-${tone}`} aria-hidden><PixelIcon name={icon} /></span>;
+                  })()}
                   <span className="nmain">
                     <span style={{ fontWeight: n.read ? 400 : 600 }}>{n.title}</span>
                     {n.body ? <span className="muted small nbody">{n.body}</span> : null}
