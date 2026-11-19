@@ -23,7 +23,7 @@ Design principles and tokens for the Thesis apps. `assets/` holds the exported i
 - **Trade or fade.** The two sides of every take are "Trade" (go with it) and "Fade" (bet against it): Traded, traders, % trading. Never "Back". (Code still calls the side `.back`.)
 - **Crypto is invisible.** No USDC, gas, wallets, chains or venue names in UI. Say "balance", "add cash", "stock", "prediction", "locked".
 - **Dark mode by default**, light mode supported.
-- **Two scores, no formula**. Own P&L, and what your takes made for the people who traded them. Show dollars and % together; every board can be ranked by either. A third board ranks who made the most from fading. (The "% ranking needs $100+ in" rule applies to the play-money board only; chain boards don't enforce it.)
+- **Two scores, no formula**. Own P&L, and what your takes made for the people who traded them. Show dollars and % together; every board can be ranked by either. A third board ranks who made the most from fading. Boards have no minimum stake for % ranking.
 
 ## Tokens
 

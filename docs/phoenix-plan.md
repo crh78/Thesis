@@ -39,6 +39,8 @@ Phoenix docs: [trader onboarding](https://docs.phoenix.trade/sdk/register.md), [
 
 **A sale** closes each child's position in the same set as `exit_position`, then `withdraw_funds` and Ember `withdraw` back to USDC ("Cash out", since Phoenix won't withdraw more than an account holds and the amount is only known after the close).
 
+**A partial sale** (`sell_part`) closes that fraction of each child's lots, and Phoenix's `withdraw_to_target_leverage` moves the freed margin to the parent trader account at the leverage the child ran at, so what stays keeps its leverage; the cash-out then withdraws the parent's collateral to USDC. Details: [`scripts/fork/README.md`](../scripts/fork/README.md#selling-a-position).
+
 **Liquidation warnings.** Each leg's liquidation price comes from Phoenix's margin equation (`liquidationOf` in `@thesis/venues/phoenix`), checked against Phoenix's own view on the fork. Receipts show it ("liquidates at $61.21 · 18% away"), in warning colors within 25% ("near") and 10% ("close"). Every 5 minutes (`LIQUIDATION_CHECK_SEC`) the fork API sends one inbox alert per leg per level (`liquidation_risk`). No push until APNs (paid Apple signing). At 5x a position starts about 18% from liquidation, so it reads "near" from the start.
 
 ## The fork

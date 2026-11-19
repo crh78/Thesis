@@ -1,6 +1,6 @@
 # Security review: the Thesis program
 
-An internal first pass over the Anchor program (`anchor/programs/thesis`) and its keys. It's not an audit: an outside audit should read the program before real users (phase 3). Off-chain services were out of scope except for what their keys can do.
+An internal first pass over the Anchor program (`anchor/programs/thesis`) and its keys. It's not an audit: an outside audit should read the program before real users (phase 3). Off-chain services were out of scope except for what their keys can do. The program has changed since (no-timeline takes and the author's sale closing a take; partial sales: `sell_part`, `record_part_prices`, `settle_part`), and this review doesn't cover those changes.
 
 ## Findings
 
@@ -19,7 +19,7 @@ An internal first pass over the Anchor program (`anchor/programs/thesis`) and it
 
 ## M-3: the settler key decides every score
 
-`record_entry_prices`, `record_exit_prices` and `record_sale_prices` check only the timing window, one price per leg and the ranges. The settler key can give any position any result within those bounds, or withhold prices so positions settle unscored. Mitigations: each price's source document is hashed into the receipt and published in the public `price_audit` table; the key belongs in OCI Vault before real users; stock legs can move to Pyth later without a program change.
+`record_entry_prices`, `record_exit_prices`, `record_sale_prices` and `record_part_prices` (added with partial sales, after this review) check only the timing window, one price per leg and the ranges. The settler key can give any position any result within those bounds, or withhold prices so positions settle unscored. Mitigations: each price's source document is hashed into the receipt and published in the public `price_audit` table; the key belongs in OCI Vault before real users; stock legs can move to Pyth later without a program change.
 
 ## The keys and what they can do
 
@@ -33,4 +33,4 @@ An internal first pass over the Anchor program (`anchor/programs/thesis`) and it
 
 ## Pause
 
-`paused` blocks `create_take`, `back` and `fade`. Sales, prices, settlement, claims, badges and fee withdrawals keep working, so a pause never traps a position.
+`paused` blocks `create_take`, `back` and `fade`. Sales (full and partial), prices, settlement, claims, badges and fee withdrawals keep working, so a pause never traps a position.

@@ -4,7 +4,7 @@ Every item here is built and on the fork. This file stays as the reference for h
 
 ## Working on the program
 
-- Test on LiteSVM (`cargo test` in `anchor/`) and on the one shared fork ([`infra/executor`](../infra/executor/README.md), "Running it"). A PR that touches the program, client, settler or fork API reruns `pnpm fork:api-e2e`, `pnpm fork:jupiter-e2e` and `pnpm fork:exit-e2e -- --settle` there. `fork:settler-e2e` moves the fork's clock: only with Chris's OK, then reset the fork.
+- Test on LiteSVM (`cargo test` in `anchor/`) and on the one shared fork ([`infra/executor`](../infra/executor/README.md), "Running it"). A PR that touches the program, client, settler or fork API reruns `pnpm fork:api-e2e`, `pnpm fork:jupiter-e2e` and `pnpm fork:exit-e2e -- --settle` there. `fork:settler-e2e` moves the fork's clock: only with the fork maintainer's OK, then reset the fork. A program change reaches the fork only through a fresh-fork reset ([`cards-reset.md`](cards-reset.md)).
 - After an interface change: `anchor build`, then copy `anchor/target/idl/thesis.json` and `anchor/target/types/*.ts` to `packages/chain/idl/`, and the IDL to `supabase/functions/_shared/thesis-idl.json`. Regenerate the Stream fixtures (`node packages/chain/test/stream-fixtures.ts`), add new instructions to the table in `infra/quicknode/thesis-filter.js`, and keep `THESIS_COMPUTE_UNITS` in step with `test_compute.rs`.
 
 ## 1. Proof of trade
@@ -24,7 +24,7 @@ A receipt (`create_take`, `back`, `fade`) must show its stake was really traded.
 | Instruction-order tricks | A bracket closes in its own transaction with no other Thesis instruction inside; bracket instructions refuse CPI; the Instructions sysvar is checked by address. |
 | Stale or foreign tickets | The receipt checks the ticket's owner, position, payer and USDC account; `begin_trade` restarts a stale ticket only for the same payer; `cancel_trade` refunds an abandoned one. |
 
-Sales (`exit_position`) need no proof: the score locks at the sale price either way. The Blink (closed) dropped its lightest leg when a 3-leg build didn't fit 1,232 bytes.
+Sales (`exit_position`, `sell_part`) need no proof: the score locks at the sale price either way. The Blink (closed) dropped its lightest leg when a 3-leg build didn't fit 1,232 bytes.
 
 Measured on the fork: `begin_trade` ~15–18k CU, `trade_step` ~7.5k, `back` ~37–43k (plus ~2.7k per event since `emit_cpi!`). The settler budgets price records for 10-leg takes (10,200 / 14,800 / 14,800 CU for entry / exit / sale).
 
@@ -41,7 +41,7 @@ Claim per take and Claim all, on the creator's own profile only, hidden until so
 
 ## 4. Scores from the chain
 
-`migrations/0027_chain_scores.sql`: `chain_positions` (one row per on-chain position, kept from `chain_events`) and `chain_wallet_stats(network, since)`, by the program's `Profile` rules. Two scores (own P&L, made for backers) plus a faders board, each by dollars or percent (`*_two_scores.sql`, `*_fader_board.sql`). With the `x-thesis-network` header, `leaderboard()` and `person_json()` use chain numbers, and only profiles with on-chain activity are on the board. Only settled, scored positions count (sales included); periods go by settlement time. `pnpm fork:scores-check` compares the backend with the `Profile` accounts.
+`migrations/0027_chain_scores.sql`: `chain_positions` (one row per on-chain position, kept from `chain_events`) and `chain_wallet_stats(network, since)`, by the program's `Profile` rules. Two scores (own P&L, made for backers) plus a faders board, each by dollars or percent (`*_two_scores.sql`, `*_fader_board.sql`). With the `x-thesis-network` header, `leaderboard()` and `person_json()` use chain numbers, and only profiles with on-chain activity are on the board. Only settled, scored positions count (sales and settled partial sales included, `*_partial_sales.sql`); periods go by settlement time. `pnpm fork:scores-check` compares the backend with the `Profile` accounts.
 
 ## 5. Badge metadata
 
@@ -57,4 +57,4 @@ The settler reads open positions from `chain_positions`, with a full scan on sta
 
 ## 8. CI
 
-iOS `build-for-testing` on PRs touching `apps/ios/**` (UI tests stay local); Supabase SQL tests on PRs touching `supabase/**`. The fork fee rate comes from the program (`GET /config`).
+iOS `build-for-testing` on PRs touching `apps/ios/**` (UI tests stay local); Supabase SQL tests on PRs touching `supabase/**`. The apps' fee rate comes from the program (`GET /config`).
