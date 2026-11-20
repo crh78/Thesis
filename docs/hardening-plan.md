@@ -1,6 +1,6 @@
 # Hardening (done)
 
-Every item here is built and on the fork. This file stays as the reference for how each piece works; code comments point at its section numbers. Open items live in the README's "What's next" and [`security-review.md`](security-review.md) (M-3).
+Every item here is built and on the fork. This file stays as the reference for how each piece works; code comments point at its section numbers. Open items live in [`roadmap.md`](roadmap.md) and [`security-review.md`](security-review.md) (M-3).
 
 ## Working on the program
 

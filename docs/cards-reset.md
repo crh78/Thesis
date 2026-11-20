@@ -38,7 +38,7 @@ A fresh-fork reset is how a new program build reaches the shared fork. It wipes 
    2. On the VM, run `pnpm fork:cards-e2e` like `fork:api-e2e`, with `CARDS_E2E_CARD` set to that card: a $25 back escrows $5 and buys no card token, a fade leaves the card out, a sale pays the escrow back.
    3. Once the bank holds the card (its cards tier runs every 15 minutes), the position's card entry is signed at insured value (`price_audit`, rule `card-insured-value`).
 8. **Clean up the old fork's data** in Supabase, with the fork maintainer's OK: see "Resets" in [`scripts/fork/README.md`](../scripts/fork/README.md#resets).
-9. **Tell the team it's done** (balances and takes gone, plus what each check showed) and update the README's "What's next".
+9. **Tell the team it's done** (balances and takes gone, plus what each check showed) and update [`roadmap.md`](roadmap.md).
 
 ## If something fails
 

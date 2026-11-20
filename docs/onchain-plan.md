@@ -110,4 +110,4 @@ Accounts are sized to their basket: on a 3-leg take a position is 190 bytes (~0.
 - On the fork, prop AMMs and maker-quoted books reject stale copied quotes, so fork routes use only `FORK_DEXES`; fills there can be slightly worse than on mainnet.
 - Phoenix lists 100+ markets, but not every name; the take builder offers only what the asset bank calls tradeable.
 
-The product's to-do list is in the [README's "What's next"](../README.md#whats-next).
+The product's to-do list is in [`roadmap.md`](roadmap.md).

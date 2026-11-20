@@ -1,180 +1,292 @@
-# Thesis
+<p align="center"><img src="docs/readme/logo.png" alt="Thesis" width="140"></p>
 
-Social trading built into your group chats and feeds: say a take, friends trade it or fade it in one message, and the chain keeps score.
+<h1 align="center">Thesis</h1>
 
-Thesis is non-custodial: the user's own wallet does the trades and the program records a receipt in the same transaction. The on-chain work follows [`docs/onchain-plan.md`](docs/onchain-plan.md).
+<p align="center"><b>Say a take. AI turns it into a real portfolio. Friends trade it or fade it from the app, from X or from iMessage, and Solana keeps score.</b></p>
 
-## Layout
+<p align="center">
+  <a href="https://yourthesis.xyz"><b>yourthesis.xyz</b></a> (live web app) ·
+  <a href="https://x.com/yourthesisxyz"><b>@yourthesisxyz</b></a> (live X bot) ·
+  <a href="media/demo-film/film/out/thesis-film-walkthrough.mp4"><b>Demo film</b></a>
+</p>
+
+<p align="center"><b>Consumer Applications</b> · <b>Best use of Solana</b> · <b>Gemini Prediction Markets</b> · <b>QuickNode Streams</b></p>
+
+---
+
+| ⚡ | |
+|---|---|
+| **~2 s** | from an opinion to a basket of real assets, with a reason for every pick |
+| **0.35–0.5 s** | from tapping Trade to *"You're in"*, gasless, no wallet pop-up |
+| **5 asset classes** in one basket | tokenized stocks and ETFs, perps up to 5x, Gemini prediction markets, trading cards, yield |
+| **4 surfaces** | web app, X bot, iMessage agent, native iOS app |
+| **6 mainnet programs** composed with ours | Jupiter, Jupiter Lend, Phoenix, Ember, Associated Token, Compute Budget |
+| **1 receipt** per trade, on-chain | with proof that the money was really traded |
+
+Market opinions live in group chats and on X, and nobody can act on them. *"AI power demand is underrated"* has no ticker, the chat has no buy button, and nobody keeps score.
+
+**Thesis turns the opinion itself into the trade.** Type a take, and an AI builds a basket across every asset class Solana has to offer. Buy in with one tap, and the take, its basket and your entry prices are frozen on-chain. Anyone can then **trade** it (buy the same basket) or **fade** it (bet against it) from the app, by replying under any post on X, or by texting the iMessage agent. Every account has a public, on-chain track record, and creators earn a cut of every trade on their takes.
+
+It's live: [yourthesis.xyz](https://yourthesis.xyz) runs on a full fork of Solana mainnet, with the real Jupiter, Phoenix and USDC programs and $1,000 of play money per account.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["💬 A take<br/><i>'crypto is in an<br/>exceptionally bullish situation'</i>"] --> B["🧠 AI take builder<br/>picks, weights, a reason<br/>for each, risk dial"]
+    B --> C["⚡ Buy in<br/>one tap, gasless<br/>Privy wallet"]
+    C --> D["⛓️ Thesis program<br/>receipt + proof of trade<br/>in the same transaction"]
+    D --> E["📣 Share<br/>feed · X · iMessage"]
+    E --> F["👥 Others trade or fade it<br/>creator earns 5 bps"]
+    F --> G["🏆 Settled on-chain<br/>scores · leaderboards · badges"]
+```
+
+<table>
+  <tr>
+    <td><img src="docs/readme/basket-crypto.png" alt="Crypto take: Bitcoin perp 2x, Strategy, Coinbase, Circle"></td>
+    <td><img src="docs/readme/basket-solana.png" alt="Solana take: Solana, Jupiter, Jito and Raydium perps at 2x"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/readme/basket-gold.png" alt="Low-risk gold take: gold 75%, cash earning interest 25%"></td>
+    <td><img src="docs/readme/basket-cards.png" alt="Pokémon card take: a 2000 Team Rocket 1st Edition card"></td>
+  </tr>
+</table>
+
+<sub>Real baskets the X bot built from people's posts, as it attaches them to its replies. They're drawn by the web app at <code>/d/&lt;id&gt;/basket.png</code>, with no model involved.</sub>
+
+## What it does
+
+**🧠 Opinion → portfolio.**
+- The take builder sees the entire tradeable catalog: every tokenized stock, ETF, perp and yield vault in a cached prompt, plus a BM25 index over every live Gemini prediction market.
+- It picks 1–5 positions that move *with* the take, each with a reason.
+- When nothing trades cleanly, it says so ("no clean exposure") instead of inventing a basket.
+- Bearish takes work: *"crypto sucks"* is built as the basket it's against and held short (an **inverted** take).
+- Edit the basket in plain words ("add AMD", "less crypto") or by hand.
+- **Benchmarked:** in a blind A/B on 100 takes with 5 LLM judges, the shipped builder beat our earlier embeddings builder **57–15** at a median **2.1 s** ([eval](packages/take-builder/eval/RESULTS.md)).
+
+**🎚️ Risk appetite changes the instruments.**
+
+| Risk | The basket |
+|---|---|
+| **Low** | About 4 spread-out picks (big names, broad ETFs) plus 20–30% USDC earning yield in Jupiter Lend |
+| **Medium** | About 5 stocks, ETFs or commodities, plus a Gemini prediction market when the take implies an outcome; cards can join |
+| **High** | The purest names, plus a Phoenix perp at 2–5x leverage chosen by the model, with liquidation warnings |
+
+**🌐 Every asset class in one basket.**
+
+| Asset class | Venue | Held as |
+|---|---|---|
+| Tokenized stocks and ETFs (xStocks, Ondo, …) | Jupiter, best issuer per stock, routed across 13+ Solana DEXes | Real tokens in your wallet |
+| Perps and shorts | Phoenix | Real positions, one isolated subaccount per leg |
+| Prediction markets | Gemini | Filled at Gemini's live prices, scored on-chain |
+| Trading cards | Collector Crypt | Priced at the card's insured value, scored on-chain |
+| Yield | Jupiter Lend | Real jlUSDC vault shares |
+
+**🔁 Trade, fade, sell.** Trading a take buys its basket. Fading it shorts the stock and crypto legs on Phoenix and takes the other side of every prediction. You can sell all or part of a position, by % or $, any time. Trades are built before you tap, and you see *"You're in"* in under half a second.
+
+**𝕏 Trade any post on X.** Reply under **any post** with `@yourthesisxyz`:
+
+| Reply | What happens |
+|---|---|
+| `back $20` | Reads the post, builds a basket, buys it from your account within your limits, and replies with the basket picture. The post becomes your take |
+| `fade $20` | The same, betting against the post |
+| `sell half` | Sells your position from inside the thread |
+| `score @handle` | That account's Thesis record (own P&L, made for backers, takes), drawn as a P&L card |
+| `copy` | Auto-copies the account: each new call it makes becomes a trade for you |
+
+**🔄 Copy trading.** Follow an X account and each call it posts becomes your take, traded within about 16 minutes. Follow a Thesis trader and their new takes are backed for you. It's $20 a call and 3 a day by default, all inside the limits you set.
+
+**💬 iMessage agent.** Text it *"make this a take for $20: gold to 5k"*, *"I'm in for $50 on Jake's take"*, *"fading Jake for $25"* or *"sell half my nvidia take"*. A "yes" or a like confirms each trade.
+
+**🔗 Share from anywhere.** An article or X post shared into Thesis (the iOS share sheet, or by tagging the bot) becomes a drafted take, credited to its source.
+
+**🏆 Social, scored on-chain.**
+- **Two public scores per account:** *Own P&L* and *Made for backers* (what everyone who backed your takes made).
+- **Leaderboards:** own P&L, backers, and a **faders** board for the best contrarians. By week, month or all time, in $ or %.
+- **Receipts:** every take is an immutable on-chain account (basket, weights, entry prices). Every signed price links to its source document in a public `price_audit` table.
+- **"Called it" badges:** non-transferable Token-2022 tokens, so reputation can't be bought.
+- **Feed, follows, comments, notifications and web push.**
+
+**💸 Creators get paid.** Every trade or fade pays a 0.10% fee, split on-chain at execution, and **half goes to the take's author**, on fades too. One tap claims it all. Copiers never pay extra.
+
+---
+
+## 🏅 Why Thesis wins each track
+
+### Consumer Applications: the crypto is invisible
+- **Sign in with X, Google or email.** A Privy embedded wallet appears at sign-in. There's no seed phrase, no extension and no SOL, and **the app pays every fee and every rent deposit**.
+- **One tap, half a second.** Trades are pre-built and signed silently. Users see *"You're in"*, never a transaction.
+- **It lives where people already talk:** an installable mobile-first web app, the X bot, an iMessage agent and a native SwiftUI iOS app.
+- **Built to come back to:** a feed of friends' calls, live returns, leaderboards, notifications when someone trades or fades you, daily position digests, badges and auto-copy.
+- **Safe by default:** play money ($1,000 per account), per-trade and daily limits on anything an agent does, revocable any time, and a confirmation before every texted trade.
+
+### Best use of Solana
+**Program ID:** `HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe`, Anchor 1.2.2 ([`anchor/programs/thesis`](anchor/programs/thesis)). It's deployed at its real address on our **Surfpool fork of Solana mainnet**, which every surface uses. That gives us every real mainnet venue, liquidity and transaction-size limit, with fake money. Devnet has none of these venues.
+
+**Programs Thesis composes with**, in the same transactions as its own receipt:
+
+| Program | ID | What it does in Thesis |
+|---|---|---|
+| Jupiter Aggregator v6 | `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4` | Spot legs: tokenized stocks, ETFs, commodities, coins, routed across Orca, Raydium, Meteora, OpenBook, Phoenix and more |
+| Jupiter Lend Earn | `jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9` | Yield legs: USDC into jlUSDC, redeemed on sale; the share's value is the leg's price |
+| Phoenix | `EtrnLzgbS7nMMy5fbD42kXiUzGg8XQzJ972Xtk1cjWih` | Perp legs and fade shorts: trader registration, isolated subaccounts, market orders, closes, margin withdrawal |
+| Ember | `EMBERpYNE6ehWmXymZZS2skiFmCa9V5dp14e1iduM5qy` | USDC ⇄ PhUSD for Phoenix collateral |
+| Token-2022 | `TokenzQdBNbLqP5VEhdkAbS1EaM1z7sbJNNvM8k1MQd` | xStocks (with their ScaledUiAmount multiplier) and our non-transferable badges with on-chain metadata |
+| SPL Token, Associated Token, System, Compute Budget | | USDC, token accounts the app pays for, per-transaction compute limits |
+| Address Lookup Tables, Instructions sysvar | | Multi-leg baskets in one v0 transaction; proof-of-trade checks |
+
+Card legs price from Collector Crypt's card data (the insured value, signed on-chain by the settler), and prediction legs from Gemini's API.
+
+**What the program does:**
+- **Non-custodial receipts:** the user's wallet does the swaps, and the receipt is recorded in the same transaction. The program never holds user funds; it escrows only paper legs' share, and returns all of it.
+- **Proof of trade:** `begin_trade` / `trade_step` bracket the venue instructions and read the Instructions sysvar to enforce three things:
+  - only allowlisted programs run inside the bracket;
+  - the owner's USDC drops by exactly the stake;
+  - each leg's output account grows.
+
+  A receipt can't be faked, and every attack has a failing test ([`hardening-plan.md`](docs/hardening-plan.md) §1). Baskets too big for one transaction split into per-transaction brackets.
+- **On-chain economics and scoring:**
+  - The 10 bps fee and the 5 bps creator share are config values, split at execution.
+  - Creators claim from the take account.
+  - Settler-signed prices settle each position into the owner's `Profile` (P&L, stake, wins), and the program mints badges.
+- **Production-grade:**
+  - **Self-CPI events** (`emit_cpi!`), so big trades never lose events to log truncation.
+  - **Tests:** LiteSVM and property tests, with compute and rent ceilings enforced in CI.
+  - **Security:** a security review, two-step admin hand-over and a separate allowlist key.
+  - **Verifiable builds** (`solana-verify`).
+
+### Gemini Prediction Markets
+Prediction markets become **first-class legs in every basket**, so Gemini's data reaches a social, on-chain app, next to stocks and perps.
+- **AI market discovery:** every open Gemini contract, in all categories, is indexed for the take builder's BM25 search. A take about a rate decision, an election or a game picks up the matching contract by itself.
+- **Live pricing:** a prediction leg fills at the side's live best ask. It exits at the best bid, or at 1 or 0 once the contract resolves. A fade takes the other side.
+- **Scored on-chain:** the settler signs Gemini entry and exit prices into the Thesis program, so prediction legs count in the same P&L, leaderboards and badges as everything else.
+- **Endpoints** (Gemini Prediction Markets API, market data):
+  - `GET /v1/prediction-markets/categories`
+  - `GET /v1/prediction-markets/events`
+  - `GET /v1/prediction-markets/events/<ticker>`
+
+  They're read through our Supabase `gemini` proxy, which trims each event to ~1.5 KB. A full sweep runs every 6 hours, and trades and settlement read single events live. Quotes come only from `bestBid` / `bestAsk`, never from last-trade fills.
+
+More: [`gemini-plan.md`](docs/gemini-plan.md).
+
+### QuickNode Streams
+QuickNode Streams is the **source of truth for the whole social layer**: feed counts, takes going live, notifications, both scores and every leaderboard are built from Thesis program events the Stream delivers.
+
+```mermaid
+flowchart LR
+    S["Solana<br/>Thesis program"] --> Q["QuickNode Stream<br/>Block dataset<br/>thesis-filter.js"]
+    Q -->|"POST, HMAC-signed"| W["Supabase webhook<br/>quicknode-stream"]
+    W --> E[("chain_events<br/>chain_takes<br/>chain_positions")]
+    E --> F["Feed · takes go live"]
+    E --> N["Notifications · push"]
+    E --> L["Scores · leaderboards"]
+    E --> T["Settler's open set"]
+```
+
+| Setting | Value | Why |
+|---|---|---|
+| Network | Solana mainnet | The program's network |
+| Dataset | **Block** | Includes inner instructions, so CPI calls and self-CPI events are visible |
+| Batch | 5 blocks, elastic, restream on reorg | Tip Streams on Solana batch ≥5; elastic still delivers per block |
+| Filter | [`thesis-filter.js`](infra/quicknode/thesis-filter.js) | Only Thesis transactions get through, already decoded (below) |
+| Destination | Webhook → Supabase `quicknode-stream` | Lands straight in the tables the apps read |
+
+**The filter:**
+1. Drops failed transactions.
+2. Keeps a transaction only if Thesis is invoked anywhere: top level, CPI, or a program ID loaded from a lookup table.
+3. Names each instruction by its Anchor discriminator.
+4. Extracts the self-CPI events.
+5. Trims logs to what matters.
+
+A batch with no Thesis activity returns `null`, so nothing is delivered.
+
+**The webhook:**
+- verifies QuickNode's HMAC signature and refuses replays older than 5 minutes;
+- decodes events against the program's IDL;
+- ingests them idempotently per `(network, signature, ordinal)`, so retries and reorgs never double-count.
+
+**On the fork,** a relay runs **the exact same filter** in a QuickNode-like sandbox and signs deliveries like QuickNode, so production's webhook path is exercised on every trade. **QuickNode RPC also powers the fork itself:** every mainnet account it reads (Jupiter pools, Phoenix markets, xStock mints) comes through our QuickNode endpoint.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph S["Surfaces"]
+        WEB["Web app<br/>yourthesis.xyz"]
+        IOS["iOS app"]
+        XB["X bot"]
+        IM["iMessage agent"]
+    end
+    subgraph B["Supabase"]
+        AI["take-builder<br/>AI baskets"]
+        AG["agent<br/>Privy session signer,<br/>user's limits"]
+        WH["quicknode-stream<br/>webhook"]
+        DB[("Postgres<br/>feed · scores ·<br/>notifications")]
+    end
+    subgraph V["Oracle VM"]
+        FA["Fork API<br/>builds and sends trades"]
+        SP["Solana mainnet fork<br/>Thesis program · Jupiter ·<br/>Jupiter Lend · Phoenix"]
+        ST["Settler · marker<br/>signed prices from Jupiter,<br/>Gemini, Collector Crypt"]
+    end
+    WEB & IOS -->|"user signs"| FA
+    XB & IM --> AG --> FA
+    S -.->|"take → basket"| AI
+    FA --> SP
+    ST --> SP
+    SP -->|"Stream filter"| WH --> DB
+    DB -.->|"reads"| S
+```
 
 | Path | What it is |
-| --- | --- |
-| `anchor/` | The Thesis Solana program: takes, non-custodial receipts with proof of trade, fee split, escrow for paper legs, settler prices, settlement, badges |
-| `packages/chain` | TS client from the IDL: addresses, instruction builders, the transaction composer, the lookup table, event and Stream decoding |
-| `packages/venues` | Venue adapters (Jupiter and Jupiter Lend, Gemini, Phoenix, Collector Crypt), the asset bank with best-issuer routing (`bank/`), and the liquidity registry (`registry/` → `docs/liquidity.md`) |
-| `packages/take-builder` | The take builder's securities catalog and index; the builder itself is the `take-builder` Supabase function |
-| `packages/agent` | Chat agent brain, transport-agnostic: baskets and trades by text (Luna with tools), the client for the `agent` function |
-| `apps/www` | The public web app (Vercel): feed, Scores, Search, composer, Me, Copy from X, Copy trading, limits, take pages; trades on the fork with Privy |
-| `apps/ios` | SwiftUI iPhone app (iOS 26): social data from Supabase, money on the fork |
-| `apps/imessage` | iMessage transport: provider adapters → agent → replies |
-| `apps/x` | The X bot (@yourthesisxyz): reads mentions, replies, trades through the `agent` function |
-| `apps/executor` | The settler (holds the settler key, never user funds), the asset-bank poller and the marker (live returns) |
-| `apps/web` | The fork Blink (closed; code kept, unmaintained) |
-| `scripts/fork` | The mainnet-fork dogfood environment and the fork API |
-| `infra/executor` | The Oracle VM that runs the one shared fork and the always-on services |
-| `infra/quicknode` | The QuickNode Stream filter, fixtures, and the fork relay |
-| `infra/badges` | Badge images and Token-2022 metadata in Supabase Storage |
-| `infra/bots` | The Railway service that runs the X and iMessage bots |
-| `supabase/` | Migrations, edge functions, seed, config |
-| `docs/design` | Design tokens, principles and exported assets |
-| `media/demo-film` | The demo film: the story cut and the app walkthrough (Remotion), with its build scripts ([`README`](media/demo-film/README.md)) |
+|---|---|
+| [`anchor/`](anchor) | The Thesis program |
+| [`packages/chain`](packages/chain/README.md) | TypeScript client: instruction builders, the transaction composer, event decoding |
+| [`packages/venues`](packages/venues/README.md) | Jupiter, Jupiter Lend, Phoenix, Gemini and Collector Crypt adapters, and the asset bank |
+| [`packages/take-builder`](packages/take-builder/README.md), [`packages/agent`](packages/agent/README.md) | The take builder's catalog and eval; the chat agent behind both bots |
+| [`apps/www`](apps/www/README.md), [`apps/ios`](apps/ios/README.md) | The web app and the native iPhone app |
+| [`apps/x`](apps/x/README.md), [`apps/imessage`](apps/imessage/README.md) | The X bot and the iMessage bot |
+| [`apps/executor`](apps/executor/README.md) | The settler (signs prices), the marker (live returns), the asset bank |
+| [`scripts/fork`](scripts/fork/README.md), [`infra/`](infra) | The mainnet fork, the fork API, the VM, the Stream filter and relay |
+| [`supabase/`](supabase/README.md) | Migrations, edge functions, SQL tests |
 
-Surfaces (`apps/`) stay thin; logic lives in `packages/`.
+## Run it
 
-## Running it
-
-| Part | State | How to run |
-| --- | --- | --- |
-| Web (`apps/www`) | The public app, live at `yourthesis.xyz` (Vercel) on the shared fork: Google, email and X sign-in, trading, posting, scores. Settings in [`apps/www/.env.example`](apps/www/.env.example) | [`apps/www/README.md`](apps/www/README.md) |
-| iOS (`apps/ios`) | A development build on the team's phones (no App Store until phase 3). Social data from Supabase; trades, posting and receipts on the fork, including prediction, perp and card legs | [`apps/ios/README.md`](apps/ios/README.md) |
-| iMessage (`apps/imessage`) | Live on Railway (Sendblue): drafts baskets, and trades by text (post, back, fade, sell) from the texter's own account within their `/limits`; each trade waits for a like or "yes". Not dogfooded yet | [`apps/imessage/README.md`](apps/imessage/README.md) |
-| X bot (`apps/x`) | Live as @yourthesisxyz on Railway: baskets, trades (back, fade, sell), scores and copy from replies, with the basket or score card as a picture. `copy` dogfooded; replies and trades not yet | [`apps/x/README.md`](apps/x/README.md) |
-| Share sheet, Copy from X and copy trading (`supabase/functions/source`, `agent`) | Live: shared articles and X posts become drafted takes; copied X accounts' calls arrive as one-tap takes, or are traded for you with auto-copy (dogfooded 2026-11-20) | [`docs/share-and-copy.md`](docs/share-and-copy.md) |
-| Anchor program (`anchor/`) | Built and tested; deployed on the fork, not on mainnet. Open review item: M-3 ([`docs/security-review.md`](docs/security-review.md)) | Below |
-| Executor (`apps/executor`) | Runs on the VM against the fork | [`apps/executor/README.md`](apps/executor/README.md) |
-| Mainnet fork (`scripts/fork`) | One shared fork on the Oracle VM; the apps reach its fork API at `https://<fork-host>` (`FORK_API_URL`) | Nothing to run for the apps. Operating it: [`infra/executor/README.md`](infra/executor/README.md), [`scripts/fork/README.md`](scripts/fork/README.md) |
-| Live data (`infra/quicknode`) | Program events reach Supabase through the fork relay today, and through a QuickNode Stream on mainnet | [`infra/quicknode/README.md`](infra/quicknode/README.md) |
-
-### iOS app
-
-Needs Xcode 26 with the iOS 26 platform and Metal Toolchain (Xcode → Settings → Components).
+The web app needs Node 24 and pnpm:
 
 ```sh
-brew install xcodegen
-cd apps/ios && xcodegen generate && open Thesis.xcodeproj
+pnpm install
+cp apps/www/.env.example apps/www/.env.local      # Privy app, Supabase URL and key, fork API host
+pnpm --filter @thesis/www dev                     # http://localhost:3100
 ```
 
-Press ⌘R for the simulator, or set your team under Signing & Capabilities to run on your phone (free accounts: the app expires after 7 days). Tests: ⌘U. More in [`apps/ios/README.md`](apps/ios/README.md).
-
-### Anchor program
-
-Needs Rust (pinned in `anchor/rust-toolchain.toml`), the Solana CLI (Agave 4.1.2) and Anchor 1.2.2 via `avm`.
+The program needs Rust, the Solana CLI 4.1.2 and Anchor 1.2.2:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-sh -c "$(curl -sSfL https://release.anza.xyz/v4.1.2/install)"
-cargo install --git https://github.com/solana-foundation/anchor --tag v1.2.2 avm --locked
-avm install 1.2.2 && avm use 1.2.2
-
-cd anchor
-anchor build                                     # program and IDL
-cargo test                                       # LiteSVM tests plus property tests of the math
-PROPTEST_CASES=50000 cargo test --lib --release  # deeper property tests
+cd anchor && anchor build && cargo test           # LiteSVM tests plus property tests
 ```
 
-After an interface change, copy `anchor/target/idl/thesis.json` and `anchor/target/types/*.ts` to `packages/chain/idl/` (CI fails if they differ); the full checklist is in [`docs/hardening-plan.md`](docs/hardening-plan.md#working-on-the-program).
-
-### Verifiable build
-
-`solana-verify` builds the program in a pinned Docker image (`solanafoundation/solana-verifiable-build:4.1.2`), so anyone can reproduce it and explorers can match it to a deployed program. Needs Docker.
+**Package tests:**
 
 ```sh
-cargo install solana-verify --version 0.5.2 --locked
-cd anchor
-solana-verify build --library-name thesis --base-image solanafoundation/solana-verifiable-build:4.1.2
-solana-verify get-executable-hash target/deploy/thesis.so
+pnpm --filter @thesis/chain test                  # also venues, executor, fork, agent, x, imessage
 ```
 
-CI runs it on every push to `main` and on demand (`.github/workflows/verifiable-build.yml`), with the hash in the run summary and `thesis.so` uploaded. At mainnet launch: deploy that `thesis.so`, check it with `solana-verify get-program-hash <PROGRAM_ID>`, and publish with `solana-verify verify-from-repo`.
+**iOS:** `brew install xcodegen && cd apps/ios && xcodegen generate && open Thesis.xcodeproj` ([setup](apps/ios/README.md)).
 
-### Checks
-
-```sh
-pnpm --filter @thesis/chain test      # also @thesis/venues, @thesis/executor, @thesis/take-builder, @thesis/fork, @thesis/agent, @thesis/x, @thesis/imessage
-```
-
-CI (`.github/workflows/`) runs these, the program's build, tests, fmt and clippy, the web app's build, the edge functions' Deno checks, the iOS build on PRs touching `apps/ios/`, and the SQL tests on PRs touching `supabase/`.
-
-Fork e2e suites run on the shared fork, on the VM ([`infra/executor/README.md`](infra/executor/README.md), "Running it"); the full list is in [`scripts/fork/README.md`](scripts/fork/README.md#commands). The usual ones:
-
-```sh
-pnpm fork:api-e2e                     # the apps' fork-mode flow over HTTP
-pnpm fork:jupiter-e2e                 # Jupiter swaps + Jupiter Lend + receipts, then entry prices
-pnpm fork:exit-e2e -- --settle        # partial and full sales, then settle them
-pnpm fork:settler-e2e -- --move-clock # moves the fork's clock ~4 days: the fork maintainer's OK only, then restart the fork
-```
+Every surface talks to one shared fork on our VM ([`infra/executor`](infra/executor/README.md)). CI covers:
+- the program's build, tests, fmt and clippy;
+- every package's typecheck and tests;
+- the web build;
+- the edge functions;
+- the SQL tests;
+- the iOS build.
 
 ## What's next
+1. **Mainnet:** deploy the verifiable build behind a safe upgrade key, with a QuickNode Stream on the live program.
+2. **Real money:** USDC in over CCTP, an Apple Pay onramp, withdrawals, and the iOS app on the App Store.
+3. **The Thesis MCP server:** AI assistants can score accounts and trade takes for a user, within that user's limits.
+4. **More chat surfaces:** Telegram, Discord and WhatsApp, on the same agent.
 
-A direction, not a schedule, ordered by the three phases: a public fork, a private mainnet program, then real mainnet. The program's own steps are in [`docs/onchain-plan.md`](docs/onchain-plan.md).
-
-### Phase 1: a public fork
-
-Anyone signs up on the web app, replies "@yourthesisxyz back $20" under a post on X, and trades play money on the shared fork. The iOS app stays a development build on the team's phones until phase 3.
-
-**Built and live on the fork**
-- **The web app** at `yourthesis.xyz` ([`apps/www`](apps/www/README.md)): sign-in with Google, email or X; feed, Scores, Search, comments, notifications and web push, Copy from X, Copy trading, trading-by-text limits, the composer, Me with both scores, creator fees and the $1,000 cap; an install prompt; on desktop, the phone layout with a QR code. Vercel builds production from `main` only.
-- **The fork API in public** at `https://<fork-host>`, published by Caddy on the VM ([`infra/executor`](infra/executor/README.md)). The browser calls it directly, server renders read with a service key, and auth and read limits are enforced ([abuse limits](scripts/fork/README.md#abuse-limits)): a Privy token on money routes, 10 money actions a minute and 100 a day per wallet, 120 reads a minute per Privy user (else per IP), and $1,000 of play money per account with no top-ups or withdrawals.
-- **No-timeline takes:** no horizon anywhere; a take runs until its author sells their buy-in, at most 365 days; the author's full sale closes it.
-- **Inverted takes:** a bearish take ("crypto sucks") is built as the basket it's against and posted inverted: the author and everyone who agrees hold the short side (Phoenix shorts, the other side of prediction legs), and anyone who disagrees holds the basket long. Every leg must be shortable, so no cash or cards. The apps show "Betting against these" and an Against pill; the bots reply "Betting against: …".
-- **Partial sales:** sell a share of a position, or of a whole holding, by % or $, as long as $10 stays in; Buy | Sell tabs on web and iOS, swipe to sell all on the profile. An author's partial sale keeps the take open.
-- **Speed checked** with `pnpm fork:load-trades` (2026-11-19, 4–5 people at once, every leg type): every trade landed and 18 of 19 sales, with no Jupiter waits; Phoenix sends queue one at a time (up to ~2 s when all 5 tap together), and a wallet's first Phoenix trade registers its Phoenix accounts (2–5 s, during the sheet's prebuild in the apps).
-- **Fast trades:** builds made before the tap and refreshed until used, sent with accept-then-confirm; each token's route is kept for 10 minutes and repriced, so most builds cost one Jupiter price read or none, and a back's sell routes are seeded right after it lands. Measured: tap to "You're in" in about 0.2–0.5 s with a ready build (Privy's signing is most of it); a first build of a take ~1 s on the Developer-plan Jupiter key; Phoenix legs re-copy only Phoenix's accounts and read mainnet's makers during the build. A swap refused for slippage, or failing inside its pool, is answered `requote` and the apps build and sign it again without a tap; a tap waits up to 20 s for Jupiter rather than failing.
-- **Legs:** spot and yield (Jupiter, Jupiter Lend), Gemini prediction legs and Collector Crypt card legs (paper; each card leg shows Collector Crypt's logo), Phoenix perps and shorts with liquidation warnings. At most 5 legs a take (the program allows 10) and up to 3 cards, each at most 20%, unless the take is about cards. Phoenix's mainnet traders are put back to their mainnet inventory before each Phoenix trade, so fork fills never pile up against the makers (thin markets like CoreWeave panicked before). Fade shows only when a leg can be faded, and nobody can fade their own take.
-- **Trading by text** (2026-11-19/20): a user allows Thesis's Privy session signer once on the limits screen (`/limits`: per-trade and daily limits, revocable), and the `agent` function trades for them within those limits (`supabase/functions/agent`: limits checked under a lock, the fork API builds, the session signer signs). The X and iMessage bots and auto-copy use it; the MCP server will too. Limits go up to $1,000 a trade and a day; the owner's account has $10,000 of play money and limits (`FORK_DEPOSIT_CAP_OVERRIDES`, `AGENT_LIMIT_OVERRIDES`).
-- **The X bot** ([`apps/x`](apps/x/README.md)), live as @yourthesisxyz since 2026-11-20: "make this a take" (a draft for the asker), "back $20" / "fade $20" (a take of their own with that buy-in, or a back or fade of a Thesis take or of the bot's own reply), "sell" / "sell half" / "sell $20", "score" / "score @handle" (the Thesis record of the account linked to that X account: own P&L, made for backers, takes, and a P&L-chart card), and "copy" (auto-copy that account). Built and live; `copy` is dogfooded, replies and trades from mentions aren't yet. Replies carry no link (they point to the bio) but carry the basket or score card as a picture. X takes always build at high risk; several repliers under one post share one basket; someone without a Thesis account gets one reply; 10 replies per person a day (`X_UNLIMITED` for the team). Takes made from X show a "Take from X ↗" tag linking to the post.
-- **The iMessage bot** ([`apps/imessage`](apps/imessage/README.md)) drafts baskets and trades by text: "make this a take for $20", "I'm in for $50 on Jake's take", "fading Jake for $25", "sell half my nvidia take", "my positions". A first-time number gets a one-time link to connect it on `/limits`; every trade waits for a like or "yes" ("On it. Like this message or reply yes to confirm: …"). It runs on Railway with the X bot (one service, `thesis-bots`: [`infra/bots`](infra/bots/README.md)) on Sendblue's free line, so only DMs from up to 10 verified contacts; group chats need a dedicated line or BlueBubbles. Built and live, not dogfooded yet.
-- **Copy trading** ([`docs/share-and-copy.md`](docs/share-and-copy.md#auto-copy)), dogfooded end to end on 2026-11-20: auto-copy an X account (each new call becomes your own take, kept out of the feeds) or a Thesis trader (their new takes are backed), $20 a call and 3 a day by default, fully automatic within your limits. Set it on Copy from X, in the Copy trading tab, with Copy on a profile, or by replying "@yourthesisxyz copy". The X poll (Apify) reads auto-copied accounts every 15 minutes and the rest hourly.
-- **A clean feed:** e2e suites trade only made-up takes from hidden accounts.
-- **Limits checked (2026-11-18; trades load-tested 2026-11-19):** Privy's free tier (500 monthly users) is enough; Supabase is far under its free limits; Vercel stays on Hobby; the VM serves 200 concurrent readers through Caddy with no failures. Jupiter was the tightest limit: since 2026-11-19 `JUPITER_API_KEY` is on the owner's Developer plan ($25 a month, 10 requests a second per organisation), and the fork API uses it at 420 a minute.
-
-**Left before opening it up**
-- **Dogfood the bots:** on X, a real "back $10" mention with the basket picture (the first image upload), "sell" under the bot's reply, "score" under a post, and a second account backing the first's take; on iMessage, connecting a number, a trade confirmed by "yes" and one by a like (whether Sendblue passes tapbacks through is unchecked).
-- **Basket size:** since the take builder's #150 ("picks that move with the take, or none"), many baskets have a single pick (an NVIDIA take is NVIDIA alone, with AMD, Broadcom and Micron tradeable). A two-line prompt change (2–5 picks when several listed names move with the take) is proposed; check with its author first.
-- **Dogfood** every screen at phone and desktop width and every trade path (back, fade, partial and full sale, cash-out, claims; spot, yield, perp, prediction and card legs) on web and iOS, including Phoenix on a phone (the liquidation alert hasn't fired on the fork, which can't move a price that far).
-- **Share to Messages:** a link shared to the Thesis contact becomes a drafted take through the `source` function. It's the public share path, since iOS won't list a web app in the share sheet. (The BlueBubbles adapter is untested on a real install.)
-- **Cards** (required for phase 1): tune the take builder so it reliably reaches for the card search on a card take ([`docs/cards-plan.md`](docs/cards-plan.md)).
-- **Open the fork:** resets are allowed until it's public; from then, none ([resets](scripts/fork/README.md#resets)).
-
-**Also in phase 1**
-- **The Thesis MCP server:** score an account, build a take from a post, back, fade, sell and list positions, within the user's limits.
-- **X cost limits:** done so far: one basket per post shared by every replier, accounts read only while someone copies them (hourly unless auto-copied), scores from in-app data only (no X reads). Left: cache share results per URL; move the X reads from Apify (which scrapes against X's terms) to X's API before mainnet.
-
-### Phase 2: a private mainnet program
-
-No users and no money in; a real program ID and real activity ([launch checklist](docs/onchain-plan.md#mainnet-launch-checklist)). The project owner holds the upgrade authority, and the SOL for the deploy is ready.
-- Deploy the program (about 5–10 SOL of rent, refundable by closing it), `init_config`, and the upgrade authority on a separate safe key.
-- A QuickNode Stream on the mainnet program, delivering to the `quicknode-stream` webhook ([`infra/quicknode`](infra/quicknode/README.md)).
-- One or two team trades (spot and yield legs only, from a wallet eligible for xStocks; the settler on a fresh key), so the explorer and the Stream show activity.
-- Optional (either could live on the fork instead): X calls on-chain (the settler posts a Merkle root over batches of scored calls, so a call survives its post being deleted); agent spending limits enforced by the Thesis program.
-
-### Phase 3: real mainnet
-
-- The native iOS app on the App Store (the Apple Developer Program is paid then, not before). Until then the team's development builds aren't rebuilt (deferred 2026-11-19: the web app is the product for phase 1); the next one comes from `main` against the fork host (`FORK_API_URL = https:/$()/<fork-host>`), on a Mac with an Apple ID in Xcode, and picks up inverted takes, stopped-trade recovery, the 5-pick cap, "Finding assets that match" and Collector Crypt's logo on card legs.
-- Money in: USDC over CCTP, and an Apple Pay onramp. Withdrawals and an offramp.
-- The mainnet gate: the whole product (UI, backend, AI, iMessage) dogfooded on the fork first.
-- Security: a fuller outside review; the settler key in OCI Vault; the upgrade authority on a multisig, with a separate allowlist key.
-- Phoenix registration by a non-US person or entity, and optionally a builder account ([`docs/phoenix-plan.md`](docs/phoenix-plan.md)).
-- Rules for real money: geoblocking (`US_RESTRICTIONS=on` brings back the old rule); labels for paper legs so paper gains never look withdrawable, or real Gemini orders.
-- The QuickNode Stream for everything, deployed from the program's commit.
-- More chat surfaces (Telegram, Discord, WhatsApp).
-
-### Account-owner setup
-
-- **X developer app: done, and the bot is live (2026-11-20).** Pay-per-use credits ($40), the app owned by @yourthesisxyz with Read and Write permissions (the access token was regenerated after setting them), the account marked automated, X's approval for an AI reply bot granted, and the monthly cap raised.
-- **Privy: done.** Sign-in with X and session signers are on; the session signer's authorization key is registered in the Privy app and set in Supabase (`PRIVY_AUTHORIZATION_KEY`, `PRIVY_SIGNER_ID`).
-
-### Open decisions
-
-| When | Decision |
-|---|---|
-| Phase 3 | Fees on small X trades: below about $50 the 10 bps fee doesn't cover X and AI costs (~$0.05 a trade). A flat fee, a higher rate, or a higher minimum? |
-| Phase 3 | The iMessage provider (BlueBubbles is built) and the Apple Pay onramp |
-| Phase 3 | Paper-leg labels and geoblocking |
-
-### Settled
-
-- **Product:** the name is Thesis; two scores instead of a formula (own P&L and made for backers, by dollars or percent, plus a faders board); a flat 5 bps creator share on every back and fade, no performance boost.
-- **Takes:** no timeline. A take runs until its author sells, at most 365 days; the author's full sale closes it and settles its headline result, and backers keep their positions until they sell. A partial sale must leave at least $10.
-- **Pricing:** Gemini quotes from best bid and ask only; token first with no band, from Jupiter and Alpaca only; tradeable means a $25k pool and under 1% impact on a $100 buy; a take's live return follows its author's signed entry prices; every signed price's source document is public in `price_audit`.
-- **Costs:** paid plans only where needed: the owner's QuickNode Build plan (the fork's mainnet reads) and Jupiter's Developer plan ($25 a month); Vercel, Supabase and Privy stay on free tiers (use is cut instead); X is pay-per-use credits; Apify draws on its own account for X reads.
-- **Phase 1:** web first; 10 bot replies per person a day plus a monthly cap; X takes build at high risk; scores come from in-app data only; copy trading is automatic within limits; X-reply takes are normal takes earning the replier the creator share; $1,000 of play money with no top-ups; no resets while public; one link-free reply to people who haven't signed up; iMessage trading and the MCP server in phase 1; sharing to the Thesis contact in Messages as the public share path; the bot is @yourthesisxyz.
+The full plan: [`docs/roadmap.md`](docs/roadmap.md). The on-chain design: [`docs/onchain-plan.md`](docs/onchain-plan.md).

@@ -1,6 +1,6 @@
 # Thesis Blink
 
-> **Closed:** Solana Blinks appear to be discontinued, so the Blink isn't pursued until that changes. The code and the VM's Blink service stay, unmaintained; the VM's listener is off (`FORK_BLINK_PORT=`). The X surface is now the X reply agent (README, "What's next").
+> **Closed:** Solana Blinks appear to be discontinued, so the Blink isn't pursued until that changes. The code and the VM's Blink service stay, unmaintained; the VM's listener is off (`FORK_BLINK_PORT=`). The X surface is now the X reply agent ([`apps/x`](../x/README.md)).
 
 What it does: a Solana Action and browser checkout per take, served by the fork API. The buyer's own wallet signs one transaction with up to three spot or yield legs (through the fork API's Jupiter and Jupiter Lend routing), the proof-of-trade instructions and the Thesis receipt. When the routes don't fit 1,232 bytes it drops its lightest leg and leaves the rest to the app; the Action lists omitted legs. Verified on the fork in Chrome over loopback and HTTPS, including replay and tamper refusals; the take link opens the iOS receipt (`yourthesis-dev://take/<take-id>`).
 

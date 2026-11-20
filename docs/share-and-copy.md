@@ -9,7 +9,7 @@ Share articles and X posts into Thesis, and copy X accounts and Thesis traders. 
 3. **`source`** (`_shared/source.ts`) reads X posts through X's public oEmbed (no key) and articles from the page (og tags and paragraphs), then one fast model call drafts `{ claim, risk, is_call }` (no horizon: a take runs until its author sells). The composer opens on it, credited.
 4. **Posting** calls `POST source/attach`, which sets `takes.source_url/label/kind` (author only, once). `take_json` returns `source`, shown as "via …" on the take page, the basket and the web page.
 
-The native extension needs the App Store (phase 3); until then the public share path is sharing to the Thesis contact in Messages (see the README's "What's next").
+The native extension needs the App Store (phase 3); until then the public share path is sharing to the Thesis contact in Messages (see [`roadmap.md`](roadmap.md)).
 
 ## Copy from X
 
