@@ -11,6 +11,8 @@ export type Mention = {
   parent: { text: string; username: string } | null;
   /** The mention is a reply to one of the bot's own posts. */
   toBot: boolean;
+  /** "fade $50": the asker bets against the view, so the claim is the opposite of it. */
+  fade?: boolean;
 };
 
 export type Verdict =
@@ -41,6 +43,7 @@ const INSTRUCTIONS = [
   "Market takes about elections, policy or public companies are fine when they're about markets, not about attacking people.",
   "The claim: neutral and plain, in your own words, no insults, no @handles, no URLs, no hashtags, no emoji, no tickers with $. Under 120 characters. If the post has no market view you can state neutrally, ignore.",
   "Risk: what the post says, else medium. A take has no timeline (it runs until its author sells), so ignore any date or time frame in the post.",
+  "A mention that says \"back $20\", \"in for $20\" or \"fade $50\" under a post with a market view is a take (from_parent true). When the input says <fade>yes</fade>, the asker bets against the view: write the claim as its opposite, what's true if the view is wrong (\"Nuclear won't win the AI power race\").",
 ].join(" ");
 
 const clip = (s: string, n: number) => s.replace(/\s+/g, " ").trim().slice(0, n);
@@ -55,6 +58,7 @@ export function vetter(opts: { openaiApiKey: string; model?: string }) {
       `<post>${clip(m.text, 1000)}</post>`,
       m.parent ? `<parent author="@${clip(m.parent.username, 30)}">${clip(m.parent.text, 2000)}</parent>` : "<parent>none</parent>",
       m.toBot ? "This mention replies to one of the bot's own posts." : "",
+      m.fade ? "<fade>yes</fade>" : "",
     ].filter(Boolean).join("\n");
 
     const res = (await client.responses.create({

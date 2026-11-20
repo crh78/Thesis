@@ -2,7 +2,7 @@
 
 The X bot, **@yourthesisxyz**. It answers everyone who mentions it. Under a post with a market view, "@yourthesisxyz make this a take" (or a take of your own, like "@yourthesisxyz nuclear wins the AI power race") gets a reply with the basket's picks. The basket is saved as a **draft take** for the person who asked; the reply carries **no link** (a reply with a URL costs $0.20 on X, without one $0.015), and points to the link in the bot's bio instead. When they sign in to the web app with that X account, the draft waits at the top of their feed ("Your takes from X"), and posting it makes it their take (`apps/www/app/d`). Only the person whose X account it was made for can post it.
 
-This bot drafts; it doesn't trade. Trading from an X reply ("@yourthesisxyz back $20") waits on Privy session signers (the root README's "What's next").
+**Trading from a reply:** "@yourthesisxyz back $20" (or "in for $20", "fade $50") trades from the replier's own Thesis account, within the limits they set at `/limits` (the `agent` function, Privy session signer). Under a shared Thesis take (a `/t/<id>` link in the post) it backs or fades that take. Under any other post the basket becomes the replier's take with that buy-in; for a fade, the claim is the opposite of the post's view. Someone who hasn't set limits gets the draft reply with a pointer to the bio link; over a limit, a reply saying so. Trades run only when replies really go out (`X_DRY_RUN` empty), or with `X_DRY_RUN_TRADES=1`; `X_TRADING=0` turns them off. Try it without X: `pnpm --filter @thesis/x try "back $20" --parent "Nuclear wins the AI power race" --author <you> --author-id <your X user id>` (a real trade on the fork; the reply is printed).
 
 ```
 Nuclear wins the AI power race.

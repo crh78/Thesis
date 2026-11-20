@@ -1,8 +1,11 @@
 // Run one mention through the bot without X: the vetting, a real draft, and the reply it would post.
 //   pnpm --filter @thesis/x try "nuclear is the only way to power AI"
 //   pnpm --filter @thesis/x try "make this a take" --parent "Gold to 5k by summer" --parent-author goldbug
+//   pnpm --filter @thesis/x try "back $20" --parent "Nuclear wins the AI power race" --author you --author-id <your X user id>
+// With --author-id, "back $N" / "fade $N" trade for real (on the fork) from the Thesis account that X account
+// is connected to (its limits at /limits); the reply is printed, never posted.
 // Needs OPENAI_API_KEY and the basket env (apps/x/.env); no X keys.
-import { basketConfigFromEnv } from "@thesis/agent";
+import { agentApi, agentApiConfigFromEnv, basketConfigFromEnv } from "@thesis/agent";
 import { plan } from "./bot.ts";
 import { xLength } from "./compose.ts";
 import { vetter } from "./vet.ts";
@@ -18,6 +21,9 @@ const flag = (name: string) => {
 const parentText = flag("--parent");
 const parentAuthor = flag("--parent-author") ?? "someone";
 const author = flag("--author") ?? "tester";
+const authorId = flag("--author-id") ?? undefined;
+const parentLink = flag("--parent-link");
+const tradeCfg = authorId ? agentApiConfigFromEnv() : null;
 const text = args.join(" ");
 if (!text && !parentText) throw new Error('usage: try "<mention>" [--parent "<post>" --parent-author <handle>] [--author <handle>]');
 if (!process.env.OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY");
@@ -31,9 +37,15 @@ const out = await plan(
     parent: parentText ? { text: parentText, username: parentAuthor } : null,
     parentUrl: parentText ? `https://x.com/${parentAuthor}/status/1` : null,
     toBot: false,
+    authorId,
+    links: parentLink ? [parentLink] : [],
   },
-  { vet: vetter({ openaiApiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_AGENT_MODEL || undefined }), basket: basketConfigFromEnv() },
+  {
+    vet: vetter({ openaiApiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_AGENT_MODEL || undefined }),
+    basket: basketConfigFromEnv(),
+    trading: tradeCfg ? agentApi(tradeCfg) : undefined,
+  },
 );
 if (out.kind === "skip") console.log(`(stays quiet: ${out.reason})`);
-else console.log(`${out.text}\n\n· ${out.what}, ${xLength(out.text)}/280 chars`);
+else console.log(`${out.text}\n\n· ${out.what}, ${xLength(out.text)}/280 chars${out.trade ? `, trade ${JSON.stringify(out.trade)}` : ""}${out.link ? `, ${out.link}` : ""}`);
 console.error(`· ${Date.now() - t0} ms`);

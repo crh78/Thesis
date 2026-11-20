@@ -1,12 +1,12 @@
 // @yourthesisxyz: answers everyone who mentions it on X. Polls the bot's mentions, vets each one
 // (vet.ts), builds the take's basket as a draft (the same take builder and drafts as iMessage),
 // and replies with the draft's link, where whoever taps posts it as their take.
-import { basketConfigFromEnv } from "@thesis/agent";
+import { agentApi, agentApiConfigFromEnv, basketConfigFromEnv } from "@thesis/agent";
 import { plan, type Plan } from "./bot.ts";
 import { OPTED_IN, OPTED_OUT, optCommand } from "./compose.ts";
 import { loadState, rollDay, saveState } from "./state.ts";
 import { vetter } from "./vet.ts";
-import { fullText, xClient, XError, type Mentions, type XPost } from "./x.ts";
+import { fullText, linksIn, xClient, XError, type Mentions, type XPost } from "./x.ts";
 
 function log(event: string, fields: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ t: new Date().toISOString(), event, ...fields }));
@@ -27,6 +27,9 @@ const POLL_MS = num("X_POLL_SECONDS", 30) * 1000;
 const MAX_PER_DAY = num("X_MAX_REPLIES_PER_DAY", 100);
 const MAX_PER_AUTHOR = num("X_MAX_PER_AUTHOR", 10);
 const MAX_PER_THREAD = num("X_MAX_PER_THREAD", 3);
+// Trading from replies ("back $20"): only when replies really go out, unless X_DRY_RUN_TRADES=1
+// (a dry run reads real mentions, and a trade is real), and X_TRADING isn't 0.
+const TRADING = process.env.X_TRADING !== "0" && (!DRY_RUN || process.env.X_DRY_RUN_TRADES === "1");
 const STATE_FILE = process.env.X_STATE_FILE || new URL("../.data/state.json", import.meta.url).pathname;
 
 const x = xClient({
@@ -36,6 +39,8 @@ const x = xClient({
   accessSecret: need("X_ACCESS_SECRET"),
 });
 const vet = vetter({ openaiApiKey: need("OPENAI_API_KEY"), model: process.env.OPENAI_AGENT_MODEL || undefined });
+const tradeCfg = TRADING ? agentApiConfigFromEnv() : null;
+const trading = tradeCfg ? agentApi(tradeCfg) : undefined;
 let basket: ReturnType<typeof basketConfigFromEnv>;
 try {
   basket = basketConfigFromEnv();
@@ -58,7 +63,7 @@ const me = await x.me().catch((e) => {
 });
 const state = loadState(STATE_FILE);
 saveState(STATE_FILE, state);
-log("starting", { as: `@${me.username}`, dryRun: DRY_RUN, pollSec: POLL_MS / 1000, maxPerDay: MAX_PER_DAY, sinceId: state.sinceId });
+log("starting", { as: `@${me.username}`, dryRun: DRY_RUN, trading: !!trading, pollSec: POLL_MS / 1000, maxPerDay: MAX_PER_DAY, sinceId: state.sinceId });
 
 /** Handles one mention. Returns false to stop the batch and retry it next poll (X or the model is down). */
 async function handle(p: XPost, batch: Mentions): Promise<boolean> {
@@ -97,7 +102,9 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
       parent: parentPost && parentAuthor ? { text: fullText(parentPost), username: parentAuthor.username } : null,
       parentUrl: parentPost && parentAuthor ? `https://x.com/${parentAuthor.username}/status/${parentPost.id}` : null,
       toBot: parentPost?.author_id === me.id,
-    }, { vet, basket });
+      authorId: p.author_id,
+      links: [...linksIn(p), ...(parentPost ? linksIn(parentPost) : [])],
+    }, { vet, basket, trading });
   } catch (e) {
     log("plan failed, retrying next poll", { ...base, error: (e as Error).message });
     return false;
@@ -105,11 +112,11 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
   if (out.kind === "skip") { log("skip", { ...base, reason: out.reason }); return true; }
 
   if (DRY_RUN) {
-    log("would reply", { ...base, what: out.what, text: out.text });
+    log("would reply", { ...base, what: out.what, text: out.text, ...(out.trade ? { trade: out.trade } : {}) });
   } else {
     try {
       const replyId = await x.reply(p.id, out.text);
-      log("replied", { ...base, what: out.what, replyId, link: out.link });
+      log("replied", { ...base, what: out.what, replyId, link: out.link, ...(out.trade ? { trade: out.trade } : {}) });
     } catch (e) {
       if (e instanceof XError && e.status < 500 && e.status !== 429) {
         log("reply refused", { ...base, status: e.status, error: e.body.slice(0, 200) });

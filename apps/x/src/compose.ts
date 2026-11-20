@@ -68,3 +68,43 @@ export function optCommand(text: string): "stop" | "start" | null {
   if (/^(start|opt ?in)$/.test(t)) return "start";
   return null;
 }
+
+// Trading from a reply ("@yourthesisxyz back $20", "fade $50") ------------------------------------
+
+export type Intent = { side: "back" | "fade"; usd: number };
+
+/** "back $20", "in for 20", "fade $50", "bet against this $25" → the side and dollars, else null. */
+export function tradeIntent(text: string): Intent | null {
+  const t = text.toLowerCase().replace(/,/g, "");
+  const m = t.match(/\b(back|backing|in for|i'?m in(?: for)?|buy|fade|fading|bet against|against|short)\b[^$\d]{0,20}\$?\s?(\d{1,4}(?:\.\d{1,2})?)\b/)
+    ?? t.match(/\$\s?(\d{1,4}(?:\.\d{1,2})?)\s+(?:on|to)?\s*(back|fade|against)\b/);
+  if (!m) return null;
+  const [word, num] = /^\d/.test(m[1]) ? [m[2], m[1]] : [m[1], m[2]];
+  const usd = Number(num);
+  if (!Number.isFinite(usd) || usd <= 0) return null;
+  return { side: /fad|against|short/.test(word) ? "fade" : "back", usd };
+}
+
+const dollars = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
+export const BIO = "the link in our bio";
+
+/** A trade went through: it's the replier's take now (posted with their buy-in). */
+export function tradeReply(claim: string, picks: { name: string; weight: number }[], usd: number): string | null {
+  if (picks.some((p) => NEVER.test(p.name))) return null;
+  const head = `You're in: ${dollars(usd)} on "${claim}".`;
+  const tail = `It's your take on Thesis now. See it at ${BIO}.`;
+  const room = MAX - xLength(head) - xLength(tail) - 4;
+  const text = cleanReply(`${head}\n\n${pickLine(picks, room)}\n\n${tail}`);
+  return xLength(text) <= MAX ? text : null;
+}
+
+/** A trade on a Thesis take someone shared. */
+export const takeTradeReply = (side: "back" | "fade", usd: number) =>
+  side === "back" ? `You're in: ${dollars(usd)} backing this take. See it at ${BIO}.` : `Done: ${dollars(usd)} fading this take. See it at ${BIO}.`;
+
+export const NOT_LINKED = `To trade from replies, sign in at ${BIO} and set your limits once. Then reply again.`;
+export const overLimit = (kind: "trade" | "daily", limit: number | undefined, left: number | undefined) =>
+  kind === "trade"
+    ? `That's over your ${limit != null ? `${dollars(limit)} ` : ""}per-trade limit. Change it or trade by hand at ${BIO}.`
+    : `That's past your daily limit${left != null ? ` (${dollars(left)} left today)` : ""}. Trade by hand at ${BIO}.`;
+export const TRADE_FAILED = `Couldn't place that trade just now. Try again in a minute, or at ${BIO}.`;
