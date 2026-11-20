@@ -131,7 +131,7 @@ struct ForkAPI {
         return try await signAndSubmit(built)
     }
 
-    struct PublishCheck: Decodable { let onChain: Bool; let relayed: Int }
+    struct PublishCheck: Decodable { let onChain: Bool }
 
     /// Whether a take's publish landed on the fork; if it did, the API delivers its events to the
     /// backend again, which makes the take live.
@@ -513,12 +513,9 @@ struct ForkAPIError: Error, Decodable, LocalizedError {
 
 /// The program's rules as the fork API reads them from the config account (`GET /config`).
 struct ForkConfig: Decodable, Equatable {
-    let feeBps: Int
-    let creatorFeeBps: Int
     /// The fee as a fraction of the stake: 0.001 for 10 bps.
     let feeRate: Double
     let minStakeUsd: Double
-    let maxLegs: Int
     let paused: Bool
 }
 
@@ -554,7 +551,6 @@ struct ForkBuild: Decodable {
         let stakeUsd: Double
         let remainingStakeUsd: Double
         let valueUsd: Double?
-        let remainingValueUsd: Double?
     }
 
     /// A sale built by a fork API that sells part of a position.
@@ -613,14 +609,12 @@ struct ForkReceipt: Decodable, Equatable {
                 let yes: Double?
                 let no: Double?
             }
-            let instrument: String
             let event: String
             let label: String
             /// "yes" or "no": the side a back holds. A fade holds the other one.
             let side: String
-            /// What buying each side costs now, and what selling it pays (0–1).
+            /// What buying each side costs now (0–1).
             let ask: Sides
-            let bid: Sides
             let expiry: String?
 
             /// The side a position on this leg holds.
@@ -632,11 +626,8 @@ struct ForkReceipt: Decodable, Equatable {
 
     /// A partial sale that hasn't settled yet (`priced`: the settler signed its prices).
     struct PendingSale: Decodable, Equatable {
-        let seq: Int
         let bps: Int
         let stakeUsd: Double
-        /// Unix seconds.
-        let soldAt: Double
         let priced: Bool
     }
 
@@ -654,8 +645,6 @@ struct ForkReceipt: Decodable, Equatable {
         let pendingNote: String?
         let canExit: Bool?
         let exited: Bool?
-        /** The prediction legs' share of the stake, held until the position settles. */
-        let escrowedUsd: Double?
         /** Legs held on Phoenix (leverage, shorts): where each is liquidated and how close it is. */
         let phoenix: [PhoenixRisk]?
         /** Partial sales; all missing on a fork API from before them. The cost basis still held
@@ -681,8 +670,6 @@ struct ForkReceipt: Decodable, Equatable {
             let symbol: String
             /** "long" or "short". */
             let side: String
-            let entryUsd: Double
-            let markUsd: Double?
             /** Nil when price alone can't liquidate it. */
             let liquidationUsd: Double?
             /** The move to liquidation, as a share of the market (0.18 = 18% away). */

@@ -5,8 +5,8 @@
 // Supabase (public reads with the publishable key); demo takes are mirrored on-chain on first trade.
 //
 // Settings: FORK_API_PORT (18901), FORK_HOST (127.0.0.1; 0.0.0.0 for a phone on the same Wi-Fi),
-// SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY (required), JUPITER_API_KEY (or JUPITER_TRADE_API_KEY for
-// trades, with FORK_API_JUPITER_RPM for its budget),
+// SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY (required), JUPITER_API_KEY (with FORK_API_JUPITER_RPM for
+// the trades' budget),
 // ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY (live returns on receipts; optional),
 // THESIS_WEBHOOK_URL / THESIS_WEBHOOK_TOKEN (as for `pnpm fork:relay`: an app take's publish is
 // delivered to the backend as soon as it lands, which is what makes the take live; FORK_API_RELAY=0
@@ -117,9 +117,8 @@ export async function startForkService(log: (m: string) => void, o: { takes?: Ta
     bases: new AuditBases(envVar("SETTLER_AUDIT_FILE") ?? join(DATA_DIR, "..", "settler", "audit.jsonl")),
     gemini: liveGemini(log),
     catalog: takeBuilderCatalog(),
-    // Trades may use a key of their own (JUPITER_TRADE_API_KEY, unset on the VM since the owner's
-    // Developer plan); otherwise they share JUPITER_API_KEY with the asset bank, settler and marker.
-    jupiterApiKey: envVar("JUPITER_TRADE_API_KEY") ?? envVar("JUPITER_API_KEY"),
+    // Trades share JUPITER_API_KEY with the asset bank, settler and marker.
+    jupiterApiKey: envVar("JUPITER_API_KEY"),
     dexes: FORK_DEXES,
     statePath: o.statePath ?? join(mkdtempSync(join(tmpdir(), "thesis-fork-api-")), "api-state.json"),
     fork: { addUsdc: (w, usd) => addUsdc(w, usd), setUsdc, refreshMarkets, forgetFresh, syncClock },

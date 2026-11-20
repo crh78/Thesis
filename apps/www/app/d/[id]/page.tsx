@@ -2,7 +2,6 @@
 // it yet; "Post it" opens it in the composer on that basket, and posting makes it yours. Once
 // someone's take from it is live, the link opens that take instead.
 import type { Metadata } from "next";
-import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import { notFound, redirect } from "next/navigation";
 import Basket from "@/components/Basket";

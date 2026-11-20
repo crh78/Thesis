@@ -76,7 +76,7 @@ enum TakeLifetime {
 struct Leg: Identifiable, Hashable, Codable {
     var id: String { name }
     let name: String
-    /// "Stock", "Prediction · Yes", "Stock · 3x" (the leverage the take builder chose), "Earns interest".
+    /// "Stock", "Prediction · Yes", "Perp · 3x" (the leverage the take builder chose), "Earns interest".
     let kind: String
     var weight: Double
     var why: String
@@ -97,7 +97,7 @@ struct Leg: Identifiable, Hashable, Codable {
         return kind.hasSuffix("No") ? "no" : "yes"
     }
 
-    /// A leveraged pick's leverage, from its kind ("Stock · 3x"); nil for anything else.
+    /// A leveraged pick's leverage, from its kind ("Perp · 3x", or an older "Stock · 3x"); nil for anything else.
     var leverage: Int? {
         guard let match = kind.firstMatch(of: /(\d+)x$/) else { return nil }
         return Int(match.1)
@@ -113,7 +113,7 @@ struct Asset: Identifiable, Hashable, Codable {
     let symbol: String
     /// "NVIDIA".
     let name: String
-    /// "Stock", "ETF", "Prediction", "Earns interest", "Stock · 2x".
+    /// "Stock", "ETF", "Prediction", "Earns interest", "Perp · 2x".
     let kindLabel: String
     let kind: String
     let venue: String

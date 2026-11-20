@@ -12,7 +12,7 @@ struct AssetLogo: View {
     /// The underlying ticker ("NVDA", "BTC", "SPACEX", "XAU"); nil for picks without one.
     let key: String?
     let name: String
-    /// The pick's kind label ("Stock", "ETF", "Earns interest", "Prediction · Yes", "Stock · 3x")
+    /// The pick's kind label ("Stock", "ETF", "Earns interest", "Prediction · Yes", "Perp · 3x")
     /// or an asset's raw kind ("stock", "yield", "prediction").
     let kind: String
     var size: CGFloat = 32

@@ -13,7 +13,6 @@ struct RemoteProfile: Codable, Equatable {
     var displayName: String?
     /// `face:<name>:<color>`, an https photo URL, or `asset:<name>` (demo).
     var avatarUrl: String?
-    var solanaAddress: String?
 
     var hasAvatar: Bool { avatarUrl != nil }
 }
@@ -21,7 +20,6 @@ struct RemoteProfile: Codable, Equatable {
 struct RemoteAccount: Codable, Equatable {
     var country: String?
     var usState: String?
-    var onboardedAt: String?
 }
 
 /// Onboarding fields. `nil` fields are left out of the request and unchanged.
