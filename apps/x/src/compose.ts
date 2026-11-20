@@ -151,3 +151,22 @@ export function plainCommand(text: string): boolean {
     .trim();
   return t === "" || /^(make (this|it) (a|into a) take|make a take|take|take this|this|basket|basket this|what'?s the trade|trade this|trade it|this one|on this)$/.test(t);
 }
+
+// Scores ("@yourthesisxyz score", "score @jake", "score me") -----------------------------------------
+
+/** "score" / "score @jake" / "score me" / "what's my score" → whom to score (null: the default), else not a score ask. */
+export function scoreIntent(text: string): { handle: string | null } | null {
+  const m = text.trim().match(/^(?:what'?s\s+(?:my|the|their|his|her)\s+)?score(?:\s+(?:of|for))?(?:\s+@?([A-Za-z0-9_]{1,15}))?\s*[?.!]*$/i);
+  if (!m) return null;
+  const h = m[1]?.toLowerCase() ?? null;
+  return { handle: h === "me" || h === "my" || h === "mine" ? "me" : h };
+}
+
+const signed = (n: number) => `${n < 0 ? "-" : "+"}$${Math.abs(Math.round(n)).toLocaleString("en-US")}`;
+const signedPct = (n: number) => `${n < 0 ? "-" : "+"}${Math.abs(n).toFixed(1)}%`;
+
+export function scoreReply(xUsername: string, self: boolean, s: { found: false } | { found: true; made: number; return_pct: number; backers_made: number; backers_pct: number; takes: number }): string {
+  const who = self ? "You" : `@${xUsername}`;
+  if (!s.found) return self ? `You're not on Thesis yet. Sign in with X at ${BIO}.` : `@${xUsername} isn't on Thesis yet. Anyone can join at ${BIO}.`;
+  return `${who} on Thesis: own P&L ${signed(s.made)} (${signedPct(s.return_pct)}), made for backers ${signed(s.backers_made)} (${signedPct(s.backers_pct)}), ${s.takes} ${s.takes === 1 ? "take" : "takes"}. Full profile at ${BIO}.`;
+}

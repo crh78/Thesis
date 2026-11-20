@@ -91,6 +91,15 @@ export function privyClient(cfg: PrivyConfig, f: typeof fetch = fetch) {
 
   return {
     user: (did: string) => call<PrivyUser>("GET", `/v1/users/${encodeURIComponent(did)}`),
+    /** The Privy user who linked this X username, or null (none; 404 / 400). Throws when Privy didn't answer. */
+    async userByXUsername(username: string): Promise<PrivyUser | null> {
+      try {
+        return await call<PrivyUser>("POST", "/v1/users/twitter/username", { username });
+      } catch (e) {
+        if (e instanceof PrivyError && (e.status === 404 || e.status === 400)) return null;
+        throw e;
+      }
+    },
     /** Whether a Thesis (Privy) user has this X account linked: true, false, or null when Privy didn't answer. */
     async hasXAccount(subject: string): Promise<boolean | null> {
       try {

@@ -25,6 +25,10 @@ export type TradeResult =
   | { ok: true; status: "landed" | "pending" | "failed"; takeId: string; url: string; usd: number | null; closesTake: boolean; existing: boolean; error?: string }
   | { ok: false; error: string; message?: string; perTradeUsd?: number; leftUsd?: number; confirmUrl?: string; takeId?: string };
 
+export type Score =
+  | { found: false }
+  | { found: true; handle: string; display_name: string | null; made: number; return_pct: number; backers_made: number; backers_pct: number; takes: number };
+
 export type Position = {
   take_id: string; claim: string; side: "back" | "fade"; stake_usd: number; value_usd: number | null;
   return_bps: number | null; can_exit: boolean | null; closes_take_if_sold_all: boolean;
@@ -71,6 +75,13 @@ export function agentApi(cfg: AgentApiConfig, f: typeof fetch = fetch) {
       const r = await post<{ url?: string; error?: string }>("links", { imessage });
       if (r.status !== 200 || !r.body.url) throw new Error(`agent links ${r.status}: ${r.body.error ?? ""}`);
       return r.body.url;
+    },
+
+    /** The Thesis account that links this X username, and its two scores (the X bot's "score"). */
+    async score(xUsername: string): Promise<Score> {
+      const r = await post<Score & { error?: string }>("score", { x_username: xUsername });
+      if (r.status !== 200) throw new Error(`agent score ${r.status}: ${r.body.error ?? ""}`);
+      return r.body;
     },
 
     /** A take's claim and its author's handle (null when there's no such take). */

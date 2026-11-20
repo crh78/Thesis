@@ -19,14 +19,20 @@ Railway project `thesis-bots`, service `bots`:
   never answers a mention twice across restarts and redeploys.
 - **Variables:** everything in `apps/imessage/.env.example` and `apps/x/.env.example`. The bots
   need only `THESIS_BOT_SECRET` from Thesis (the Vault's `bot_secret`), plus `SUPABASE_URL`,
-  `OPENAI_API_KEY` and the Sendblue keys. Keep `X_DRY_RUN=1` until the dry-run replies look
-  right and X has approved the bot (`apps/x/README.md`).
+  `OPENAI_API_KEY` and the Sendblue keys. The X bot is live (`X_DRY_RUN` unset since
+  2026-11-20); `X_UNLIMITED=chrisherzog78` lifts the reply caps for the owner. Trading and scores
+  go through the `agent` function with the same bot secret.
 
-Deploy from the repo root:
+Deploy `main`, from a clean export, never the working tree (it would upload local folders such as
+`.claude/`, and changes that aren't merged):
 
 ```sh
-railway up --service bots      # uploads the repo (minus .gitignore'd files) and builds
+dir=$(mktemp -d) && git archive origin/main | tar -x -C "$dir" && cd "$dir"
+railway link -p thesis-bots -s bots -e production
+railway up --service bots --ci
 railway logs --service bots
 ```
+
+Changing a variable doesn't always redeploy: `railway redeploy --service bots -y` after deleting one.
 
 Run it locally the same way: `node infra/bots/run.mts` with the bots' variables in the environment.
