@@ -113,6 +113,12 @@ export default function SettingsPage() {
         {pushError ? <div className="err">{pushError}</div> : null}
       </section>
 
+      <section className="set-sec">
+        <div className="caps">Trading by text</div>
+        <button className="set-row" onClick={() => router.push("/limits")}><span>Limits for iMessage and X</span><span className="muted">›</span></button>
+        <p className="muted small">Let Thesis trade for you when you text it or reply on X, up to limits you set.</p>
+      </section>
+
       {X_LOGIN ? (
       <section className="set-sec">
         <div className="caps">X</div>
