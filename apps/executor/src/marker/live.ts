@@ -41,7 +41,7 @@ export class Db {
 
   /** False until a read shows chain_takes has closed_at (the author's sale). */
   hasClosedColumn = true;
-  /** False until a read shows takes has inverted (0061_inverted_takes); before it, no take is. */
+  /** False until a read shows takes has inverted (0062_inverted_takes); before it, no take is. */
   hasInvertedColumn = true;
 
   /**

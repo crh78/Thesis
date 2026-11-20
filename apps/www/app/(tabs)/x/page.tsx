@@ -1,8 +1,12 @@
 "use client";
 // Copy from X, like the iOS XCopyView: add an X account, and each market call it posts becomes a
 // drafted take. The accounts you copy sit in a row of faces (tap one for just its calls), then
-// every call, newest first. Nothing trades by itself (one-tap copy, not auto-copy).
+// every call, newest first. Tapping a face shows its Auto-copy switch: on, Thesis trades each new
+// call for you (copy trading, /copy); off, calls are one-tap copies.
 // Copy on a call opens the composer with that take drafted, its basket built, credited to the post.
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCopies } from "@/lib/copies";
 import { useCallback, useEffect, useState } from "react";
 import { age } from "@/components/TakeRow";
 import { XAvatar, type XAccount } from "@/components/XTraders";
@@ -24,8 +28,33 @@ function cleanHandle(s: string): string {
   return (h.match(/^[A-Za-z0-9_]+/)?.[0] ?? "").slice(0, 15);
 }
 
+/** Auto-copy for one X account: the switch, what it does, and where its settings are. */
+function AutoBar({ handle, username, copies, onToggle }: { handle: string; username: string; copies: ReturnType<typeof useCopies>["copies"]; onToggle: (on: boolean) => void }) {
+  const c = copies?.x.find((x) => x.handle === handle);
+  if (!copies || !c) return null;
+  return (
+    <div className="xauto-bar">
+      <div className="xauto-text">
+        <b>Auto-copy @{username}</b>
+        <span className="muted small">
+          {c.auto ? `Thesis puts $${c.usd} into each new call, up to ${c.daily} a day.` : "Thesis puts money into each new call for you, up to your limits."}{" "}
+          <Link href="/copy">Settings</Link>
+        </span>
+      </div>
+      <input type="checkbox" className="switch" checked={c.auto} onChange={() => onToggle(!c.auto)} aria-label={`Auto-copy @${username}`} />
+    </div>
+  );
+}
+
 export default function XCopyPage() {
   const { source } = useSession();
+  const router = useRouter();
+  const { copies, reload: reloadCopies, setX } = useCopies();
+  const autoOn = (h: string) => !!copies?.x.find((x) => x.handle === h)?.auto;
+  async function toggleAuto(h: string, on: boolean) {
+    if (on && copies && !copies.linked) return router.push("/limits");
+    await setX(h, { auto: on }).catch(() => {});
+  }
   const composer = useComposer();
   const [accounts, setAccounts] = useState<XAccount[] | null>(null);
   const [handle, setHandle] = useState("");
@@ -51,6 +80,9 @@ export default function XCopyPage() {
       setAccounts((a) => [r.account, ...(a ?? []).filter((x) => x.handle !== r.account.handle)]);
       setHandle("");
       setAdding(false);
+      // Show the new account's Auto-copy switch right away.
+      setOnly(r.account.handle);
+      reloadCopies();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -80,7 +112,7 @@ export default function XCopyPage() {
     <main className="page xcopy">
       <TopBar />
       <h1 className="title">Copy from X</h1>
-      <p className="muted small">Their market calls become takes. Tap one to build the basket; buying in is up to you.</p>
+      <p className="muted small">Their market calls become takes you can copy in one tap, or turn on <b>Auto-copy</b> and Thesis trades each new call for you. Tap an account to set it.</p>
 
       <div className="xfaces">
         <button className="xface" onClick={() => setAdding((v) => !v)} aria-label={adding ? "Close" : "Copy an account"}>
@@ -92,18 +124,21 @@ export default function XCopyPage() {
           return (
             <button key={a.handle} className="xface" style={{ opacity: only == null || on ? 1 : 0.45 }} onClick={() => setOnly(on ? null : a.handle)}
               onContextMenu={(e) => { e.preventDefault(); setMenu(a); }} aria-pressed={on} aria-label={`@${a.username}`}>
-              <span className={`xring${on ? " on" : ""}`}><XAvatar account={a} size={54} /></span>
+              <span className={`xring${on ? " on" : ""}`}><XAvatar account={a} size={54} />{autoOn(a.handle) ? <span className="xauto-badge">AUTO</span> : null}</span>
               <span className="small" style={{ fontWeight: on ? 600 : 400, color: on ? "var(--text)" : "var(--muted)" }}>{a.username}</span>
             </button>
           );
         })}
       </div>
       {only ? (
-        <div className="xonly small">
-          Showing @{list.find((a) => a.handle === only)?.username}
-          <button className="up" onClick={() => setMenu(list.find((a) => a.handle === only) ?? null)}>More</button>
-        </div>
-      ) : null}
+        <>
+          <AutoBar handle={only} username={list.find((a) => a.handle === only)?.username ?? only} copies={copies} onToggle={(on) => toggleAuto(only, on)} />
+          <div className="xonly small">
+            Showing @{list.find((a) => a.handle === only)?.username}
+            <button className="up" onClick={() => setMenu(list.find((a) => a.handle === only) ?? null)}>More</button>
+          </div>
+        </>
+      ) : list.length ? <p className="muted small">Tap an account to turn on Auto-copy.</p> : null}
 
       {adding || (accounts != null && list.length === 0) ? (
         <form className="xadd-row" onSubmit={(e) => { e.preventDefault(); copy(handle); }}>
@@ -158,6 +193,10 @@ export default function XCopyPage() {
         <div className="sheet-wrap" onClick={(e) => e.target === e.currentTarget && setMenu(null)}>
           <div className="sheet" role="dialog" aria-label={`@${menu.username}`}>
             <h3>@{menu.username}</h3>
+            <label className="set-row">
+              <span>Auto-copy their calls</span>
+              <input type="checkbox" className="switch" checked={autoOn(menu.handle)} onChange={() => toggleAuto(menu.handle, !autoOn(menu.handle))} />
+            </label>
             <a className="obtn" style={{ marginTop: 12 }} href={`https://x.com/${menu.username}`} target="_blank" rel="noopener noreferrer nofollow">Open on X ↗</a>
             <button className="obtn plain down" onClick={() => stop(menu)}>Stop copying</button>
           </div>

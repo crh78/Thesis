@@ -174,3 +174,22 @@ export function scoreReply(xUsername: string, self: boolean, s: { found: false }
   if (!s.found) return self ? `You're not on Thesis yet. Sign in with X at ${BIO}.` : `@${xUsername} isn't on Thesis yet. Anyone can join at ${BIO}.`;
   return `${who} on Thesis: own P&L ${signed(s.made)} (${signedPct(s.return_pct)}), made for backers ${signed(s.backers_made)} (${signedPct(s.backers_pct)}), ${s.takes} ${s.takes === 1 ? "take" : "takes"}. Full profile at ${BIO}.`;
 }
+
+// Copy trading ("@yourthesisxyz copy" under someone's post, or "copy @handle") ---------------------
+
+/** "copy" / "copy them" / "copytrade" / "copy @jake" → whom (null: the post's author), else not a copy ask. */
+export function copyIntent(text: string): { handle: string | null } | null {
+  const m = text.trim().match(/^(?:auto[- ]?)?copy(?:[- ]?trade)?(?:\s+(?:them|him|her|this|this account))?(?:\s+@?([A-Za-z0-9_]{1,15}))?\s*[.!]*$/i);
+  if (!m) return null;
+  return { handle: m[1]?.toLowerCase() ?? null };
+}
+
+export function copyReply(r: { copying: true; kind: "x" | "trader"; handle: string; thesis_handle?: string; usd: number; daily: number; already: boolean }): string {
+  if (r.already) return `You already copy @${r.handle}. Change it in Copy trading at ${BIO}.`;
+  const what = r.kind === "trader" ? "each new take they post on Thesis" : "each new call they post";
+  return `Copying @${r.handle}: Thesis will put ${dollars(r.usd)} into ${what}, up to ${r.daily} a day. Change it in Copy trading at ${BIO}.`;
+}
+
+export const COPY_WHO = `Reply "copy" under a post from the account you want to copy, or "copy @handle".`;
+export const COPY_LIMIT = `You copy 10 accounts already. Remove one in Copy trading at ${BIO}.`;
+export const COPY_SELF = "You can't copy yourself.";

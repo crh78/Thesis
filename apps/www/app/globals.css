@@ -167,6 +167,24 @@ select.field { appearance: none; color: var(--text); }
 .tag-down { background: color-mix(in srgb, var(--down) 14%, transparent); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 30%, transparent); }
 a.tag-up:hover { background: rgba(169, 227, 186, 0.24); }
 .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+/* Copy trading (/copy): who you copy, their settings, recent copies. */
+.copy-item { border-bottom: 1px solid var(--hairline); display: flex; flex-wrap: wrap; align-items: center; }
+.copy-head { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 12px 0; text-align: left; }
+.copy-switch { margin-left: 12px; flex-shrink: 0; }
+.copy-item > .copy-settings { flex-basis: 100%; }
+/* Copy from X: the selected account's Auto-copy bar, and the badge on auto-copied faces. */
+.xauto-bar { display: flex; align-items: center; gap: 12px; margin: 10px 0 4px; padding: 12px 14px; border-radius: 14px; background: var(--tile); }
+.xauto-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.xring { position: relative; }
+.xauto-badge { position: absolute; right: -4px; bottom: -2px; padding: 1px 5px; border-radius: 999px; background: var(--up); color: var(--bg); font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.4px; }
+.copy-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.copy-letter { display: grid; place-items: center; background: var(--tile); font-weight: 600; }
+.copy-name { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.copy-settings { padding: 0 0 12px; }
+.copy-job { display: flex; align-items: baseline; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--hairline); font-size: 14px; }
+.copy-job-body { flex: 1; min-width: 0; }
+.copy-job-link { color: inherit; text-decoration: none; display: block; }
+
 /* A take made from an X post: links to the post. */
 .tag-x { text-decoration: none; height: 22px; padding: 0 9px; font-size: 11px; margin-left: auto; flex-shrink: 0; }
 .tag-x:hover { color: var(--text); }

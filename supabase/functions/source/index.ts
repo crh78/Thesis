@@ -20,7 +20,9 @@
 //                                  x_fetch_failed when Apify can't answer.
 //   DELETE /source/x/:handle       stop copying
 //   POST   /source/poll            header x-poll-secret: new posts from copied accounts → drafted
-//                                  takes → x_call notifications (pg_cron, every 15 minutes).
+//                                  takes → x_call notifications (pg_cron, every 15 minutes; accounts
+//                                  nobody auto-copies are read hourly). New calls of auto-copied
+//                                  accounts queue copy_jobs (migrations/*_copy_trading.sql).
 //                                  502 { error: x_fetch_failed, reason, detail } when Apify can't
 //                                  answer (503 with reason no_token); the next run reads the same window
 //   POST   /source/drafts          header x-bot-secret: a chat bot's take { claim, risk,
@@ -388,13 +390,20 @@ async function stopCopying(profile: string, raw: string) {
 }
 
 /** New posts from every copied account, in one Apify search; none when nobody copies anyone. */
+/** Accounts nobody auto-copies are read at most this often (each Apify run has a minimum charge). */
+const IDLE_POLL_MS = 55 * 60_000;
+
 async function poll() {
-  const { data: follows, error } = await db.from("x_follows").select("handle, x_accounts(username, seen_until)");
+  const { data: follows, error } = await db.from("x_follows").select("handle, auto, x_accounts(username, seen_until, polled_at)");
   dbCheck(error);
+  // Every run (15 minutes) for accounts someone auto-copies; hourly for the rest.
+  const auto = new Set((follows ?? []).filter((f) => f.auto).map((f) => f.handle as string));
   const followed = new Map<string, { username: string; seenUntil: Date }>();
   for (const f of follows ?? []) {
-    const a = (Array.isArray(f.x_accounts) ? f.x_accounts[0] : f.x_accounts) as { username: string; seen_until: string } | null;
-    if (a) followed.set(f.handle, { username: a.username, seenUntil: new Date(a.seen_until) });
+    const a = (Array.isArray(f.x_accounts) ? f.x_accounts[0] : f.x_accounts) as { username: string; seen_until: string; polled_at: string | null } | null;
+    if (!a) continue;
+    const due = auto.has(f.handle) || !a.polled_at || Date.now() - new Date(a.polled_at).getTime() >= IDLE_POLL_MS;
+    if (due) followed.set(f.handle, { username: a.username, seenUntil: new Date(a.seen_until) });
   }
   if (!followed.size) return json(200, { accounts: 0, posts: 0, stored: 0, calls: 0 });
 
