@@ -7,7 +7,7 @@
 // the chat's guid, with the server's default send method (AppleScript), which needs no Private API
 // and sends to existing group chats. Chat guids look like "iMessage;-;+15555550123" for a DM and
 // "iMessage;+;chat123…" for a group.
-import type { Handler, Inbound, Provider } from "../types.ts";
+import { tapbackFromText, type Handler, type Inbound, type Provider } from "../types.ts";
 import { log, mask } from "../log.ts";
 
 const POLL_MS = 1_500;
@@ -28,6 +28,8 @@ type BbMessage = {
   handle?: { address?: string | null } | null;
   chats?: Array<{ guid: string }>;
   associatedMessageGuid?: string | null;
+  /** A tapback's kind: "love", "like", ... ("-like" when one is taken back). */
+  associatedMessageType?: string | null;
 };
 
 export function bluebubbles(env: BlueBubblesEnv): Provider {
@@ -55,8 +57,15 @@ export function bluebubbles(env: BlueBubblesEnv): Provider {
 
   async function handle(handler: Handler, m: BbMessage, chatGuid: string) {
     const text = m.text?.trim();
-    // Tapbacks and other reactions carry an associated message; skip them like non-text.
-    if (!text || m.associatedMessageGuid) {
+    // Tapbacks carry an associated message: a like or love can confirm a trade, the rest are skipped.
+    const reaction = m.associatedMessageGuid
+      ? (m.associatedMessageType && !m.associatedMessageType.startsWith("-") ? m.associatedMessageType.toLowerCase() : null) ?? tapbackFromText(text ?? "")
+      : null;
+    if (m.associatedMessageGuid && reaction !== "like" && reaction !== "love") {
+      log("skip non-text", { chat: mask(chatGuid) });
+      return;
+    }
+    if (!text && !reaction) {
       log("skip non-text", { chat: mask(chatGuid) });
       return;
     }
@@ -66,9 +75,10 @@ export function bluebubbles(env: BlueBubblesEnv): Provider {
       chatType: chatGuid.includes(";+;") ? "group" : "dm",
       senderId: m.handle?.address ?? undefined,
       messageId: m.guid,
-      text,
+      text: text ?? "",
+      ...(reaction ? { reaction } : {}),
     };
-    log("inbound", { chat: mask(msg.chatId), type: msg.chatType, from: mask(msg.senderId), chars: text.length });
+    log("inbound", { chat: mask(msg.chatId), type: msg.chatType, from: mask(msg.senderId), chars: msg.text.length, ...(reaction ? { reaction } : {}) });
     const reply = await handler(msg);
     if (reply === null) {
       log("quiet", { chat: mask(msg.chatId) });

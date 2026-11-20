@@ -34,6 +34,10 @@
 //                                      draft_for_other_account; a fork refusal passes through as
 //                                      { error, message } with its status
 //   POST   /agent/positions          { who } → { positions } open positions (the fork API's portfolio)
+//   POST   /agent/takes              { take_id } → { claim, author, status } a live take (the
+//                                      bots' confirmation text names it); 404 no_such_take
+//   A trade with wait: false answers once the fork accepted it (status pending) and follows it
+//   to the end in the background (EdgeRuntime.waitUntil), so a bot can say "you're in" sooner.
 //
 // How a trade runs: agent_reserve (migrations/*_agent_grants.sql) holds it to the limits and
 // records it; the fork API builds it for the user's wallet (service key); Privy signs each
@@ -266,7 +270,7 @@ type Submission = { status?: string; signatures?: string[]; error?: { code?: str
 // Trades ------------------------------------------------------------------------------------------
 
 type TradeReq = {
-  who: Who; surface: Surface; ref: string | null; action: Action;
+  who: Who; surface: Surface; ref: string | null; action: Action; wait: boolean;
   takeId: string | null; draftId: string | null; usd: number | null; bps: number | null; side: "back" | "fade";
 };
 
@@ -287,7 +291,7 @@ function readTrade(b: Record<string, unknown>): TradeReq {
   if (action === "post") check(draftId && usd !== null && usd >= MIN_USD, draftId ? "invalid_usd" : "invalid_draft_id");
   if (action === "back" || action === "fade") check(takeId && usd !== null && usd >= MIN_USD, takeId ? "invalid_usd" : "invalid_take_id");
   if (action === "sell") check(takeId, "invalid_take_id");
-  return { who, surface, ref, action, takeId, draftId, usd, bps, side: b.side === "fade" ? "fade" : "back" };
+  return { who, surface, ref, action, takeId, draftId, usd, bps, side: b.side === "fade" ? "fade" : "back", wait: b.wait !== false };
 }
 
 async function finish(id: string, fields: Record<string, unknown>) {
@@ -386,6 +390,21 @@ async function trade(b: Record<string, unknown>) {
       await finish(tradeId, { take_id: takeId });
     }
     const { built, sub } = await signAndSend(t, g, takeId!);
+    if (!t.wait && sub.status === "pending") {
+      // Answer now; follow it to the end in the background.
+      const tail = settle(built.buildId, sub).then(async (d) => {
+        const st = d.status === "landed" ? "landed" : d.status === "pending" ? "pending" : "failed";
+        await finish(tradeId, { status: st, build_id: built.buildId, signatures: d.signatures ?? null, error: d.error?.code?.slice(0, 200) ?? null });
+        if (st === "failed" && created) await db.rpc("discard_posting_take", { p_author: g.profile_id, p_id: takeId });
+      }).catch((e) => console.error("settle", e));
+      const rt = (globalThis as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } }).EdgeRuntime;
+      if (rt) rt.waitUntil(tail);
+      await finish(tradeId, { build_id: built.buildId, signatures: sub.signatures ?? null });
+      return json(200, {
+        status: "pending", trade_id: tradeId, take_id: takeId, url: `${WEB_URL}/t/${takeId}`, usd: t.usd ?? built.expectedUsd ?? null,
+        signatures: sub.signatures ?? [], closes_take: built.closesTake ?? false,
+      });
+    }
     const done = await settle(built.buildId, sub);
     const status = done.status === "landed" ? "landed" : done.status === "pending" ? "pending" : "failed";
     await finish(tradeId, { status, build_id: built.buildId, signatures: done.signatures ?? null, error: done.error?.code?.slice(0, 200) ?? null });
@@ -406,6 +425,16 @@ async function trade(b: Record<string, unknown>) {
     }
     throw e;
   }
+}
+
+async function takeInfo(b: Record<string, unknown>) {
+  const id = typeof b.take_id === "string" && UUID_RE.test(b.take_id) ? b.take_id : null;
+  check(id, "invalid_take_id");
+  const { data, error } = await db.from("takes").select("claim, status, profiles:author_id(handle)").eq("id", id).maybeSingle();
+  dbCheck(error);
+  if (!data || data.status !== "live") throw new HttpError(404, "no_such_take");
+  const author = (data.profiles as { handle?: string | null } | null)?.handle ?? null;
+  return json(200, { claim: data.claim, author, status: data.status });
 }
 
 async function positions(b: Record<string, unknown>) {
@@ -446,13 +475,14 @@ Deno.serve(async (req) => {
       if (m === "DELETE") return await revokeGrant(profile);
     }
     if (route === "links" && arg && m === "GET") return await peekLink(arg);
-    if (m === "POST" && ["links", "whois", "trades", "positions"].includes(route ?? "")) {
+    if (m === "POST" && ["links", "whois", "trades", "positions", "takes"].includes(route ?? "")) {
       await requireBot(req);
       const b = await body();
       if (route === "links") return await makeLink(b);
       if (route === "whois") return await whois(b);
       if (route === "trades") return await trade(b);
       if (route === "positions") return await positions(b);
+      if (route === "takes") return await takeInfo(b);
     }
     return json(404, { error: "not_found" });
   } catch (e) {

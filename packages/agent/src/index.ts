@@ -1,15 +1,17 @@
 // Thesis chat agent, independent of transport. One OpenAI Responses call per
 // inbound message (Luna, low reasoning effort), with tools for the actions a
-// chat can take. Today: build_basket. Later: back / fade / receipts.
+// chat can take: build_basket, and trades (post, back, fade, sell) that wait for a yes (./confirm.ts).
 import OpenAI from "openai";
 import { basketTool, buildBasket, warmBasket, RISKS, type BasketArgs, type BasketConfig } from "./basket.ts";
 import { cleanReply } from "./style.ts";
-import { runTradeTool, TRADE_TOOL_NAMES, tradeTools } from "./tools.ts";
+import { askText, prepareTrade, runConfirmed, yesNo, type Pending } from "./confirm.ts";
+import { TRADE_TOOL_NAMES, tradeTools } from "./tools.ts";
 import { takeIdFrom, type AgentApi } from "./trade.ts";
 
 export type { BasketConfig, BasketResult, DraftMeta } from "./basket.ts";
 export { basketConfigFromEnv, buildBasket, plainName, warmBasket } from "./basket.ts";
 export { cleanReply } from "./style.ts";
+export { yesNo } from "./confirm.ts";
 export { agentApi, agentApiConfigFromEnv, draftIdFrom, takeIdFrom, type AgentApi, type TradeAsk, type TradeResult, type Who, type WhoIs } from "./trade.ts";
 
 export type Turn = {
@@ -21,6 +23,8 @@ export type Turn = {
   senderId?: string;
   /** The provider's message id: trades are keyed on it, so a redelivered message never trades twice. */
   messageId?: string;
+  /** A tapback rather than text ("like", "love", ...): a like or love confirms a trade waiting for a yes. */
+  reaction?: string;
   text: string;
 };
 
@@ -65,9 +69,9 @@ const TRADING = [
   "\"Make this a take for $20\" or \"I'm in for $20\" on a basket that isn't posted: build_basket if needed, then post_take with its draft_id. That posts it as their take with their buy-in.",
   "\"I'm in for $50 on Jake's take\": back_take. \"Fading Jake for $25\": fade_take. Find the take in [Recent in this chat] or a link; if more than one fits, ask which.",
   "Selling: sell_position. If it's all of a position marked closes_take_if_sold_all, first say that selling all of their buy-in closes their take to new backers, and ask them to confirm.",
-  "After a trade: status landed means it went through: say so in one short line with the amount (\"you're in: $50 on nuclear wins\"), and include the link. pending: it's going through. failed: it didn't go through; suggest trying again.",
+  "Trade tools don't trade right away: they set the trade up (status awaiting_confirmation) and the person confirms by liking the message or replying yes. The confirmation message is written for you; don't write one.",
   "error not_linked: say they need to connect once, then trades by text just work, and give the connect link. over_trade_limit or over_daily_limit: say their limit in one line and give the link to do it themselves. Any other error: one plain line, never the raw code.",
-  "Never say something was bought, sold or posted unless a trade tool returned status landed or pending. A build_basket link alone is a draft: whoever opens it can post it.",
+  "Never say something was bought, sold or posted. A build_basket link alone is a draft: whoever opens it can post it.",
 ].join(" ");
 
 
@@ -91,6 +95,12 @@ export function createAgent(cfg: AgentConfig) {
     recent.set(chatId, list.slice(-RECENT_MAX));
   };
 
+  /** Trades waiting for a yes, per chat and sender. */
+  const pending = new Map<string, Pending>();
+  /** A follow-up still sending a turn's tool outputs to the model (keeps its context whole). */
+  const catchUp = new Map<string, Promise<void>>();
+  const pendingKey = (turn: Turn) => `${turn.chatId}|${turn.senderId ?? ""}`;
+
   async function create(input: unknown, previous: string | undefined) {
     return client.responses.create({
       model,
@@ -103,17 +113,21 @@ export function createAgent(cfg: AgentConfig) {
     } as never) as Promise<OpenAI.Responses.Response>;
   }
 
-  async function runTool(call: FnCall, links: string[], turn: Turn): Promise<string> {
+  type TurnState = { links: string[]; proposal: Pending | null; picks: string[] };
+
+  async function runTool(call: FnCall, st: TurnState, turn: Turn): Promise<string> {
+    const links = st.links;
     if (TRADE_TOOL_NAMES.has(call.name)) {
       if (!cfg.trading || !turn.senderId) return JSON.stringify({ error: "trading_unavailable" });
       let args: Record<string, unknown> = {};
       try { args = JSON.parse(call.arguments); } catch { return JSON.stringify({ error: "bad arguments" }); }
       const t0 = Date.now();
-      const out = await runTradeTool(cfg.trading, { imessage: turn.senderId }, turn.messageId ?? null, call.name, args)
-        .catch((e: Error) => ({ output: { error: "trade_unavailable", message: e.message.slice(0, 120) } as Record<string, unknown>, link: undefined, take: undefined }));
+      const claims = new Map((recent.get(turn.chatId) ?? []).filter((r) => r.claim).map((r) => [r.id, r.claim!] as [string, string]));
+      const out = await prepareTrade(cfg.trading, { imessage: turn.senderId }, turn.messageId ?? null, call.name, args, claims, cfg.basket.webUrl)
+        .catch((e: Error) => ({ kind: "done" as const, output: { error: "trade_unavailable", message: e.message.slice(0, 120) } as Record<string, unknown>, link: undefined }));
       log(`tool ${call.name}`, { status: out.output.status ?? null, error: out.output.error ?? null, ms: Date.now() - t0 });
-      if (out.link) links.push(out.link);
-      if (out.take) remember(turn.chatId, { kind: "take", id: out.take.id, by: turn.sender ?? undefined });
+      if (out.kind === "pending") st.proposal = out.pending;
+      else if (out.link) links.push(out.link);
       return JSON.stringify(out.output);
     }
     if (call.name !== "build_basket") return JSON.stringify({ error: `unknown tool ${call.name}` });
@@ -133,6 +147,7 @@ export function createAgent(cfg: AgentConfig) {
     log("tool build_basket", { verdict: out.verdict, legs: out.verdict === "basket" ? out.legs.length : 0, ms: Date.now() - t0 });
     if (out.verdict === "basket") {
       links.push(out.link);
+      st.picks = out.legs.map((l) => `${l.name} ${Math.round(l.weight)}%`);
       remember(turn.chatId, { kind: "draft", id: out.draftId, claim: args.claim, by: turn.sender ?? undefined });
       return JSON.stringify({ ...out, draft_id: out.draftId });
     }
@@ -145,6 +160,27 @@ export function createAgent(cfg: AgentConfig) {
 
     /** Reply text, or null to stay quiet. */
     async respond(turn: Turn): Promise<string | null> {
+      await catchUp.get(turn.chatId);
+      // A trade waiting for this person's yes: a like / love tapback or "yes" runs it, "no" drops it.
+      const key = pendingKey(turn);
+      const waiting = pending.get(key);
+      if (waiting && waiting.expiresAt < Date.now()) pending.delete(key);
+      const live = pending.get(key);
+      const answer = turn.reaction ? (turn.reaction === "like" || turn.reaction === "love" ? "yes" : null) : yesNo(turn.text);
+      if (live && cfg.trading && answer === "yes") {
+        pending.delete(key);
+        const t0 = Date.now();
+        const r = await runConfirmed(cfg.trading, live);
+        log("trade confirmed", { action: live.ask.action, ms: Date.now() - t0, by: turn.reaction ? "reaction" : "text" });
+        if (r.takeId) remember(turn.chatId, { kind: "take", id: r.takeId, claim: live.claim ?? undefined, by: turn.sender ?? undefined });
+        return r.text;
+      }
+      if (live && answer === "no") {
+        pending.delete(key);
+        return "ok, cancelled.";
+      }
+      // Other tapbacks are never something to answer.
+      if (turn.reaction) return null;
       // A take link in the chat is something people may back or fade next.
       for (const m of turn.text.matchAll(/\/t\/([0-9a-f-]{36})/gi)) {
         const id = takeIdFrom(m[1]);
@@ -156,7 +192,8 @@ export function createAgent(cfg: AgentConfig) {
         ? `[Recent in this chat: ${known.map((r) => `${r.kind} ${r.id}${r.claim ? ` "${r.claim.slice(0, 60)}"` : ""}${r.by ? ` from ${r.by}` : ""}`).join("; ")}]\n`
         : "";
       const text = context + said;
-      const links: string[] = [];
+      const st: TurnState = { links: [], proposal: null, picks: [] };
+      const links = st.links;
       let res: OpenAI.Responses.Response;
       try {
         res = await create([{ role: "user", content: text }], last.get(turn.chatId));
@@ -172,8 +209,17 @@ export function createAgent(cfg: AgentConfig) {
         const calls = res.output.filter((o): o is FnCall & typeof o => o.type === "function_call") as unknown as FnCall[];
         if (calls.length === 0) break;
         const outputs = await Promise.all(
-          calls.map(async (c) => ({ type: "function_call_output", call_id: c.call_id, output: await runTool(c, links, turn) })),
+          calls.map(async (c) => ({ type: "function_call_output", call_id: c.call_id, output: await runTool(c, st, turn) })),
         );
+        if (st.proposal) {
+          // A trade is set up: ask for the yes now, and hand the tool outputs to the model in the
+          // background (its context needs them; this reply doesn't).
+          const p = st.proposal;
+          pending.set(key, p);
+          const prev = res.id;
+          catchUp.set(turn.chatId, create(outputs, prev).then((r) => { last.set(turn.chatId, r.id); }, () => { last.delete(turn.chatId); }).finally(() => catchUp.delete(turn.chatId)));
+          return [askText(p), ...st.picks].join("\n");
+        }
         res = await create(outputs, res.id);
       }
       last.set(turn.chatId, res.id);
