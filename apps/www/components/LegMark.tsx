@@ -8,7 +8,7 @@ import { isLightLogo, logoUrl, symbol } from "./AssetBits";
 
 export type LegShape = "square" | "diamond" | "circle" | "hex" | "card";
 
-/** The frame for a leg's kind ("Stock", "Stock · 2x", "Prediction · Yes", "Earns interest", "Cards"…). */
+/** The frame for a leg's kind ("Stock", "Perp · 2x", "Prediction · Yes", "Earns interest", "Cards"…). */
 export function legShape(kind: string, name = ""): LegShape {
   const k = kind.toLowerCase();
   if (/·\s*[\d.]+x\b/.test(k) || /\bperp/.test(k) || /\bperp\b/i.test(name)) return "diamond";

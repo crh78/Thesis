@@ -33,7 +33,7 @@ Deno.test("a draft's builder legs become POST /takes legs the way the composer m
     ["Constellation Energy", "Stock", 50, 0, "Bets the stock falls", "ceg"],
     ["Cash", "Earns interest", 20, 1, null, "jl"],
     ["Will a new US reactor start by 2027?", "Prediction · No", 20, 2, "Bets No", "pm"],
-    ["Vistra", "Stock · 3x", 10, 3, null, "vst"],
+    ["Vistra", "Perp · 3x", 10, 3, null, "vst"],
   ]);
   assertEquals(takeLegs(Array.from({ length: 7 }, (_, i) => ({ name: `L${i}`, kind: "stock", weight: 1 }))).length, 5);
 });

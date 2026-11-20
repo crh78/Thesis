@@ -117,7 +117,8 @@ export function takeLegs(built: BuiltLeg[]): TakeLeg[] {
   const legs = built.slice(0, 5);
   const weights = normalizedWeights(legs.map((l) => Number(l.weight) || 0));
   return legs.map((b, i) => {
-    const kind = b.kind === "perp" ? (b.leverage ? `Stock · ${b.leverage}x` : "Leveraged")
+    // "Perp", not "Stock": perps cover crypto too (BTC, SOL). The fork API reads only the "3x".
+    const kind = b.kind === "perp" ? (b.leverage ? `Perp · ${b.leverage}x` : "Leveraged")
       : b.kind === "prediction" ? (b.side === "no" ? "Prediction · No" : "Prediction · Yes")
       : LABEL[b.kind] ?? "Stock";
     return {
@@ -126,7 +127,7 @@ export function takeLegs(built: BuiltLeg[]): TakeLeg[] {
       weight: weights[i],
       why: (b.why ?? "").slice(0, 300),
       slot: i,
-      fade_how: (b.canShort ?? b.can_short) ? (b.kind === "prediction" ? "Bets No" : "Bets the stock falls") : null,
+      fade_how: (b.canShort ?? b.can_short) ? (b.kind === "prediction" ? "Bets No" : b.kind === "perp" ? "Bets it falls" : "Bets the stock falls") : null,
       asset_id: typeof b.id === "string" && b.id.length <= 120 ? b.id : null,
     };
   });
