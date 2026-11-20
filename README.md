@@ -93,7 +93,7 @@ Reply to **any post** on X with `@yourthesisxyz`:
 
 Several people replying under one post share one basket. Takes made from X carry a "Take from X ↗" tag back to the post.
 
-### 🪞 Copy trading
+### 🔄 Copy trading
 Copy an **X account** (each call it posts becomes your own take, traded automatically within your limits, within about 16 minutes of the post) or a **Thesis trader** (each new take of theirs is backed for you). The defaults are $20 a call and 3 a day. Set it in the app, on any profile, or with "@yourthesisxyz copy".
 
 ### 💬 iMessage agent
@@ -206,40 +206,31 @@ It returns `null` for a batch with no Thesis transactions, so nothing is deliver
 ## Architecture
 
 ```mermaid
-flowchart TB
-    subgraph Surfaces
-        WEB["Web app<br/>Next.js on Vercel"]
-        IOS["iOS app<br/>SwiftUI"]
-        XB["X bot<br/>@yourthesisxyz"]
-        IM["iMessage agent<br/>Sendblue"]
+flowchart LR
+    subgraph S["Surfaces"]
+        WEB["Web app<br/>yourthesis.xyz"]
+        IOS["iOS app"]
+        XB["X bot"]
+        IM["iMessage agent"]
     end
-    subgraph Backend["Supabase"]
-        TB["take-builder<br/>(AI baskets)"]
-        AG["agent<br/>(trades within limits,<br/>Privy session signer)"]
-        SO["social · source ·<br/>session · gemini proxy"]
-        DB[("Postgres<br/>takes · scores · notifications")]
+    subgraph B["Supabase"]
+        AI["take-builder<br/>AI baskets"]
+        AG["agent<br/>Privy session signer,<br/>user's limits"]
         WH["quicknode-stream<br/>webhook"]
+        DB[("Postgres<br/>feed · scores ·<br/>notifications")]
     end
-    subgraph VM["Oracle VM: the mainnet fork"]
-        FA["Fork API<br/>builds trades, sends them"]
-        SP["Surfpool<br/>mainnet fork"]
-        ST["Settler · marker ·<br/>asset bank"]
+    subgraph V["Oracle VM"]
+        FA["Fork API<br/>builds and sends trades"]
+        SP["Solana mainnet fork<br/>Thesis program · Jupiter ·<br/>Jupiter Lend · Phoenix"]
+        ST["Settler · marker<br/>signed prices from Jupiter,<br/>Gemini, Collector Crypt"]
     end
-    PRG{{"Thesis program<br/>(Anchor)"}}
-    VEN["Jupiter · Jupiter Lend · Phoenix ·<br/>Gemini · Collector Crypt"]
-
-    WEB & IOS --> FA
-    WEB & IOS --> SO
-    XB & IM --> AG
-    AG --> FA
-    WEB & IOS & AG --> TB
+    WEB & IOS -->|"user signs"| FA
+    XB & IM --> AG --> FA
+    S -.->|"take → basket"| AI
     FA --> SP
-    SP --- PRG
-    PRG --- VEN
     ST --> SP
-    SP -->|"Stream filter"| WH
-    WH --> DB
-    SO --> DB
+    SP -->|"Stream filter"| WH --> DB
+    DB -.->|"reads"| S
 ```
 
 | Path | What it is |
