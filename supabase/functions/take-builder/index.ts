@@ -614,9 +614,9 @@ const RISK_KINDS: Record<string, (kind: string) => boolean> = {
 };
 
 const RISK_RULES: Record<string, string> = {
-  low: "Low risk: up to 4 picks (a perp at leverage 1 only for a name or coin with no stock listed: BTC, ETH and SOL are held this way). Spread out, prefer big well-known companies and broad ETFs. Include exactly one cash pick at 20-30%.",
-  medium: "Medium risk: up to 5 picks of stocks/ETFs/commodities (a perp at leverage 1 only for a name or coin with no stock listed: BTC, ETH and SOL are held this way), fewer when fewer fit directly. Add one prediction market (10-20%) when the take directly implies one's outcome (a rates take: the Fed decision; a slump: recession).",
-  high: "High risk: up to 4 picks, concentrated in the purest names. You may use one perp (max 30%, or the whole basket when it's the only pick) on a name the take is about, in place of that name's stock: never both. " +
+  low: "Low risk: aim for 4 picks (a perp at leverage 1 only for a name or coin with no stock listed: BTC, ETH and SOL are held this way). Spread out, prefer big well-known companies and broad ETFs. Include exactly one cash pick at 20-30%.",
+  medium: "Medium risk: aim for 5 picks of stocks/ETFs/commodities (a perp at leverage 1 only for a name or coin with no stock listed: BTC, ETH and SOL are held this way). Add one prediction market (10-20%) when the take directly implies one's outcome (a rates take: the Fed decision; a slump: recession).",
+  high: "High risk: aim for 4 picks, weighted toward the purest names. You may use one perp (max 30%, or the whole basket when it's the only pick) on a name the take is about, in place of that name's stock: never both. " +
     "Choose its leverage, from 2 up to its max (at most 5x): more for a name that IS the take, less for a looser fit. " +
     "The take may be held up to a year, and a leveraged bet held longer is likelier to be liquidated on the way.",
 };
@@ -672,12 +672,18 @@ const BUILD_SYSTEM = [
   "listed name by itself.",
   "Pick what pays off most directly if the take is right: the names the take is about first, then the companies that",
   "win most directly when they do (the foundry that makes their chips, the memory that goes in them, the supplier",
-  "whose biggest customer they are). Use the risk's pick count when that many fit: a basket of one is only for a take",
-  "about one asset with nothing listed that clearly rides with it. Never add a pick whose why has to stretch, and",
-  "never one that moves against the take (a rival a take says is losing). Never stand in a lookalike for a company",
-  "that isn't listed (no generic AI name for a take about one AI company).",
-  "Every pick must be IN what the take is about, or a direct supplier to it: that company, that sector's own",
-  "companies, that commodity, that country.",
+  "whose biggest customer they are), then looser winners at smaller weights (the platforms, customers and adjacent",
+  "names that do well when the take does). Aim for more, not less: fill the risk's pick count whenever that many",
+  "listed names move with the take: search the take's industries and tags, and include every name it shows that",
+  "rides with the take (defense: Lockheed and Palantir; space: SpaceX and Lockheed; robotaxis: Tesla and NVIDIA, whose",
+  "chips drive them; sports betting: DraftKings and Robinhood). An industry, theme, country or macro take always gets a",
+  "full basket when that many are listed. Stay small",
+  "only when the take targets one named stock or asset with nothing listed riding with it, or says \"only\". Weight",
+  "by how directly each pick is the take: the names it's about biggest, loose ones 5-15%. Never add one that moves",
+  "against the take (a rival a take says is losing). Never stand in a lookalike for a company that isn't listed (no",
+  "generic AI name for a take about one AI company).",
+  "Every pick must move with what the take is about: that company, its sector's companies, its suppliers, the",
+  "commodity, the country, or a looser winner that clearly does well when it does.",
   "A side project, a customer or a different sector doesn't count (Lockheed isn't nuclear power, SpaceX isn't robotaxis,",
   "a cinema chain isn't doughnuts, oil isn't copper or natural gas), and neither does a broad index for a narrower take",
   "(the S&P 500 isn't a utilities, airline, bank or Brazil bet). The S&P 500 and Nasdaq are for takes on the US market or",
