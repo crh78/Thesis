@@ -52,7 +52,7 @@
 //
 // Secrets: PRIVY_APP_ID, PRIVY_APP_SECRET, PRIVY_VERIFICATION_KEY (as the other functions),
 // PRIVY_AUTHORIZATION_KEY (the session signer's private key) and PRIVY_SIGNER_ID (its id),
-// PRIVY_SIGNER_POLICY_IDS (optional, comma-separated), FORK_API_URL and FORK_API_SERVICE_KEY (the
+// PRIVY_SIGNER_POLICY_IDS (optional, comma-separated), CHAIN_NETWORK (default solana-mainnet-fork), FORK_API_URL and FORK_API_SERVICE_KEY (the
 // fork API's "agent" service key), WEB_URL (default https://yourthesis.xyz), AGENT_LIMIT_OVERRIDES
 // (optional: "<wallet>=10000" lets a wallet with more play money allow more than $1,000). BOT_SECRET from the
 // function's secrets or the Vault's bot_secret.
@@ -69,6 +69,12 @@ const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
   auth: { persistSession: false },
 });
 const env = (k: string) => Deno.env.get(k) ?? "";
+/** The chain the apps show: the database's read functions answer on-chain scores for it (as the web app's reads). */
+const NETWORK = Deno.env.get("CHAIN_NETWORK") || "solana-mainnet-fork";
+const chainDb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+  auth: { persistSession: false },
+  global: { headers: { "x-thesis-network": NETWORK } },
+});
 const WEB_URL = (env("WEB_URL") || "https://yourthesis.xyz").replace(/\/$/, "");
 const SIGNER_ID = env("PRIVY_SIGNER_ID") || null;
 const POLICY_IDS = env("PRIVY_SIGNER_POLICY_IDS").split(",").map((s) => s.trim()).filter(Boolean);
@@ -458,7 +464,8 @@ async function score(b: Record<string, unknown>) {
   const { data: acct, error } = await db.from("accounts").select("profile_id").eq("privy_did", user.id).maybeSingle();
   dbCheck(error);
   if (!acct) return json(200, { found: false });
-  const { data: p, error: e2 } = await db.rpc("profile", { p_profile: acct.profile_id });
+  // On-chain scores, as the profile shows them (without the network header the function answers the old off-chain figures).
+  const { data: p, error: e2 } = await chainDb.rpc("profile", { p_profile: acct.profile_id });
   dbCheck(e2);
   const prof = p as Record<string, unknown> | null;
   // Not onboarded yet (no handle) or deleted: nothing to show.
