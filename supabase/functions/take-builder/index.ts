@@ -614,8 +614,8 @@ const RISK_KINDS: Record<string, (kind: string) => boolean> = {
 };
 
 const RISK_RULES: Record<string, string> = {
-  low: "Low risk: up to 4 picks (a perp at leverage 1 only for a name with no stock listed). Spread out, prefer big well-known companies and broad ETFs. Include exactly one cash pick at 20-30%.",
-  medium: "Medium risk: up to 5 picks of stocks/ETFs/commodities (a perp at leverage 1 only for a name with no stock listed), fewer when fewer fit directly. Add one prediction market (10-20%) when the take directly implies one's outcome (a rates take: the Fed decision; a slump: recession).",
+  low: "Low risk: up to 4 picks (a perp at leverage 1 only for a name or coin with no stock listed: BTC, ETH and SOL are held this way). Spread out, prefer big well-known companies and broad ETFs. Include exactly one cash pick at 20-30%.",
+  medium: "Medium risk: up to 5 picks of stocks/ETFs/commodities (a perp at leverage 1 only for a name or coin with no stock listed: BTC, ETH and SOL are held this way), fewer when fewer fit directly. Add one prediction market (10-20%) when the take directly implies one's outcome (a rates take: the Fed decision; a slump: recession).",
   high: "High risk: up to 4 picks, concentrated in the purest names. You may use one perp (max 30%, or the whole basket when it's the only pick) on a name the take is about, in place of that name's stock: never both. " +
     "Choose its leverage, from 2 up to its max (at most 5x): more for a name that IS the take, less for a looser fit. " +
     "The take may be held up to a year, and a leveraged bet held longer is likelier to be liquidated on the way.",
@@ -688,8 +688,12 @@ const BUILD_SYSTEM = [
   "stand-in: use no on a market about it or an inverse fund on it (an inverse Nasdaq fund for a tech or market crash).",
   "With neither, no_clean_exposure. A company whose own product causes the slump can go in (a GLP-1 drug maker when",
   "food sales fall).",
-  "A perp is how you hold a company that has no stock listed (TSMC, Netflix, Oracle, Marvell, ASML): at low and",
-  "medium risk too, at leverage 1, for the take's own names and its direct winners alike.",
+  "A perp is how you hold a company or a coin that has no stock listed (TSMC, Netflix, Oracle, Marvell, ASML; BTC,",
+  "ETH, SOL and every other coin): at low and medium risk too, at leverage 1, for the take's own names and its direct",
+  "winners alike. A crypto take always has these to hold.",
+  "Read slang and vibes as a view on price: \"tuff\", \"fire\", \"goated\", \"sending\", \"based\", \"we're so back\" =",
+  "it goes up; \"cooked\", \"mid\", \"ngmi\", \"rekt\", \"sucks\", \"it's over\" = it goes down. \"crypto is tuff\" is a",
+  "bullish crypto take, not a sentiment without a direction.",
   "If there's a source (an X post, an article, a fund's or trader's holdings or trades), it's what the take copies:",
   "hold what the source names, at the weights it gives or implies. When the source lists picks, don't pad with names",
   "it doesn't hold (fewer picks is fine, risk_rules' counts don't apply); add others only when the source states a",
