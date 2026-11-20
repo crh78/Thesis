@@ -71,6 +71,7 @@ test("under any post: the basket becomes the asker's take with their buy-in; a f
   assert.ok(out.kind === "reply" && out.what === "trade");
   assert.ok(out.kind === "reply" && out.text.startsWith(`You're in: $50 on "Nuclear won't win the AI power race".`));
   assert.ok(out.kind === "reply" && !/https?:\/\//.test(out.text) && xLength(out.text) <= 280);
+  assert.ok(out.kind === "reply" && out.image === "https://web.example.test/d/Dr4ft001/basket.png");
 });
 
 test("not connected: the draft reply, pointing at the limits instead", async () => {
