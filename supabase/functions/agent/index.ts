@@ -17,8 +17,10 @@
 //
 // The bots' routes (header x-bot-secret: the Vault's bot_secret, as for functions/source):
 //   POST   /agent/links              { imessage } → { url } a one-time connect link (30 minutes)
-//   POST   /agent/whois              { who: { x: <X user id> } | { imessage } } → { linked: false }
-//                                      or { linked, active, per_trade_usd, daily_usd, left_usd, handle }
+//   POST   /agent/whois              { who: { x: <X user id> } | { imessage } } → { linked: false,
+//                                      signed_up } or { linked, signed_up, active, per_trade_usd,
+//                                      daily_usd, left_usd, handle }; signed_up: a Thesis account links
+//                                      that X account (asked of Privy; null when it didn't answer)
 //   POST   /agent/trades             { who, surface: x|imessage|copy|mcp, ref?, action, ... }
 //                                      action post: { draft_id, usd } posts a bot's draft as the
 //                                        user's take with that buy-in;
@@ -238,9 +240,11 @@ async function whois(b: Record<string, unknown>) {
   const who = readWho(b.who);
   check(who, "invalid_who");
   const g = await grantFor(who);
-  if (!g) return json(200, { linked: false });
+  // signed_up: a Thesis account links this X account (null: Privy didn't answer). The X bot gives
+  // people who haven't signed up one reply.
+  if (!g) return json(200, { linked: false, signed_up: "x" in who ? await privy.hasXAccount(who.x) : null });
   const { data } = await db.from("profiles").select("handle").eq("id", g.profile_id).maybeSingle();
-  return json(200, { linked: true, handle: data?.handle ?? null, ...await grantView(g) });
+  return json(200, { linked: true, signed_up: true, handle: data?.handle ?? null, ...await grantView(g) });
 }
 
 // The fork API ------------------------------------------------------------------------------------

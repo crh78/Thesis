@@ -108,3 +108,46 @@ export const overLimit = (kind: "trade" | "daily", limit: number | undefined, le
     ? `That's over your ${limit != null ? `${dollars(limit)} ` : ""}per-trade limit. Change it or trade by hand at ${BIO}.`
     : `That's past your daily limit${left != null ? ` (${dollars(left)} left today)` : ""}. Trade by hand at ${BIO}.`;
 export const TRADE_FAILED = `Couldn't place that trade just now. Try again in a minute, or at ${BIO}.`;
+
+// Selling from a reply ("@yourthesisxyz sell", "sell half", "sell 25%", "sell $20") ------------------
+
+export type SellIntent = { bps?: number; usd?: number };
+
+/** "sell" (all of it), "sell half", "sell 25%", "sell $20" → what to sell, else null. */
+export function sellIntent(text: string): SellIntent | null {
+  const t = text.toLowerCase().replace(/,/g, "");
+  if (!/\b(sell|cash out|close)\b/.test(t)) return null;
+  if (/\bhalf\b/.test(t)) return { bps: 5000 };
+  const pct = t.match(/(\d{1,3}(?:\.\d+)?)\s?%/);
+  if (pct) {
+    const p = Number(pct[1]);
+    return p > 0 && p < 100 ? { bps: Math.round(p * 100) } : {};
+  }
+  const usd = t.match(/\$\s?(\d{1,5}(?:\.\d{1,2})?)\b/);
+  if (usd && Number(usd[1]) > 0) return { usd: Number(usd[1]) };
+  return {};
+}
+
+export function sellReply(s: SellIntent, claim: string | null, closesTake: boolean): string {
+  const what = s.bps ? `${s.bps / 100}% of your position` : s.usd ? `${dollars(s.usd)} of your position` : "your position";
+  const on = claim ? ` in "${claim.length > 80 ? `${claim.slice(0, 77)}...` : claim}"` : "";
+  return `Sold ${what}${on}.${closesTake ? " That closed your take to new backers." : ""} See it at ${BIO}.`;
+}
+
+export const SELL_WHICH = `Not sure which position. Reply "sell" under my reply to your trade, or under the take you hold.`;
+export const NOT_HELD = "You don't hold that one.";
+export const SELL_KEEP_10 = `At least $10 has to stay in. Reply "sell" on its own to sell all of it.`;
+
+/**
+ * A mention that only asks for the post's take (or a trade on it): "make this a take", "back $20",
+ * "@yourthesisxyz" alone. Those can share one basket per post; anything with its own words can't.
+ */
+export function plainCommand(text: string): boolean {
+  const t = text.toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/\b(back|backing|in for|i'?m in(?: for)?|buy|fade|fading|bet against|against|short)\b[^$\d]{0,20}\$?\s?\d{1,4}(?:\.\d{1,2})?/g, " ")
+    .replace(/[^a-z' ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return t === "" || /^(make (this|it) (a|into a) take|make a take|take|take this|this|basket|basket this|what'?s the trade|trade this|trade it|this one|on this)$/.test(t);
+}

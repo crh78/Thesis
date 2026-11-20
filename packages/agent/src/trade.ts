@@ -11,9 +11,10 @@ export type AgentApiConfig = {
   botSecret: string;
 };
 
+/** signed_up: a Thesis account links this X account (null: unknown). */
 export type WhoIs =
-  | { linked: false }
-  | { linked: true; active: boolean; handle: string | null; per_trade_usd: number; daily_usd: number; left_usd: number };
+  | { linked: false; signed_up?: boolean | null }
+  | { linked: true; signed_up?: boolean; active: boolean; handle: string | null; per_trade_usd: number; daily_usd: number; left_usd: number };
 
 export type TradeAsk =
   | { action: "post"; draftId: string; usd: number }

@@ -61,6 +61,6 @@ test("plan never asks for a timeline: the draft is sent no horizon whatever the 
   assert.ok(out.kind === "reply" && out.what === "take");
   assert.ok(sent);
   assert.equal("horizon" in sent!, false);
-  assert.equal(sent!.risk, "medium");
+  assert.equal(sent!.risk, "high"); // X takes always build at high risk, whatever the post says
   assert.equal(sent!.origin_ref, mention.id);
 });

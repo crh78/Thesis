@@ -31,6 +31,9 @@
 //                                  the web; the same origin_ref returns the same draft.
 //                                  for_x: the X bot's asker (their username), whose drafts wait for
 //                                  them in the web app, since the bot's replies carry no link.
+//                                  copy_of: another draft's id: its basket, saved again for this
+//                                  asker without building (several people replying under one post
+//                                  share one basket); 404 no_such_draft.
 //   GET    /source/drafts/mine     → { x, drafts } the X bot's unposted drafts for the X account
 //                                  linked to your Privy login (x null when none is linked), newest
 //                                  first, from the last 14 days: { id, claim, legs, context, created_at }
@@ -212,6 +215,15 @@ async function buildDraft(b: Record<string, unknown>) {
     if (data) return drafted(data, true);
   }
 
+  // The same basket for another asker: no second build.
+  if (typeof b.copy_of === "string" && DRAFT_ID_RE.test(b.copy_of)) {
+    const { data: from, error } = await db.from("take_drafts")
+      .select("claim, risk, horizon, legs, summary, source_url, source_label, source_kind").eq("id", b.copy_of).maybeSingle();
+    dbCheck(error);
+    if (!from) throw new HttpError(404, "no_such_draft");
+    return saveDraft({ ...from, origin, context: str(b.context, 80) || null, origin_ref: ref, for_x: forX }, ref, origin);
+  }
+
   const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/take-builder`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-index-secret": Deno.env.get("SECURITIES_INDEX_SECRET") ?? "" },
@@ -242,10 +254,15 @@ async function buildDraft(b: Record<string, unknown>) {
     source_label: sourceUrl ? str(src!.label, 60) || "the post" : null,
     source_kind: sourceUrl ? (src!.kind === "x" ? "x" : "link") : null,
   };
+  return saveDraft(row, ref, origin);
+}
+
+/** Inserts a draft under a fresh id (retrying a taken one); a racing retry of the same ref returns the winner. */
+async function saveDraft(row: Record<string, unknown> & { summary: string | null; legs: unknown }, ref: string | null, origin: string) {
   for (let i = 0; i < 3; i++) {
     const id = draftId();
     const { error } = await db.from("take_drafts").insert({ id, ...row });
-    if (!error) return drafted({ id, summary: row.summary, legs }, false);
+    if (!error) return drafted({ id, summary: row.summary, legs: row.legs }, false);
     if (error.code !== "23505") dbCheck(error);
     // A taken id (or a racing retry of the same ref): try again, or return the winner.
     if (ref) {
