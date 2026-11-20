@@ -9,3 +9,6 @@ spikes
 **/node_modules
 **/.next
 **/dist
+
+# Demo film media (Git LFS, not part of any deploy)
+media

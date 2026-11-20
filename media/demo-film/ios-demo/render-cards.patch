@@ -1,0 +1,47 @@
+diff --git a/apps/ios/Thesis/App/ThesisApp.swift b/apps/ios/Thesis/App/ThesisApp.swift
+index a965c5f..40dea90 100644
+--- a/apps/ios/Thesis/App/ThesisApp.swift
++++ b/apps/ios/Thesis/App/ThesisApp.swift
+@@ -14,6 +14,9 @@ struct ThesisApp: App {
+                 .environment(app)
+                 .environment(session)
+                 .task { await session.start() }
++                #if DEBUG
++                .task { if CommandLine.arguments.contains("-renderCards") { DemoCards.renderAll() } }
++                #endif
+                 // Take links from chat; held until signed in (RootView opens it).
+                 .onOpenURL { open($0) }
+                 .onAppear {
+diff --git a/apps/ios/Thesis/Features/Profile/CalledItShare.swift b/apps/ios/Thesis/Features/Profile/CalledItShare.swift
+index 0e9b283..8971646 100644
+--- a/apps/ios/Thesis/Features/Profile/CalledItShare.swift
++++ b/apps/ios/Thesis/Features/Profile/CalledItShare.swift
+@@ -866,3 +866,28 @@ struct ShareCardButton<Label: View>: View {
+             .accessibilityLabel("Share")
+     }
+ }
++
++#if DEBUG
++/// DEMO FILM ONLY, never commit: launch with -renderCards to write every card look to Documents/cards.
++enum DemoCards {
++    @MainActor static func renderAll() {
++        let legs = [("Kalshi", "Pre-IPO", 30.0, 0), ("DraftKings", "Stock", 25, 1), ("Polymarket", "Pre-IPO", 20, 2),
++                    ("Coinbase", "Stock", 15, 3), ("Robinhood", "Stock", 10, 4)]
++            .map { Leg(name: $0.0, kind: $0.1, weight: $0.2, why: "", ret: 0, slot: $0.3, fadeHow: nil) }
++        let card = CallCard(takeID: "demo", claim: "Everyone is betting on everything", ret: 104.2, faded: false,
++                            author: nil, name: "Dev", handle: "dev", avatar: "avatar-person-02", since: "Nov 14", legs: legs)
++        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appending(path: "cards")
++        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
++        for t in CardTheme.allCases {
++            let r = ImageRenderer(content: ThemedCard(card: card, theme: t, photo: nil)
++                .frame(width: 360, height: 640)
++                .environment(\.cardCorner, 0)
++                .background(Color(hex: 0x0B0D12))
++                .environment(\.colorScheme, .dark))
++            r.scale = 3
++            if let data = r.uiImage?.pngData() { try? data.write(to: dir.appending(path: "\(t.rawValue).png")) }
++        }
++        print("DEMO_CARDS_DONE \(dir.path)")
++    }
++}
++#endif

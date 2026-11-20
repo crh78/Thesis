@@ -1,0 +1,140 @@
+{
+  "style": "Stylized 3D animated feature-film look, soft cinematic lighting, expressive cartoon acting, exactly matching the art style and character designs of the reference images. Vertical 9:16, viral TikTok skit pacing. Clear spoken dialogue with restaurant ambience. No captions, no subtitles, no logos, no background music, and no on-screen text unless the shot asks for it.",
+  "style_ref": "him",
+  "refs": {
+    "him": "Stylized 3D animated character turnaround of a young man working at a burger diner: navy cap, orange polo, navy apron with a STAFF badge, grey cargo pants.",
+    "her": "Character turnaround sheet laid out exactly like the reference image, in exactly the same stylized 3D animated art style, lighting and plain warm-grey background: one large full-body front view on the left, and on the right a full-body side profile, a full-body back view and a full-body three-quarter view, all the same person in the same outfit. The character: a very attractive, glamorous 23-year-old woman with long wavy blonde hair, bright blue eyes, glossy lips, gold hoop earrings, a fitted cream knit top under a tan wool coat, slim jeans, ankle boots and a small plain tan leather shoulder bag with no logo or pattern. Confident, slightly bored expression. No text, no logos, no brand patterns.",
+    "place": "One single continuous wide interior shot, not a collage or split panel, in exactly the same stylized 3D animated art style as the reference image: a busy casual American burger diner at night, orange and navy colour scheme matching the staff uniform, red vinyl booths along the windows, a counter with a kitchen pass behind it, and a host stand by a glass front door with the street outside at night. Vertical framing, no people. No signs, no readable text, no logos.",
+    "newguy": "Character turnaround sheet laid out exactly like the reference image, in exactly the same stylized 3D animated art style, lighting and plain warm-grey background: one large full-body front view on the left, and on the right a full-body side profile, a full-body back view and a full-body three-quarter view, all the same person in the same outfit. The character: an extremely jacked 26-year-old bodybuilder with huge arms, a massive chest and broad shoulders, a slicked-back fade haircut, a skin-tight black t-shirt that's barely holding on, a thin chain necklace, an unbranded flashy watch, grey joggers and white sneakers, with a cocky smirk. No text, no logos."
+  },
+  "shots": [
+    {
+      "id": "i1",
+      "name": "intro-blender",
+      "duration": 6,
+      "refs": [
+        "him",
+        "place"
+      ],
+      "prompt": "The young man is {him}. The diner is {place}. Opening shot from INSIDE a glass milkshake blender jar on the diner counter, looking out through the curved glass. A thick pink and white strawberry milkshake swirls and splashes around the edges of the frame like a whirlpool, framing a round clear window in the middle. Through the glass, slightly blurred, the young man in his uniform stands behind the counter in the warm diner, and a few customers sit in red booths. The blender spins, then slows to a stop and the swirl settles. Warm golden diner light, shallow depth of field, slow and dreamy. Keep the center of the frame calm enough for a title to be added later. No text, no logos."
+    },
+    {
+      "id": "i2",
+      "name": "intro-fryer",
+      "duration": 6,
+      "refs": [
+        "him",
+        "place"
+      ],
+      "prompt": "The young man is {him}. The diner is {place}. Opening shot from INSIDE a deep-fryer basket, looking straight up and out. Golden french fries tumble and bounce around the edges of the frame in slow motion, with oil bubbles and shimmering heat, framing a round clear opening in the middle. Through it, slightly blurred, the young man in his uniform leans over the fryer, lit by the warm kitchen lights, then lifts the basket and gives it a shake. Warm golden diner light, shallow depth of field, slow and dreamy. Keep the center of the frame calm enough for a title to be added later. No text, no logos."
+    },
+    {
+      "id": "i3",
+      "name": "intro-kitchen-door",
+      "duration": 6,
+      "refs": [
+        "him",
+        "place"
+      ],
+      "prompt": "The young man is {him}. The diner is {place}. Opening shot from inside the steamy diner kitchen, looking through the round porthole window of the swinging kitchen door. Steam drifts past the lens and blurry plates of burgers slide by in the foreground, framing the round window in the middle. Through the window, the warm diner glows: red booths and a few customers. Then the young man in his uniform pushes through the door with a tray, the door swings open and the camera glides through into the diner. Warm golden diner light, shallow depth of field, slow and dreamy. Keep the center of the frame calm enough for a title to be added later. No text, no logos."
+    },
+    {
+      "id": "s1",
+      "name": "dumped",
+      "duration": 7,
+      "refs": [
+        "him",
+        "her",
+        "place"
+      ],
+      "prompt": "The young man is {him}. The woman is {her}, his girlfriend. The diner is {place}. By the host stand, the young man in his uniform holds a tray of dirty plates and smiles hopefully at her. She stands facing him in her coat, crosses her arms, rolls her eyes and says, \"We're done. I'm not dating a guy who makes twelve dollars an hour.\" She pulls off a necklace he gave her, drops it on his tray with a clink, flips her blonde hair, turns and walks out through the glass front door. He stands frozen holding the tray, heartbroken, as the door swings shut behind her. Medium shot, then the camera holds on his face."
+    },
+    {
+      "id": "s2",
+      "name": "the-pattern",
+      "duration": 8,
+      "refs": [
+        "him",
+        "place"
+      ],
+      "prompt": "The young man is {him}. The diner is {place}. Three quick cuts as he brings food to different booths. Shot 1: two young guys in hoodies stare at one phone and one shouts, \"Two hundred on the Knicks, LET'S GO!\" Shot 2: a woman in her thirties scrolls her phone and says to her friend, \"I just bet it rains tomorrow.\" Shot 3: a sweet elderly grandmother with glasses taps her phone with total focus and says, \"I've got money on the Oscars.\" In each shot he pauses, looking from the phone to the customer, puzzled."
+    },
+    {
+      "id": "s3",
+      "name": "realization",
+      "duration": 5,
+      "refs": [
+        "him"
+      ],
+      "prompt": "The young man is {him}. In the diner kitchen at night, with steel counters and steam from the grill, he leans against a counter, his face lit by his phone screen. Slow dramatic push-in on his face as his eyes go wide, and he whispers, \"Wait... everyone's betting on everything.\""
+    },
+    {
+      "id": "s4a",
+      "name": "bet-1-20k",
+      "duration": 7,
+      "refs": [
+        "him",
+        "app-bet",
+        "app-money-1"
+      ],
+      "prompt": "The young man is {him}. In the diner kitchen on his break, he opens an app on his phone. Over-the-shoulder close-up: for about one second the screen faces the camera and shows exactly this app screen, {app-bet}. He whispers, \"Let's ride,\" and taps the button. Quick close-up of the screen changing to exactly this screen, {app-money-1}, a dark phone screen with a big white balance, a green gain under it and a green line chart climbing. Glowing gold text \"+$20K\" pops up into the air above the phone with a few sparkles and a couple of dollar bills floating down. His eyes go wide and he grins."
+    },
+    {
+      "id": "s4b",
+      "name": "bet-2-100k",
+      "duration": 6,
+      "refs": [
+        "him",
+        "app-money-2"
+      ],
+      "prompt": "The young man is {him}, still in his diner uniform. At 3am in a tiny messy studio apartment, lit only by his phone in the dark, he sits on the edge of his bed and taps his phone hard: he's doubling down. Close-up of the screen for about one second showing exactly this app screen, {app-money-2}, a dark phone screen with a big white balance, a green gain under it and a green line chart climbing. Bigger glowing gold text \"+$100K\" bursts into the air above him and a flurry of dollar bills swirls around the room. He falls back on the bed laughing in disbelief."
+    },
+    {
+      "id": "s4c",
+      "name": "bet-3-1-25m",
+      "duration": 7,
+      "refs": [
+        "him",
+        "place",
+        "app-money-3"
+      ],
+      "prompt": "The young man is {him}. The diner is {place}. Behind the diner counter in his uniform, he slams his thumb on his phone: all in. Close-up of the screen for about one second showing exactly this app screen, {app-money-3}, a dark phone screen with a big white balance, a green gain under it and a green line chart climbing. Then an explosion of golden light: huge glowing gold text \"+$1.25M\" erupts into the air above his head and a storm of dollar bills rains down over the whole diner. Customers stare, a coworker drops a spatula and yells, \"BROOO!\" He stands there calmly, sunglasses suddenly on. Slow motion, low angle, epic and celebratory."
+    },
+    {
+      "id": "s5",
+      "name": "shes-back",
+      "duration": 7,
+      "refs": [
+        "him",
+        "her",
+        "newguy",
+        "place"
+      ],
+      "prompt": "The young man is {him}. The woman is {her}. Her new boyfriend is {newguy}. The diner is {place}. The woman walks in through the glass front door arm in arm with her new boyfriend. They spot the young man, still in his diner uniform and carrying two plates of burgers. The new boyfriend smirks, nudges her and says loudly, \"Babe, is that your ex? Bro's still flipping burgers.\" She laughs and says, \"Told you he'd be broke forever.\""
+    },
+    {
+      "id": "s6",
+      "name": "punchline",
+      "duration": 6,
+      "refs": [
+        "him",
+        "her",
+        "newguy",
+        "place"
+      ],
+      "prompt": "The young man is {him}. The woman is {her}. Her new boyfriend is {newguy}. The diner is {place}. Calm and confident, the young man sets the two plates down on a booth table, smirks at them and says, \"Nah. I own the place.\" Behind him, an older manager in a sharp grey suit walks past, nods and says, \"Morning, boss.\" The new boyfriend's smirk fades and the woman's smile freezes."
+    },
+    {
+      "id": "s7",
+      "name": "bugatti",
+      "duration": 7,
+      "refs": [
+        "him",
+        "her",
+        "newguy",
+        "place"
+      ],
+      "prompt": "The young man is {him}. The woman is {her}. Her new boyfriend is {newguy}. The diner is {place}. The young man tosses a car key in the air, catches it and walks out the glass front door. Parked at the curb outside is a gleaming blue-and-black hypercar shaped like a Bugatti Chiron, with no badges or logos. He slides in, the door shuts and the engine roars to life. Cut to inside the diner: the woman and her new boyfriend press against the window, jaws on the floor, as the hypercar speeds off into the night with glowing taillights."
+    }
+  ]
+}

@@ -29,3 +29,4 @@ packages/venues/*
 !packages/venues/package.json
 packages/take-builder/*
 !packages/take-builder/package.json
+media
