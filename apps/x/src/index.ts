@@ -30,6 +30,8 @@ const MAX_PER_THREAD = num("X_MAX_PER_THREAD", 3);
 // Trading from replies ("back $20"): only when replies really go out, unless X_DRY_RUN_TRADES=1
 // (a dry run reads real mentions, and a trade is real), and X_TRADING isn't 0.
 const TRADING = process.env.X_TRADING !== "0" && (!DRY_RUN || process.env.X_DRY_RUN_TRADES === "1");
+// The basket picture on take replies (the web app draws it); X_IMAGES=0 turns it off.
+const IMAGES = process.env.X_IMAGES !== "0";
 const STATE_FILE = process.env.X_STATE_FILE || new URL("../.data/state.json", import.meta.url).pathname;
 
 const x = xClient({
@@ -64,6 +66,14 @@ const me = await x.me().catch((e) => {
 const state = loadState(STATE_FILE);
 saveState(STATE_FILE, state);
 log("starting", { as: `@${me.username}`, dryRun: DRY_RUN, trading: !!trading, pollSec: POLL_MS / 1000, maxPerDay: MAX_PER_DAY, sinceId: state.sinceId });
+
+/** Fetches the basket picture from the web app and uploads it to X: its media id. */
+async function basketImage(url: string): Promise<string> {
+  const r = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  const type = r.headers.get("content-type") ?? "";
+  if (!r.ok || !type.startsWith("image/")) throw new Error(`image ${r.status} ${type}`);
+  return x.uploadImage(new Uint8Array(await r.arrayBuffer()), type.split(";")[0]);
+}
 
 /** Handles one mention. Returns false to stop the batch and retry it next poll (X or the model is down). */
 async function handle(p: XPost, batch: Mentions): Promise<boolean> {
@@ -112,10 +122,12 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
   if (out.kind === "skip") { log("skip", { ...base, reason: out.reason }); return true; }
 
   if (DRY_RUN) {
-    log("would reply", { ...base, what: out.what, text: out.text, ...(out.trade ? { trade: out.trade } : {}) });
+    log("would reply", { ...base, what: out.what, text: out.text, ...(out.image && IMAGES ? { image: out.image } : {}), ...(out.trade ? { trade: out.trade } : {}) });
   } else {
     try {
-      const replyId = await x.reply(p.id, out.text);
+      // The picture is a bonus: any failure posts the reply without it.
+      const media = out.image && IMAGES ? await basketImage(out.image).catch((e) => { log("image failed", { ...base, error: (e as Error).message.slice(0, 160) }); return null; }) : null;
+      const replyId = await x.reply(p.id, out.text, media ? [media] : []);
       log("replied", { ...base, what: out.what, replyId, link: out.link, ...(out.trade ? { trade: out.trade } : {}) });
     } catch (e) {
       if (e instanceof XError && e.status < 500 && e.status !== 429) {

@@ -122,9 +122,26 @@ export function xClient(creds: XCreds) {
       return { posts, users, refs, newestId };
     },
 
-    async reply(toPostId: string, text: string): Promise<string> {
-      const r = await call<{ data: { id: string } }>("POST", "/tweets", {}, { text, reply: { in_reply_to_tweet_id: toPostId } });
+    async reply(toPostId: string, text: string, mediaIds: string[] = []): Promise<string> {
+      const r = await call<{ data: { id: string } }>("POST", "/tweets", {}, {
+        text, reply: { in_reply_to_tweet_id: toPostId }, ...(mediaIds.length ? { media: { media_ids: mediaIds } } : {}),
+      });
       return r.data.id;
+    },
+
+    /** Uploads an image (PNG/JPEG, up to 5 MB) for a post: its media id. A multipart body isn't signed. */
+    async uploadImage(bytes: Uint8Array, mime: string): Promise<string> {
+      const url = `${API}/media/upload`;
+      const form = new FormData();
+      form.append("media", new Blob([bytes as BlobPart], { type: mime }), "basket.png");
+      form.append("media_category", "tweet_image");
+      form.append("media_type", mime);
+      const res = await fetch(url, { method: "POST", headers: { authorization: oauthHeader("POST", url, {}, creds) }, body: form, signal: AbortSignal.timeout(30_000) });
+      const text = await res.text();
+      if (!res.ok) throw new XError(res.status, text);
+      const id = (JSON.parse(text) as { data?: { id?: string } }).data?.id;
+      if (!id) throw new XError(502, `no media id: ${text.slice(0, 120)}`);
+      return id;
     },
   };
 }

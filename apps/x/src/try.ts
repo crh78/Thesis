@@ -47,5 +47,5 @@ const out = await plan(
   },
 );
 if (out.kind === "skip") console.log(`(stays quiet: ${out.reason})`);
-else console.log(`${out.text}\n\n· ${out.what}, ${xLength(out.text)}/280 chars${out.trade ? `, trade ${JSON.stringify(out.trade)}` : ""}${out.link ? `, ${out.link}` : ""}`);
+else console.log(`${out.text}\n\n· ${out.what}, ${xLength(out.text)}/280 chars${out.trade ? `, trade ${JSON.stringify(out.trade)}` : ""}${out.link ? `, ${out.link}` : ""}${out.image ? `\n· image ${out.image}` : ""}`);
 console.error(`· ${Date.now() - t0} ms`);

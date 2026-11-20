@@ -10,6 +10,8 @@ export type Plan =
   | { kind: "skip"; reason: string }
   | {
     kind: "reply"; text: string; link?: string;
+    /** The basket as a picture (the web app's /d/<id>/basket.png), attached to the reply. */
+    image?: string;
     what: "take" | "no_exposure" | "explain" | "opt_out" | "opt_in" | "trade" | "trade_refused" | "trade_failed" | "not_linked";
     trade?: { status: string; takeId?: string; error?: string };
   };
@@ -66,6 +68,7 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
     ...(fromParent ? { source: { text: m.parent!.text, url: m.parentUrl!, label: `@${m.parent!.username} on X`.slice(0, 60) } } : {}),
   });
   if (out.verdict === "error") return { kind: "skip", reason: `build failed: ${out.reason}` };
+  const image = out.verdict === "basket" ? `${deps.basket.webUrl.replace(/\/$/, "")}/d/${out.draftId}/basket.png` : undefined;
   if (out.verdict === "no_clean_exposure") return { kind: "reply", text: NO_EXPOSURE, what: "no_exposure" };
 
   if (intent) {
@@ -76,17 +79,17 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
       // Not connected yet: the draft still waits for them in the app.
       if (p.kind === "reply" && p.what === "not_linked") {
         const draft = takeReply(claim, out.legs);
-        return draft ? { ...p, text: draft.replace(TAKE_TAIL, NOT_LINKED) } : p;
+        return draft ? { ...p, text: draft.replace(TAKE_TAIL, NOT_LINKED), image } : p;
       }
       return p;
     }
     if (r.status === "failed") return { kind: "reply", text: TRADE_FAILED, what: "trade_failed", trade: { status: r.status, takeId: r.takeId, error: r.error } };
     const text = tradeReply(claim, out.legs, intent.usd);
     if (!text) return { kind: "skip", reason: "reply failed the checks" };
-    return { kind: "reply", text, what: "trade", link: r.url, trade: { status: r.status, takeId: r.takeId } };
+    return { kind: "reply", text, what: "trade", link: r.url, image, trade: { status: r.status, takeId: r.takeId } };
   }
 
   const text = takeReply(claim, out.legs);
   if (!text) return { kind: "skip", reason: "reply failed the checks" };
-  return { kind: "reply", text, what: "take", link: out.link };
+  return { kind: "reply", text, what: "take", link: out.link, image };
 }
