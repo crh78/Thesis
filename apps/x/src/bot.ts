@@ -3,7 +3,7 @@
 // the asker's own account. No X calls here, so `pnpm try` runs the same path offline.
 import { buildBasket, takeIdFrom, type AgentApi, type BasketConfig, type TradeResult } from "@thesis/agent";
 import {
-  EXPLAIN, NO_EXPOSURE, NOT_HELD, NOT_LINKED, overLimit, plainCommand, safeClaim, scoreIntent, scoreReply, SELL_KEEP_10, SELL_WHICH, sellIntent, sellReply,
+  COPY_LIMIT, COPY_SELF, COPY_WHO, copyIntent, copyReply, EXPLAIN, NO_EXPOSURE, NOT_HELD, NOT_LINKED, overLimit, plainCommand, safeClaim, scoreIntent, scoreReply, SELL_KEEP_10, SELL_WHICH, sellIntent, sellReply,
   TAKE_TAIL, takeReply, takeTradeReply, TRADE_FAILED, tradeIntent, tradeReply,
 } from "./compose.ts";
 import type { Mention, Vet } from "./vet.ts";
@@ -39,7 +39,7 @@ export type Plan =
     kind: "reply"; text: string; link?: string;
     /** The basket as a picture (the web app's /d/<id>/basket.png), attached to the reply. */
     image?: string;
-    what: "take" | "no_exposure" | "explain" | "opt_out" | "opt_in" | "trade" | "trade_refused" | "trade_failed" | "not_linked" | "sell" | "score";
+    what: "take" | "no_exposure" | "explain" | "opt_out" | "opt_in" | "trade" | "trade_refused" | "trade_failed" | "not_linked" | "sell" | "score" | "copy";
     trade?: { status: string; takeId?: string; error?: string };
     remember?: Remember;
   };
@@ -91,6 +91,21 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
     const target = sc.handle === "me" ? me : sc.handle ?? parentAuthor ?? me;
     const s = await deps.lookup!.score(target);
     return { kind: "reply", text: scoreReply(target, target === me, s), what: "score", ...(s.found ? { image: `${web}/u/${encodeURIComponent(s.handle)}/score.png` } : {}) };
+  }
+
+  // "copy" under someone's post (that author), or "copy @handle": auto-copy them for the asker.
+  const cp = trading ? copyIntent(m.text) : null;
+  if (cp) {
+    const parentAuthor = m.parent && !m.toBot ? m.parent.username : null;
+    const target = cp.handle ?? parentAuthor?.toLowerCase() ?? null;
+    if (!target) return { kind: "reply", text: COPY_WHO, what: "copy" };
+    if (target === me) return { kind: "reply", text: COPY_SELF, what: "copy" };
+    const r = await trading!.copy(who, target, cp.handle ? undefined : parentAuthor ?? undefined);
+    if (!r.copying) {
+      const text = r.error === "not_linked" ? NOT_LINKED : r.error === "copy_limit" ? COPY_LIMIT : r.error === "cant_copy_self" ? COPY_SELF : TRADE_FAILED;
+      return { kind: "reply", text, what: r.error === "not_linked" ? "not_linked" : "copy" };
+    }
+    return { kind: "reply", text: copyReply(r), what: "copy" };
   }
 
   // "sell", "sell half", "sell 25%", "sell $20": the take under this reply, or the one traded in this thread.
