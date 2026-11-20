@@ -43,9 +43,15 @@ type BuilderReply = {
   legs: Leg[];
 };
 
+/**
+ * How the take builder got there (its reasoning summaries, searches, raw picks), as the drafts
+ * route passes it on: for the bots' telemetry, never shown to anyone.
+ */
+export type BuildTrace = Record<string, unknown>;
+
 export type BasketResult =
-  | { verdict: "basket"; summary: string; legs: { name: string; weight: number; side: string; why: string }[]; link: string; draftId: string }
-  | { verdict: "no_clean_exposure"; reason: string }
+  | { verdict: "basket"; summary: string; legs: { name: string; weight: number; side: string; why: string }[]; link: string; draftId: string; trace?: BuildTrace }
+  | { verdict: "no_clean_exposure"; reason: string; trace?: BuildTrace }
   | { verdict: "error"; reason: string };
 
 export const basketTool = {
@@ -85,9 +91,10 @@ export async function buildBasket(cfg: BasketConfig, args: BasketArgs, meta: Dra
     signal: AbortSignal.timeout(35_000),
   });
   if (!res.ok) return { verdict: "error", reason: `drafts ${res.status}` };
-  const out = (await res.json()) as BuilderReply & { id?: string };
+  const out = (await res.json()) as BuilderReply & { id?: string; trace?: BuildTrace };
+  const trace = out.trace ? { trace: out.trace } : {};
   if (out.verdict !== "basket" || !out.legs?.length || !out.id) {
-    return { verdict: "no_clean_exposure", reason: out.reason || "Nothing you can buy tracks this closely enough yet." };
+    return { verdict: "no_clean_exposure", reason: out.reason || "Nothing you can buy tracks this closely enough yet.", ...trace };
   }
   const id = out.id;
 
@@ -98,6 +105,7 @@ export async function buildBasket(cfg: BasketConfig, args: BasketArgs, meta: Dra
     legs: out.legs.map((l) => ({ name: l.kind === "yield" ? "Cash" : plainName(l.name), weight: l.weight, side: l.side ?? "long", why: l.why })),
     link: `${cfg.webUrl.replace(/\/$/, "")}/d/${id}`,
     draftId: id,
+    ...trace,
   };
 }
 

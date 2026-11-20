@@ -34,6 +34,9 @@
 //                                  copy_of: another draft's id: its basket, saved again for this
 //                                  asker without building (several people replying under one post
 //                                  share one basket); 404 no_such_draft.
+//   POST   /source/bot-events      header x-bot-secret: { bot: x|imessage, events: [{ at, event,
+//                                  ref?, author?, what?, ...rest }] } (up to 100) → { saved }.
+//                                  What the bots did, kept in bot_events (rest goes to data).
 //   GET    /source/drafts/mine     → { x, drafts } the X bot's unposted drafts for the X account
 //                                  linked to your Privy login (x null when none is linked), newest
 //                                  first, from the last 14 days: { id, claim, legs, context, created_at }
@@ -188,8 +191,16 @@ const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice
 
 type BuiltLeg = { name: string; weight: number; side?: string | null; kind?: string; why?: string };
 const DRAFT_COLUMNS = "id, summary, legs";
-const drafted = (d: { id: string; summary: string | null; legs: unknown }, existing: boolean) =>
-  json(200, { verdict: "basket", id: d.id, summary: d.summary, legs: d.legs, existing });
+const drafted = (d: { id: string; summary: string | null; legs: unknown }, existing: boolean, trace?: Trace) =>
+  json(200, { verdict: "basket", id: d.id, summary: d.summary, legs: d.legs, existing, ...(trace ? { trace } : {}) });
+
+/** How the take builder got there, for the bots' telemetry (bot_events): never stored on the draft. */
+type Trace = { thoughts?: string[]; searches?: string[]; picked?: string[]; raw?: unknown; rounds?: number | null; speculated?: boolean; ms?: unknown };
+function traceOf(built: { debug?: Record<string, unknown>; ms?: unknown }): Trace | undefined {
+  const d = built.debug;
+  if (!d) return undefined;
+  return { thoughts: d.thoughts as string[] | undefined, searches: d.searches as string[], picked: d.picked as string[], raw: d.raw, rounds: d.rounds as number | null, speculated: d.speculated as boolean, ms: built.ms };
+}
 
 /**
  * A bot's take → the take builder's basket, saved as a draft → { verdict: "basket", id, summary,
@@ -233,15 +244,17 @@ async function buildDraft(b: Record<string, unknown>) {
       // A bot's draft is a public reply, and its asker isn't waiting on a composer: the builder
       // thinks longer (reasoning medium, ~3 s instead of ~1.5) and gets a take's direction right
       // more often ("$TSLA demand is collapsing" isn't a Tesla buy).
-      variant: { reasoning: "medium", timeoutMs: 20_000 },
+      // thoughts: the model's reasoning summaries come back in debug, passed on as `trace`.
+      variant: { reasoning: "medium", timeoutMs: 20_000, thoughts: true },
     }),
     signal: AbortSignal.timeout(25_000),
   });
   if (!r.ok) throw new Error(`take-builder ${r.status}`);
-  const built = await r.json() as { verdict: string; summary?: string; reason?: string | null; legs?: BuiltLeg[] };
+  const built = await r.json() as { verdict: string; summary?: string; reason?: string | null; legs?: BuiltLeg[]; debug?: Record<string, unknown>; ms?: unknown };
+  const trace = traceOf(built);
   const legs = (built.legs ?? []).filter((l) => l && typeof l.name === "string").slice(0, 10);
   if (built.verdict !== "basket" || !legs.length) {
-    return json(200, { verdict: "no_clean_exposure", reason: built.reason || "Nothing you can buy tracks this closely enough yet." });
+    return json(200, { verdict: "no_clean_exposure", reason: built.reason || "Nothing you can buy tracks this closely enough yet.", ...(trace ? { trace } : {}) });
   }
 
   const row = {
@@ -254,15 +267,15 @@ async function buildDraft(b: Record<string, unknown>) {
     source_label: sourceUrl ? str(src!.label, 60) || "the post" : null,
     source_kind: sourceUrl ? (src!.kind === "x" ? "x" : "link") : null,
   };
-  return saveDraft(row, ref, origin);
+  return saveDraft(row, ref, origin, trace);
 }
 
 /** Inserts a draft under a fresh id (retrying a taken one); a racing retry of the same ref returns the winner. */
-async function saveDraft(row: Record<string, unknown> & { summary: string | null; legs: unknown }, ref: string | null, origin: string) {
+async function saveDraft(row: Record<string, unknown> & { summary: string | null; legs: unknown }, ref: string | null, origin: string, trace?: Trace) {
   for (let i = 0; i < 3; i++) {
     const id = draftId();
     const { error } = await db.from("take_drafts").insert({ id, ...row });
-    if (!error) return drafted({ id, summary: row.summary, legs: row.legs }, false);
+    if (!error) return drafted({ id, summary: row.summary, legs: row.legs }, false, trace);
     if (error.code !== "23505") dbCheck(error);
     // A taken id (or a racing retry of the same ref): try again, or return the winner.
     if (ref) {
@@ -413,6 +426,39 @@ async function poll() {
   return json(200, { accounts: followed.size, posts: posts.length, ...result });
 }
 
+// Bot telemetry --------------------------------------------------------------------------------
+
+const MAX_EVENTS = 100;
+const short = (v: unknown, n: number) => (typeof v === "string" && v ? v.slice(0, n) : null);
+
+/** POST /source/bot-events: what the bots did, one row per event (bot_events). */
+async function botEvents(b: Record<string, unknown>) {
+  const bot = b.bot;
+  check(bot === "x" || bot === "imessage", "invalid_bot");
+  check(Array.isArray(b.events) && b.events.length <= MAX_EVENTS, "invalid_events");
+  const rows = (b.events as unknown[])
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === "object" && !Array.isArray(e) && typeof (e as { event?: unknown }).event === "string")
+    .map((e) => {
+      const { t, at, event, ref, author, what, ...rest } = e;
+      const when = new Date(String(at ?? t ?? ""));
+      let data = rest;
+      // A long trace loses its reasoning first, then everything is cut.
+      if (JSON.stringify(data).length > 60_000 && data.trace) data = { ...rest, trace: { cut: JSON.stringify(rest.trace).slice(0, 30_000) } };
+      if (JSON.stringify(data).length > 60_000) data = { truncated: JSON.stringify(rest).slice(0, 60_000) };
+      return {
+        at: Number.isNaN(when.getTime()) ? new Date().toISOString() : when.toISOString(),
+        bot,
+        event: String(event).slice(0, 60),
+        ref: short(ref, 60),
+        author: short(author, 60),
+        what: short(what, 40),
+        data,
+      };
+    });
+  if (rows.length) dbCheck((await db.from("bot_events").insert(rows)).error);
+  return json(200, { saved: rows.length });
+}
+
 // Server ---------------------------------------------------------------------------------------
 
 Deno.serve(async (req) => {
@@ -427,11 +473,11 @@ Deno.serve(async (req) => {
       if (!sameSecret(req.headers.get("x-poll-secret") ?? "", pollSecret)) return json(401, { error: "unauthorized" });
       return await poll();
     }
-    if (route === "POST drafts") {
+    if (route === "POST drafts" || route === "POST bot-events") {
       const botSecret = await secret("BOT_SECRET", "bot_secret");
       if (!botSecret) return json(503, { error: "not_configured" });
       if (!sameSecret(req.headers.get("x-bot-secret") ?? "", botSecret)) return json(401, { error: "unauthorized" });
-      return await buildDraft(await body(req));
+      return route === "POST drafts" ? await buildDraft(await body(req)) : await botEvents(await body(req));
     }
     switch (route) {
       case "POST ": {

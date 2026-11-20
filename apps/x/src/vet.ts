@@ -15,10 +15,14 @@ export type Mention = {
   fade?: boolean;
 };
 
-export type Verdict =
+/** What the vetting model saw, answered and (in summary) thought: for telemetry, never posted. */
+export type VetTrace = { input: string; output: string; thoughts: string[] };
+
+export type Verdict = (
   | { action: "ignore"; reason: string }
   | { action: "take"; reason: string; claim: string; risk: "low" | "medium" | "high"; fromParent: boolean }
-  | { action: "explain"; reason: string };
+  | { action: "explain"; reason: string }
+) & { trace?: VetTrace };
 
 const SCHEMA = {
   type: "object",
@@ -65,11 +69,13 @@ export function vetter(opts: { openaiApiKey: string; model?: string }) {
       model,
       instructions: INSTRUCTIONS,
       input,
-      reasoning: { effort: "low" },
+      // summary: the model's reasoning summary, kept in the bot's telemetry (OpenAI never returns the reasoning itself).
+      reasoning: { effort: "low", summary: "auto" },
       text: { format: { type: "json_schema", name: "verdict", schema: SCHEMA, strict: true } },
     } as never)) as OpenAI.Responses.Response;
 
-    return readVerdict(res.output_text ?? "", m);
+    const thoughts = res.output.flatMap((o) => (o.type === "reasoning" ? (o.summary ?? []).map((s) => s.text) : [])).filter(Boolean);
+    return { ...readVerdict(res.output_text ?? "", m), trace: { input, output: res.output_text ?? "", thoughts } };
   };
 }
 

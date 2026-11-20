@@ -1,15 +1,26 @@
 // @yourthesisxyz: answers everyone who mentions it on X. Polls the bot's mentions, vets each one
 // (vet.ts), builds the take's basket as a draft (the same take builder and drafts as iMessage),
 // and replies with the draft's link, where whoever taps posts it as their take.
-import { agentApi, agentApiConfigFromEnv, basketConfigFromEnv } from "@thesis/agent";
+import { agentApi, agentApiConfigFromEnv, basketConfigFromEnv, botEvents, type Recorder } from "@thesis/agent";
 import { plan, type Plan } from "./bot.ts";
 import { OPTED_IN, OPTED_OUT, optCommand } from "./compose.ts";
 import { loadState, memoryOf, rollDay, saveState } from "./state.ts";
 import { vetter } from "./vet.ts";
 import { fullText, linksIn, xClient, XError, type Mentions, type XPost } from "./x.ts";
 
-function log(event: string, fields: Record<string, unknown> = {}): void {
+// Every event also goes to Supabase (bot_events) so replies can be looked back on; "poll failed"
+// at most every 10 minutes, since a dead key would log one every poll.
+let recorder: Recorder = botEvents("x", null);
+let lastPollFailRecorded = 0;
+/** `recordOnly`: kept in telemetry but not printed (the models' traces are long). */
+function log(event: string, fields: Record<string, unknown> = {}, recordOnly: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ t: new Date().toISOString(), event, ...fields }));
+  if (event === "poll failed") {
+    if (Date.now() - lastPollFailRecorded < 10 * 60_000) return;
+    lastPollFailRecorded = Date.now();
+  }
+  const { id, from, ...rest } = fields;
+  recorder.record(event, { ref: id, author: from, ...rest, ...recordOnly, ...(DRY_RUN ? { dryRun: true } : {}) });
 }
 
 function need(k: string): string {
@@ -54,6 +65,9 @@ try {
   console.error((e as Error).message);
   process.exit(1);
 }
+if (process.env.X_TELEMETRY !== "0") {
+  recorder = botEvents("x", basket, { onError: (message) => console.log(JSON.stringify({ t: new Date().toISOString(), event: "telemetry error", message })) });
+}
 
 /** "@yourthesisxyz @jake make this a take" → "make this a take": X prepends the handles of a reply. */
 const stripHandles = (s: string) => s.replace(/^(\s*@\w+)+\s*/, "").trim();
@@ -86,7 +100,10 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
   const ref = p.referenced_tweets?.find((r) => r.type === "replied_to") ?? p.referenced_tweets?.find((r) => r.type === "quoted");
   const parentPost = ref ? batch.refs.get(ref.id) ?? null : null;
   const parentAuthor = parentPost ? batch.users.get(parentPost.author_id) : undefined;
-  const base = { id: p.id, from: author ? `@${author.username}` : p.author_id, followers: author?.public_metrics?.followers_count };
+  const base = {
+    id: p.id, from: author ? `@${author.username}` : p.author_id, followers: author?.public_metrics?.followers_count,
+    mention: fullText(p).slice(0, 500), parent: parentPost?.id, thread: p.conversation_id,
+  };
 
   if (p.author_id === me.id || p.referenced_tweets?.some((r) => r.type === "retweeted")) return true;
   const thread = p.conversation_id ?? p.id;
@@ -138,7 +155,8 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
     log("plan failed, retrying next poll", { ...base, error: (e as Error).message });
     return false;
   }
-  if (out.kind === "skip") { log("skip", { ...base, reason: out.reason }); return true; }
+  const traced = out.trace ? { trace: out.trace } : {};
+  if (out.kind === "skip") { log("skip", { ...base, reason: out.reason }, traced); return true; }
   const reply = out;
   // What a trade or basket leaves behind is kept whether or not the reply goes out; the bot's own
   // post (for "back $20" or "sell" under it) only once it has an id.
@@ -151,18 +169,18 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
   };
 
   if (DRY_RUN) {
-    log("would reply", { ...base, what: out.what, text: out.text, ...(out.image && IMAGES ? { image: out.image } : {}), ...(out.trade ? { trade: out.trade } : {}) });
+    log("would reply", { ...base, what: out.what, text: out.text, ...(out.image && IMAGES ? { image: out.image } : {}), ...(out.trade ? { trade: out.trade } : {}) }, traced);
   } else {
     try {
       // The picture is a bonus: any failure posts the reply without it.
       const media = out.image && IMAGES ? await basketImage(out.image).catch((e) => { log("image failed", { ...base, error: (e as Error).message.slice(0, 160) }); return null; }) : null;
       const replyId = await x.reply(p.id, out.text, media ? [media] : []);
-      log("replied", { ...base, what: out.what, replyId, link: out.link, image: !!media, ...(out.trade ? { trade: out.trade } : {}) });
+      log("replied", { ...base, what: out.what, text: out.text, replyId, link: out.link, image: !!media, ...(out.trade ? { trade: out.trade } : {}) }, traced);
       keep(replyId);
       if (firstReply) state.onceReplied[p.author_id] = true;
     } catch (e) {
       if (e instanceof XError && e.status < 500 && e.status !== 429) {
-        log("reply refused", { ...base, status: e.status, error: e.body.slice(0, 200) });
+        log("reply refused", { ...base, what: out.what, text: out.text, status: e.status, error: e.body.slice(0, 200) }, traced);
         keep();
         return true;
       }
@@ -190,7 +208,9 @@ while (!stopping) {
   } catch (e) {
     log("poll failed", { error: (e as Error).message });
   }
+  await recorder.flush();
   // Sleep in short steps so Ctrl-C stops promptly.
   for (let waited = 0; waited < POLL_MS && !stopping; waited += 500) await new Promise((r) => setTimeout(r, 500));
 }
 log("stopped", { sinceId: state.sinceId });
+await recorder.flush();

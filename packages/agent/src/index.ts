@@ -8,9 +8,10 @@ import { askText, prepareTrade, runConfirmed, yesNo, type Pending } from "./conf
 import { TRADE_TOOL_NAMES, tradeTools } from "./tools.ts";
 import { takeIdFrom, type AgentApi } from "./trade.ts";
 
-export type { BasketConfig, BasketResult, DraftMeta } from "./basket.ts";
+export type { BasketConfig, BasketResult, BuildTrace, DraftMeta } from "./basket.ts";
 export { basketConfigFromEnv, buildBasket, plainName, warmBasket } from "./basket.ts";
 export { cleanReply } from "./style.ts";
+export { botEvents, type Recorder } from "./telemetry.ts";
 export { yesNo } from "./confirm.ts";
 export { agentApi, agentApiConfigFromEnv, draftIdFrom, takeIdFrom, type AgentApi, type Score, type TradeAsk, type TradeResult, type Who, type WhoIs } from "./trade.ts";
 

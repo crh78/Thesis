@@ -1,12 +1,12 @@
 // One mention → what the bot posts (or nothing): vet it, build the basket as a draft take, and
 // fill the reply template; or trade ("back $20", "fade $50") and sell ("sell", "sell half") from
 // the asker's own account. No X calls here, so `pnpm try` runs the same path offline.
-import { buildBasket, takeIdFrom, type AgentApi, type BasketConfig, type TradeResult } from "@thesis/agent";
+import { buildBasket, takeIdFrom, type AgentApi, type BasketConfig, type BuildTrace, type TradeResult } from "@thesis/agent";
 import {
   EXPLAIN, NO_EXPOSURE, NOT_HELD, NOT_LINKED, overLimit, plainCommand, safeClaim, scoreIntent, scoreReply, SELL_KEEP_10, SELL_WHICH, sellIntent, sellReply,
   TAKE_TAIL, takeReply, takeTradeReply, TRADE_FAILED, tradeIntent, tradeReply,
 } from "./compose.ts";
-import type { Mention, Vet } from "./vet.ts";
+import type { Mention, Verdict, Vet, VetTrace } from "./vet.ts";
 
 /** X takes are always built at high risk: up to 30% in perps at up to 5x (the take builder's cap), the rest spot. */
 export const X_RISK = "high" as const;
@@ -33,7 +33,13 @@ export type Remember = {
   shared?: { parentId: string; side: "back" | "fade"; value: Omit<Shared, "at"> };
 };
 
-export type Plan =
+/** How the bot decided: the vetting model's verdict and reasoning summary, and the take builder's. For telemetry only. */
+export type PlanTrace = {
+  vet?: Omit<Verdict, "trace"> & Partial<VetTrace>;
+  build?: { verdict: string; reason?: string; summary?: string; legs?: unknown; trace?: BuildTrace };
+};
+
+export type Plan = (
   | { kind: "skip"; reason: string }
   | {
     kind: "reply"; text: string; link?: string;
@@ -42,7 +48,8 @@ export type Plan =
     what: "take" | "no_exposure" | "explain" | "opt_out" | "opt_in" | "trade" | "trade_refused" | "trade_failed" | "not_linked" | "sell" | "score";
     trade?: { status: string; takeId?: string; error?: string };
     remember?: Remember;
-  };
+  }
+) & { trace?: PlanTrace };
 
 export type MentionInput = Mention & {
   /** The mention's post id: the draft's origin_ref, so a retry reuses its draft. */
@@ -73,7 +80,16 @@ function refusal(r: Extract<TradeResult, { ok: false }>): Plan {
 const failed = (r: { status: string; takeId?: string; error?: string }): Plan =>
   ({ kind: "reply", text: TRADE_FAILED, what: "trade_failed", trade: { status: r.status, takeId: r.takeId, error: r.error } });
 
-export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConfig; trading?: AgentApi; memory?: Memory; lookup?: AgentApi }): Promise<Plan> {
+type Deps = { vet: Vet; basket: BasketConfig; trading?: AgentApi; memory?: Memory; lookup?: AgentApi };
+
+/** What the bot posts for a mention, with how it decided (`trace`) when a model was involved. */
+export async function plan(m: MentionInput, deps: Deps): Promise<Plan> {
+  const trace: PlanTrace = {};
+  const out = await decide(m, deps, trace);
+  return trace.vet || trace.build ? { ...out, trace } : out;
+}
+
+async function decide(m: MentionInput, deps: Deps, trace: PlanTrace): Promise<Plan> {
   const trading = deps.trading && m.authorId ? deps.trading : undefined;
   const mem = deps.memory;
   const who = { x: m.authorId ?? "" };
@@ -150,6 +166,7 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
     fromParent = true;
   } else {
     const v = await deps.vet({ ...m, fade: side === "fade" });
+    { const { trace: t, ...verdict } = v; trace.vet = { ...verdict, ...t }; }
     if (v.action === "ignore") return { kind: "skip", reason: `vetted out: ${v.reason}` };
     if (v.action === "explain") return { kind: "reply", text: EXPLAIN, what: "explain" };
     const c = safeClaim(v.claim);
@@ -166,6 +183,9 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
     ...(fromParent && source ? { source } : {}),
     ...(share ? { copyOf: share.draftId } : {}),
   });
+  trace.build = out.verdict === "basket"
+    ? { verdict: out.verdict, summary: out.summary, legs: out.legs, trace: out.trace }
+    : { verdict: out.verdict, reason: out.reason, ...(out.verdict === "no_clean_exposure" ? { trace: out.trace } : {}) };
   if (out.verdict === "error") return { kind: "skip", reason: `build failed: ${out.reason}` };
   if (out.verdict === "no_clean_exposure") return { kind: "reply", text: NO_EXPOSURE, what: "no_exposure" };
   const image = imageOf(out.draftId);
