@@ -42,6 +42,6 @@ pnpm --filter @thesis/x try "make this a take" --parent "Gold to 5k by summer" -
 pnpm --filter @thesis/x start      # polls; with X_DRY_RUN=1 it logs "would reply" instead of posting
 ```
 
-When the dry-run replies look right, set `X_DRY_RUN=` (empty) and restart. It runs anywhere Node 24 runs: the BlueBubbles Mac, or the VM next to the settler.
+When the dry-run replies look right, set `X_DRY_RUN=` (empty) and restart. In production it runs on Railway with the iMessage bot ([`infra/bots`](../../infra/bots/README.md)), live since 2026-11-20. The app's permissions must be Read and Write before the access token is generated: a token made while it was read-only can read mentions but every reply is refused (403 "oauth1 app permissions").
 
 Logs are one JSON line per event: the mention id, the author's handle and follower count, what it did and why. With `X_DRY_RUN=1` the reply text is logged too.

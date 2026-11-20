@@ -29,5 +29,5 @@ Tables (`migrations/0032_sources_and_x_copy.sql`): `x_accounts`, `x_follows`, `x
 
 ## Not built
 
-- **Auto-copy** (buying for you when a call lands, within your limits) needs Privy session signers with a spending policy.
+- **Auto-copy** (buying for you when a call lands, within your limits): would trade through the `agent` function and its session signer (built, used by the X and iMessage bots, surface `copy`).
 - **Track records of X accounts' own posts**: dropped (owner's decision 2026-11-19, too costly). "@yourthesisxyz score @handle" shows the in-app record of the Thesis account that links that X account instead (`apps/x`).
