@@ -9,7 +9,7 @@ Nothing goes to real users until the whole product has run end to end on a **for
 
 Everything here relies on `surfnet_*` cheatcodes, so pointing it at a real RPC fails rather than spending anything.
 
-**The team runs one shared fork**, on the Oracle VM `thesis-executor` ([`infra/executor`](../../infra/executor/README.md)): Surfpool, the fork API (`https://<fork-host>`, public), the relay, the settler, the asset-bank poller and the marker, as systemd services (the closed Blink's listener is off: `FORK_BLINK_PORT=`). The apps point at it through `FORK_API_URL`, and the e2e suites run there. Don't start a second fork: two forks would report different state to the same Supabase. The commands below are what those services run.
+**There is exactly one fork**, on the Oracle VM `thesis-executor` ([`infra/executor`](../../infra/executor/README.md)): Surfpool, the fork API (`https://<fork-host>`, public), the relay, the settler, the asset-bank poller and the marker, as systemd services (the closed Blink's listener is off: `FORK_BLINK_PORT=`). The apps point at it through `FORK_API_URL`, and the e2e suites run there. Never start another fork (on a laptop, another port, a scratch copy): two forks would report different state to the same Supabase. The commands below are what those services run; run e2e suites on the VM the way CLAUDE.md → "The one fork" shows.
 
 ### Resets
 
@@ -27,19 +27,9 @@ The shared fork will be public once the product opens up. A reset (a fresh fork)
      ```
   3. **Check** the feeds show only takes posted since the reset, every Trade button works, and nobody's inbox shows the old fork's digests or badges.
 
-## Quick start
+## On the VM
 
-```sh
-pnpm install
-pnpm fork:up                      # start the fork, deploy, init_config
-pnpm fork:fund <your wallet>      # 10 SOL + 1,000 USDC
-pnpm fork:relay                   # second terminal: print Stream payloads
-pnpm fork:smoke                   # a create_take and a back
-pnpm fork:status
-pnpm fork:down                    # stop the fork fork:up started
-```
-
-The fork listens on `http://127.0.0.1:18899` (websocket 18900), clear of a `solana-test-validator` on 8899.
+`thesis-surfpool` runs Surfpool in Docker and `thesis-fork-up` runs `pnpm fork:up` once it answers; the fork listens on `http://127.0.0.1:18899` (websocket 18900).
 
 **Prerequisites:** Node 24 and pnpm; Surfpool 1.7.0 (looked up at `$SURFPOOL_BIN`, `~/.local/bin/surfpool`, then `PATH`); and the built `thesis.so` (`--so <path>`, `$THESIS_SO`, then `anchor/target/deploy/thesis.so` here or in the main checkout). It must match the IDL in `packages/chain/idl/`. You don't need the program keypair, the Solana CLI or a funded wallet.
 
@@ -66,7 +56,7 @@ The fork listens on `http://127.0.0.1:18899` (websocket 18900), clear of a `sola
 | `pnpm fork:phoenix-e2e` | Phoenix through `@thesis/venues/phoenix` only: register, 2x long and short, close, sweep |
 | `pnpm fork:phoenix-api-e2e [-- --settle]` | Phoenix legs through the API and program: a back with a 5x perp, its liquidation price and one alert, a fade of shorts, sales, cash-out; `--settle` prices and scores both |
 | `pnpm fork:phoenix-makers-e2e [-- --runs N --usd N]` | One wallet backs a take with a thin perp (CoreWeave) ten times in a row, sells the whole holding and cashes out: every one must land (the maker sync; without it Phoenix panicked from about the third) |
-| `pnpm fork:load-trades [-- --users N --takes K --usd N --stocks-only --ramp S]` | A few people trading at once (default 4, all at the same moment): each backs or fades a take with every kind of leg (stocks, a CoreWeave perp, a live Gemini prediction, a card), sells all of it a few seconds later and cashes out Phoenix; p50 / p90 / max per step, errors with their messages, Jupiter waits and the Phoenix lock's waits. Run it while nobody else trades. 2026-11-19, 5 users ×3: every trade landed, 14 of 15 sales (one not confirmed), Phoenix sends queued up to ~2 s |
+| `pnpm fork:load-trades [-- --users N --takes K --usd N --stocks-only --ramp S]` | A few people trading at once (default 4, all at the same moment): each backs or fades a take with every kind of leg (stocks, a CoreWeave perp, a live Gemini prediction, a card), sells all of it a few seconds later and cashes out Phoenix; p50 / p90 / max per step, errors with their messages, Jupiter waits and the Phoenix lock's waits. Run it while nobody else trades |
 | `pnpm fork:cards-e2e` | Card legs: a back escrows the card's share, a fade leaves it out, a sale returns the escrow. `CARDS_E2E_CARD` picks the card (one the take builder picked) |
 | `pnpm fork:creator-fees-e2e` | Creator fees on backs and a fade, the signed read, claim one and Claim all |
 | `pnpm fork:ticket-e2e` | An abandoned split-trade ticket is cancelled by the owner's next trade (security review L-4) |
@@ -82,9 +72,9 @@ Settings, all optional:
 | Variable | Default | |
 | --- | --- | --- |
 | `FORK_RPC_PORT` / `FORK_WS_PORT` | `18899` / RPC + 1 | |
-| `FORK_HOST` | `127.0.0.1` | `0.0.0.0` lets a phone on the same Wi-Fi reach it |
+| `FORK_HOST` | `127.0.0.1` | Interface Surfpool binds to |
 | `FORK_RPC_URL` / `FORK_WS_URL` | from host and ports | Use a fork elsewhere |
-| `FORK_DATASOURCE_RPC_URL` | public mainnet | The mainnet RPC Surfpool forks from (the VM: QuickNode Build). Public mainnet rate-limits heavy use (`Failed to fetch accounts`); **not the free QuickNode plan**, which caps `getMultipleAccounts` at 5. Applies when Surfpool starts |
+| `FORK_DATASOURCE_RPC_URL` | public mainnet | The mainnet RPC Surfpool forks from (the VM: QuickNode Build, passed by environment). Public mainnet rate-limits heavy use (`Failed to fetch accounts`); the free QuickNode plan caps `getMultipleAccounts` at 5. Applies when Surfpool starts |
 | `SURFPOOL_BIN`, `SURFPOOL_ARGS`, `THESIS_SO` | | Extra flags, e.g. `SURFPOOL_ARGS="--no-studio --disable-instruction-profiling"` (what the VM runs: profiling cost about 145 ms per instruction) |
 
 `fork:up` also creates a fork-only **app fee payer** (`.data/fork/app-payer.json`) and the **Thesis lookup table** (`.data/fork/thesis-alt.json`; with `JUPITER_API_KEY` it adds Jupiter Lend's accounts, so a sale with a yield leg fits one transaction). Surfpool keeps state in memory (`--no-tui --no-deploy --airdrop-amount 0`, log in `.data/fork/surfpool.log`, Studio on 18488): after `fork:down`, a crash or a reboot the fork starts fresh.
@@ -98,7 +88,7 @@ Surfpool's `surfnet_writeProgram` writes the ELF straight into the program's acc
 ## Pointing surfaces at the fork
 
 - **Apps** talk to the fork API, not the RPC: iOS through `FORK_API_URL` in `apps/ios/Config/Fork.local.xcconfig` ([`apps/ios/README.md`](../../apps/ios/README.md#the-fork)), the web app through `NEXT_PUBLIC_FORK_API_URL` in the browser and `FORK_API_URL` on its server ([`apps/www/README.md`](../../apps/www/README.md)).
-- **Anything that reads Solana directly** should use `SOLANA_RPC_URL` / `SOLANA_WS_URL` (browser: `NEXT_PUBLIC_SOLANA_RPC_URL`), so one switch moves it. Local Supabase functions run in Docker: use `http://host.docker.internal:18899`. Program ID and USDC mint are the mainnet ones, so there are no fork-specific code paths.
+- **Anything that reads Solana directly** should use `SOLANA_RPC_URL` / `SOLANA_WS_URL` (browser: `NEXT_PUBLIC_SOLANA_RPC_URL`), so one switch moves it. Program ID and USDC mint are the mainnet ones, so there are no fork-specific code paths.
 - **Privy:** embedded wallets are ordinary addresses (`fork:fund` works). Sign with the embedded wallet (`signTransaction`, which doesn't send) and send through the fork API or fork RPC. Never broadcast through Privy's server-side `signAndSendTransaction` with a mainnet CAIP-2 ID: it sends to Privy's mainnet RPC.
 
 ## Fork API (the apps' fork mode)
@@ -150,11 +140,11 @@ Keeping load down (every RPC read of an account the fork doesn't have goes to th
 | Money actions per wallet | 10 a minute, 100 a day | `429 rate_limited` with `Retry-After`, in every auth mode (unverified callers count per IP and wallet) |
 | Reads (GETs and `/confirm`) per signed-in user, else per IP | 120 a minute | `FORK_API_READ_LIMIT=enforce`: `429`; `report` (default) logs. Service keys aren't counted |
 | `POST /digests` | service key only | `401 service_key_required` |
-| Jupiter calls (builds, sales, sweeps, route checks, price reads) | 30 a minute and bursts of 10 by default (`FORK_API_JUPITER_RPM`, `FORK_API_JUPITER_BURST`); 8 in flight, 24 queued. On a paid plan it takes most of the organisation's limit: the VM runs `JUPITER_API_KEY` on the owner's Developer plan (10 a second, enforced as 100 per 10 s), shared with the settler, marker and asset bank, at 420 a minute in bursts of 10 (`JUPITER_TRADE_API_KEY`, a key of its own, is unset) | Lanes: a tap-time build waits up to 20 s for its turn (a cold 5-leg take needs ~10 s on the VM's key), then `503 busy` with `Retry-After`; route checks fail fast with `503 busy` when fewer than 6 are left; a prebuild short only of those spare requests waits up to 4 s for the bucket to refill, and fails fast after a 429 or behind a waiting tap. Once a prebuild's first call is let in, its other calls (a sale quotes its legs in parallel) go in a tap's turn, so it isn't refused halfway. A 429 in a prebuild or route check answers `503 busy` with `Retry-After`. While calls run or wait, the API touches the asset bank's `trade-builds.busy` every 5 s, so the poller's probes pause |
+| Jupiter calls (builds, sales, sweeps, route checks, price reads) | 30 a minute and bursts of 10 by default (`FORK_API_JUPITER_RPM`, `FORK_API_JUPITER_BURST`); 8 in flight, 24 queued. The VM runs `JUPITER_API_KEY` on the Developer plan (10 a second, enforced as 100 per 10 s; shared with the settler, marker and asset bank) at `FORK_API_JUPITER_RPM=420`, bursts of 10. The old `JUPITER_TRADE_API_KEY` override is retired and unset | Lanes: a tap-time build waits up to 20 s for its turn (a cold 5-leg take needs ~10 s on the VM's key), then `503 busy` with `Retry-After`; route checks fail fast with `503 busy` when fewer than 6 are left; a prebuild short only of those spare requests waits up to 4 s for the bucket to refill, and fails fast after a 429 or behind a waiting tap. Once a prebuild's first call is let in, its other calls (a sale quotes its legs in parallel) go in a tap's turn, so it isn't refused halfway. A 429 in a prebuild or route check answers `503 busy` with `Retry-After`. While calls run or wait, the API touches the asset bank's `trade-builds.busy` every 5 s, so the poller's probes pause |
 
 **Who a read counts against:** a read carrying a valid Privy token (`Authorization: Bearer <token>`, as on money routes) counts against that Privy user, so people sharing an IP don't share a limit. A valid token is trusted for a minute (never past its expiry) without checking its signature again; an invalid one is ignored and the read counts per IP.
 
-**The caller's IP:** for a request from loopback (Caddy, or Tailscale Funnel for old builds), the last `X-Forwarded-For` entry; Caddy overwrites whatever a client sent in that header, so it can't be spoofed. The web app's Vercel proxy (`/api/fork/*`, used only when the browser doesn't call directly) sends `x-thesis-proxy-key: <FORK_API_PROXY_KEY>` and `x-thesis-client-ip`, and only with that key is the visitor's IP used. Server renders send a service key and aren't counted.
+**The caller's IP:** for a request from loopback (Caddy), the last `X-Forwarded-For` entry; Caddy overwrites whatever a client sent in that header, so it can't be spoofed. The web app's Vercel proxy (`/api/fork/*`, used only when the browser doesn't call directly) sends `x-thesis-proxy-key: <FORK_API_PROXY_KEY>` and `x-thesis-client-ip`, and only with that key is the visitor's IP used. Server renders send a service key and aren't counted.
 
 ### Direct browser calls
 
@@ -290,7 +280,7 @@ Receipts and the portfolio give each position `remainingStakeUsd` (cost basis st
 
 ## The Blink (closed)
 
-The Blink isn't pursued; the code stays, unmaintained. To run it anyway: `pnpm --filter @thesis/web build`, then `FORK_BLINK_PORT=18902 pnpm fork:api`, and `pnpm fork:blink http://127.0.0.1:18902/api/actions/back/<take-id>` acts as the wallet. Details: [`apps/web/README.md`](../../apps/web/README.md).
+The Blink isn't pursued; the code stays, unmaintained, and the VM's listener is off. To run it anyway, on the one fork API: `pnpm --filter @thesis/web build`, set `FORK_BLINK_PORT=18902`, then `pnpm fork:blink http://127.0.0.1:18902/api/actions/back/<take-id>` acts as the wallet. Details: [`apps/web/README.md`](../../apps/web/README.md).
 
 ## Troubleshooting
 

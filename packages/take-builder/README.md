@@ -4,7 +4,7 @@ AI take builder: opinion → risk question → explained basket (why each leg, p
 
 The builder runs as the `take-builder` Supabase edge function (`supabase/functions/take-builder`). It lists every stock, ETF, perp and cash vault in a cached prompt, BM25-searches prediction markets on the take's words (an in-worker index over `basket_catalog()`, no embeddings), lets one fast model call `search` for a market it needs, and has it pick and weight 1–5 legs. `eval/` compares builders on 100 takes with blind LLM judges (`eval/RESULTS.md`).
 
-House rules (`supabase/functions/take-builder/rules.ts`):
+House rules (`supabase/functions/take-builder/rules.ts`; the card rules are in `cards.ts`):
 - a perp pick's leverage is the model's choice, from the risk the user picked and how directly the name is the take, at most 5x and the market's own max; 2x when no model chose it (the rules fallback, a switch to high risk, an add by name);
 - a perp is at most 30% when the basket holds other picks; one pick per name;
 - Collector Crypt cards (live search) at medium and high risk only: a take about cards can be all cards, any other take gets at most three cards, each at most 20%, never only cards;

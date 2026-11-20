@@ -32,7 +32,7 @@ const leg = await jupiterBuy({ quote: best.winner!.quote, user, payer, label: "N
 - `jupiterLendDeposit({ user, payer, amount, apiKey })` deposits USDC into the jlUSDC vault from the user's wallet (with an idempotent create of their jlUSDC account, paid by `payer`). Needs `JUPITER_API_KEY`.
 - `jupiterLendShareValue(shareMint)` is one share's value in USDC (`totalAssets / totalSupply`, keyless), which the settler signs as the leg's price.
 - `jupiterLendRedeem({ user, payer, shares, apiKey })` redeems on a sale (no slippage).
-- `jupiterLendAccounts({ apiKey })` lists the vault accounts every deposit and redeem shares; `fork:up` puts them in the lookup table so a sale with a swap leg fits one transaction.
+- `jupiterLendAccounts({ apiKey })` lists the vault accounts every deposit and redeem shares; `fork:up` puts them in the lookup table so a sale with a yield leg fits one transaction.
 
 Tested on recorded responses (`pnpm --filter @thesis/venues test`) and for real on the fork (`pnpm fork:jupiter-e2e`).
 

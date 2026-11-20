@@ -1,6 +1,6 @@
 # Thesis on-chain plan
 
-The direction for everything on Solana: the Thesis Anchor program, its TypeScript client (`packages/chain`), and the transactions that pair a user's trades with a Thesis receipt. A direction, not a spec.
+How the Solana side works and what was decided: the Thesis Anchor program, its TypeScript client (`packages/chain`), and the transactions that pair a user's trades with a Thesis receipt. The program and its services are built and live on the fork; what's left is dogfooding (step 10) and the mainnet launch (step 12).
 
 ## The idea
 
@@ -23,7 +23,7 @@ The user's own wallet does the trading (Jupiter swaps, Jupiter Lend, Phoenix). I
 | Platform fee | 10 bps (0.10%) of each back or fade, whole stake (paper shares included); capped at 1% in the program |
 | Creator share | 5 bps of the fee to the take's author on every back and fade; the platform keeps 5 bps. On the author's own buy-in it goes to the platform. No performance boost |
 | Minimum stake | $10. Smaller positions are recorded but don't score |
-| Max legs per take | 10 |
+| Max legs per take | 5 in the apps, the take builder and the `social` function (a cold build costs ~2 Jupiter calls per swap leg); the program's own cap stays 10 |
 | Take length | No timeline to pick: a take runs until its author sells their buy-in, at most 365 days after posting. `horizon_end` is fixed at posting + 365 days (the config's window is 364 to 366 days), and a take its author never sells settles then, as if sold at that day's prices |
 | Closing a take | The author's sale of their own buy-in closes the take (`Closed`, event `takeClosed`): no new backs or fades, and its headline result settles from the sale's prices (`settle_take`). Backers and faders who haven't sold keep their positions; each settles when its owner sells, or at the 365-day mark. "Made for backers" counts positions as they settle. The program refuses a fade by the take's own author |
 | Author buy-in | At least $10. Like a back, it records only the legs it bought, so a leg with no venue never holds up the take's result |
@@ -78,7 +78,7 @@ Solana Actions/Blinks were step 9 until the Blink was closed; the code stays in 
 | 7. Live data: events, the QuickNode filter and decoder, the fork relay | Done |
 | 8. Asset bank and venues: best-issuer routing, Jupiter, Jupiter Lend, Gemini, Phoenix, Collector Crypt, the composer | Done on the fork |
 | 9. The X Blink | Closed |
-| 10. Dogfood on the fork | Ongoing: the web app (public at `yourthesis.xyz`) and the iOS development build run on the shared fork; iMessage trading and the X agent wait on Privy session signers |
+| 10. Dogfood on the fork | Ongoing: the web app (`yourthesis.xyz`) runs on the shared fork. Trading by text through Privy session signers, the X bot, iMessage trading and copy trading are live there; X copy trading is dogfooded, the X bot's trades and iMessage trading not yet |
 | 10b. No-timeline takes, then partial sales | Done (program changes reach the fork through a fresh-fork reset: [`cards-reset.md`](cards-reset.md)) |
 | 11. Hardening: proof of trade, security review, property tests, verifiable build, self-CPI events | Done ([`hardening-plan.md`](hardening-plan.md)); M-3 open ([`security-review.md`](security-review.md)) |
 | 12. Mainnet launch | Phase 2 (private program), then phase 3 (real users) |
@@ -101,15 +101,6 @@ Accounts are sized to their basket: on a 3-leg take a position is 190 bytes (~0.
 - **Exit accounts** (111 bytes on a 3-leg take) close with their position; **part accounts** (one per partial sale) close when the part settles, refunding whoever paid.
 - **Takes and profiles stay:** they're the permanent record.
 - **Later:** Light Protocol compressed positions (needs a compression-aware RPC such as Helius Photon).
-
-## What the on-chain work gives
-
-| Area | What it gives |
-|---|---|
-| Solana | Anchor, Token-2022 badges, atomic composition with Jupiter, Jupiter Lend and Phoenix, instruction introspection, verifiable build, rent reclaim |
-| Consumer app | Gasless for app users, no custody, live receipts |
-| Prediction markets | Prediction legs paper-filled at Gemini's live prices, recorded and scored on-chain, faded through the other side |
-| Streams | Program events built for a Stream filter, decoded by the Supabase webhook |
 
 ## Risks
 

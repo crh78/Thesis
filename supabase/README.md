@@ -2,7 +2,7 @@
 
 Migrations, edge functions, seed data and config for the `thesis` project (`https://<project-ref>.supabase.co`). Auth is Privy, not Supabase Auth: clients read with the publishable key, and every write goes through an edge function that verifies the Privy access token (`privy-token` header) and uses the service role.
 
-Migrations are numbered `0001_<name>.sql` … `0058_<name>.sql`; a new one takes the next number. Below, `*_name` means the migration of that name.
+Migrations are numbered `0001_<name>.sql` … `0061_<name>.sql`; a new one takes the next number. Below, `*_name` means the migration of that name.
 
 ## Database
 
@@ -33,7 +33,14 @@ Migrations are numbered `0001_<name>.sql` … `0058_<name>.sql`; a new one takes
 | `*_author_sale_closes` | No-timeline takes: `create_take` ignores the horizon (every take is `12mo`, `settles_at` = posting + 365 days). The author's sale closes the take: `takeClosed` sets `chain_takes.closed_at`, `takeSettled` sets `settled_at`, and `take_json()` adds `closed_at`, `settled` and `settled_at`. Holders with open positions get a `take_closed` notification; `apply_marks()` freezes a closed take's return |
 | `*_take_drafts`, `*_take_drafts_for_x`, `*_take_draft_for_x` | Draft takes from the chat bots (`/d/<id>` on the web). An X draft is saved for the asker's X username (`for_x`) and listed only to them; `take_draft()` says whom it's for, and only that account can post it |
 | `*_take_leg_name_120`, `*_gemini_leg_names` | Leg names up to 120 characters; Gemini leg names without the "?" before the contract's label |
-| `*_sources_and_x_copy`, `*_x_poll_cron` | Takes from what you read and copying X accounts: `x_accounts`, `x_follows`, `x_calls` (service role only) and the 15-minute poll ([`docs/share-and-copy.md`](../docs/share-and-copy.md)) |
+| `*_sources_and_x_copy`, `*_x_poll_cron` | Takes from what you read and copying X accounts: `x_accounts`, `x_follows`, `x_calls` (service role only) and the X poll (pg_cron every 15 minutes; accounts nobody auto-copies are read hourly) ([`docs/share-and-copy.md`](../docs/share-and-copy.md)) |
+
+### Trading by text and copy trading
+
+| Migrations | What they do |
+|---|---|
+| `*_agent_grants`, `*_agent_limits_10k` | `agent_grants` (each account's session-signer wallet, per-trade and daily limits, linked X account and iMessage handle), `agent_links` (one-time iMessage connect links), `agent_trades` and `agent_spent()`, all service role only, for `functions/agent`. The table allows limits up to $10,000; the function holds everyone else to $1,000 (`AGENT_LIMIT_OVERRIDES`) |
+| `*_copy_trading` | Auto-copy: `x_follows.auto*`, `trader_follows`, `copy_jobs` queued by triggers and run by the pg_cron job `copy-run` (every minute → `functions/agent` `POST /agent/copy-run`), `x_calls.draft_id` (one basket per call, shared by every copier), `takes.auto_copy` (kept out of the feeds), and the `copy_done` / `copy_skipped` notifications |
 
 ### Chain data and scores
 
@@ -71,7 +78,7 @@ Migrations are numbered `0001_<name>.sql` … `0058_<name>.sql`; a new one takes
 
 ### Retired: simulated money
 
-The simulated-money mode is gone (decided 2026-11-18): `functions/cash` is removed, and only the fork's on-chain trades count. Its tables and SQL functions stay so no data is dropped (`*_cash`, `*_cash_activity_paging`, `*_trade_amounts`, `*_cash_positions`, `*_positions_and_selling`): the double-entry `ledger`, `positions`, `cash_rules()`, `cash_deposit` / `cash_withdraw`, `place_trade`, `sell_position`, `take_price()`, `cash_summary` / `cash_activity` / `cash_positions` (all service role only; nothing calls the writes any more). `take_traders()` still reads the ledger, so older play-money trades keep their names on take pages.
+The simulated-money mode and `functions/cash` are gone; only the fork's on-chain trades count. Its tables and functions (`*_cash`, `*_cash_activity_paging`, `*_trade_amounts`, `*_cash_positions`, `*_positions_and_selling`: `ledger`, `positions`, `place_trade`, …) stay so no data is dropped; nothing writes them. `take_traders()` still reads the ledger, so older trades keep their names on take pages.
 
 ## Edge functions
 
@@ -81,7 +88,7 @@ All have `verify_jwt = false` in `config.toml` and check their own caller.
 |---|---|
 | `session` | Sign-in: find-or-create the user, sync their wallet, onboarding fields, name, handle and photo, account deletion |
 | `social` | Social writes (post a take, save, follow, comment, like, bio), `GET /saves`, the follow lists, and the inbox (`GET /notifications`, `POST /notifications/read`; chain notifications only for the `x-thesis-network` you ask for) |
-| `assets` | Asset search (`GET /assets/search?q=`) and asset pages (`GET /assets/:id?range=1D\|1W\|1M\|1Y`: details, live price from Jupiter, history from GeckoTerminal; a token under the $50k floor shows its stock's price; yield rows show Jupiter Lend's live APY). With `US_RESTRICTIONS=on`, things US persons can't buy are marked unavailable |
+| `assets` | Asset search (`GET /assets/search?q=`) and asset pages (`GET /assets/:id?range=1D\|1W\|1M\|1Y`: details, live price from Jupiter, history from GeckoTerminal; a token under the $25k pooled-liquidity floor shows its stock's price; yield rows show Jupiter Lend's live APY). With `US_RESTRICTIONS=on`, things US persons can't buy are marked unavailable |
 | `take-builder` | Take → basket: every stock, perp and cash vault in a cached prompt, prediction markets BM25-searched in the worker, and a `search` tool for a market the model needs; no embeddings. Also edits a basket (`mode: "edit"` with an `ask`, `mode: "risk"`, `include`), copies a post, article or fund (`source`), and searches Collector Crypt live for cards (`cards.ts`). House rules in `rules.ts` ([`packages/take-builder`](../packages/take-builder/README.md)) |
 | `source` | Takes from what you read (`POST /source`, `/source/attach`), copying X accounts (`/source/x`, the pg_cron `/source/poll`), and the chat bots' drafts (`POST /source/drafts` with `x-bot-secret`, `GET /source/drafts/mine`, `PUT /source/drafts/:id`) |
 | `quicknode-stream` | The Stream's webhook: checks QuickNode's signature (`QUICKNODE_STREAM_TOKEN`), decodes events, calls `ingest_chain_events()` |
@@ -92,6 +99,7 @@ All have `verify_jwt = false` in `config.toml` and check their own caller.
 | `securities-index` | Loads the take builder's catalog into `securities`; `unindex` marks prediction rows thin; `liquidity` syncs tradeable flags from the asset bank. Called with `SECURITIES_INDEX_SECRET` |
 | `web-push` | Saves and removes a browser's push subscription (with the user's Privy token), and sends a notification to that person's browsers when the trigger calls it |
 | `cards` | Uploads a called-it card picture (`privy-token`), so a shared link previews as the card |
+| `agent` | Trading by text within the limits a user approved once on the web app's `/limits` screen, through a Privy session signer: the user's routes (`/agent/grant`, `/agent/copies`, `/agent/links/:token`, Privy token) and the bots' routes (`x-bot-secret`: `/agent/trades`, `/agent/whois`, `/agent/positions`, `/agent/score`, `/agent/copy`, `/agent/links`, and `/agent/copy-run` for pg_cron). Trades go to the fork API with its `agent` service key |
 | `open` | `GET /open?…` → a 302 into the app's URL scheme, so chat links (iMessage only taps `https`) open a take on its basket |
 
 Shared code is in `functions/_shared/` (`privy.ts` token checks, `catalog.ts` the catalog as the apps show it, `source.ts` and `x.ts`, and `thesis-idl.json`, a copy of the program's IDL that a `packages/chain` test keeps equal).
@@ -111,6 +119,8 @@ Shared code is in `functions/_shared/` (`privy.ts` token checks, `catalog.ts` th
 | `account_deletion.sql` | Takes others are in stay with the "Deleted account" author, the rest go; comments go except an answered one |
 | `leaderboard.sql` | Boards lowest first and the viewer's own rank, past the limit and off the board |
 | `take_drafts.sql` | `take_draft()` says whom an X draft is for; the drafts table stays private |
+| `agent_grants.sql` | The per-trade and daily limits (never on sales), one trade per surface + ref, revoked grants, private tables |
+| `copy_trading.sql` | Auto-copy jobs queued once per copier and call or take, claimed once, the daily count, auto-copied takes out of the feeds |
 | `search_securities.sql` | `search_securities` answers exactly as its slower predecessor did |
 
 ## Seed
@@ -119,10 +129,11 @@ Shared code is in `functions/_shared/` (`privy.ts` token checks, `catalog.ts` th
 
 ## Deploying
 
-With the Supabase CLI 2.x (3.x rejects `config.toml`'s `[inbucket]`; to use 3.x, run it from a folder without that file), linked to the project.
+Changes to the hosted project are applied from this repo. Additive, backward-compatible changes may go to the hosted project after local tests pass; tell the project owner each time.
 
-- **Migrations:** the hosted history uses MCP-assigned versions, so **never `supabase db push`** (it would re-run old ones). Apply each new migration on its own with `supabase db query --linked -f supabase/migrations/<file>.sql`, then record its version in `supabase_migrations.schema_migrations`. Additive, backward-compatible changes may go to the hosted project after local tests pass; tell the project owner each time.
+- **CLI:** Supabase CLI 3.x, run from a folder without the repo's `supabase/config.toml` (its `[inbucket]` key is rejected by 3.x).
+- **Migrations:** the hosted history uses MCP-assigned versions, so **never `supabase db push`** (it would re-run old ones). Apply each new migration on its own with `supabase db query --remote=<project-ref> --yes -f <absolute path to supabase/migrations/<file>.sql>`, then record its version in `supabase_migrations.schema_migrations`.
 - **Functions:** `supabase functions deploy <name>`: `session social assets take-builder source quicknode-stream marks price-audit notify gemini securities-index web-push cards open agent`. Deploy `quicknode-stream` from the same commit as the program, so its IDL matches. Preserve live changes from other branches when redeploying one.
 - **Seed:** `psql "$DATABASE_URL" -f supabase/seed/demo.sql`, then `seed/demo_trades.sql`.
-- **Vault** (once per project, in SQL): `select vault.create_secret('https://<project-ref>.supabase.co', 'project_url');`. The X poll cron job and the web push trigger call functions at this URL; there is no default.
-- **Secrets** (dashboard or `supabase secrets set`): the Privy keys, OpenAI, `SECURITIES_INDEX_SECRET`, `QUICKNODE_STREAM_TOKEN`, `NOTIFY_TOKEN`, `GEMINI_PROXY_TOKEN`, `MARKS_TOKEN`, `PRICE_AUDIT_TOKEN`, and for web push `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`. Every name, with what it's for, is in `functions/.env.example`.
+- **Vault** (in SQL, `select vault.create_secret('<value>', '<name>');`): `project_url` (`https://<project-ref>.supabase.co`; the pg_cron jobs and the web push trigger call functions at this URL, with no default), `bot_secret` and `x_poll_secret` (migrations create random ones; the bots and `functions/source` must use the same values), and `apify_token` (set by hand). `web_push_secret` is made by its migration.
+- **Secrets** (dashboard or `supabase secrets set`): every name, with what it's for, is in `functions/.env.example` (Privy, OpenAI, the shared tokens, VAPID, the X and Apify keys, the agent's session signer and fork API service key).
