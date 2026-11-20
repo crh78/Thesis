@@ -20,11 +20,11 @@ const state = (tokens: Record<string, TokenEntry>, probesOkAt: string | null = "
     tiers: { probes: { lastOkAt: probesOkAt, lastStartAt: null, lastError: null, lastDurationMs: null, runs: 1, requests: 0 } },
   }) as unknown as BankState;
 
-test("XLEx (no route at $100), and a pre-IPO token and a stock under the $50k floor, go thin; a routed, deep token stays tradeable", () => {
+test("XLEx (no route at $100), and a pre-IPO token and a stock under the $25k floor, go thin; a routed, deep token stays tradeable", () => {
   const s = state({
     XLEX: tok({ underlying: "etf:US:XLE", cls: "no-route", pooled: 113 }),
-    SPCX: tok({ underlying: "private:SPACEX", cls: "tradeable", pooled: 40_000 }),
-    NVDA: tok({ underlying: "equity:US:NVDA", cls: "tradeable", pooled: 30_000 }),
+    SPCX: tok({ underlying: "private:SPACEX", cls: "tradeable", pooled: 20_000 }),
+    NVDA: tok({ underlying: "equity:US:NVDA", cls: "tradeable", pooled: 15_000 }),
     MSFT: tok({ underlying: "equity:US:MSFT", cls: "tradeable", pooled: 60_000 }),
     PAXG: tok({ underlying: "commodity:XAU", cls: "tradeable", pooled: 104_000 }),
   });
@@ -40,9 +40,9 @@ test("XLEx (no route at $100), and a pre-IPO token and a stock under the $50k fl
   assert.match(changes[1].why, /floor/);
 });
 
-test("tradeable needs both the price-impact probe and $50k pooled, stocks included; unknown or unprobed tokens are left alone", () => {
+test("tradeable needs both the price-impact probe and $25k pooled, stocks included; unknown or unprobed tokens are left alone", () => {
   assert.equal(tokenLiquidity(tok({ underlying: "equity:US:FWDI", cls: "tradeable", pooled: 24_711 }))?.liquidity, "thin");
-  assert.equal(tokenLiquidity(tok({ underlying: "equity:US:FWDI", cls: "tradeable", pooled: 50_000 }))?.liquidity, "tradeable");
+  assert.equal(tokenLiquidity(tok({ underlying: "equity:US:FWDI", cls: "tradeable", pooled: 25_000 }))?.liquidity, "tradeable");
   assert.equal(tokenLiquidity(tok({ underlying: "equity:US:FWDI", cls: "thin", pooled: 1e6 }))?.liquidity, "thin");
   assert.equal(tokenLiquidity(tok({ underlying: "equity:US:AAPL", cls: "unprobed", pooled: 1e6 })), null);
   assert.equal(tokenLiquidity(undefined), null);

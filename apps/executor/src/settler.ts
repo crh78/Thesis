@@ -9,7 +9,7 @@
 //   ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY   US stock prices and splits (required)
 //   JUPITER_API_KEY             issuer token prices and yield legs, on api.jup.ag (required)
 //   COLLECTOR_CRYPT_API_KEY     optional ccsk_ key for card legs' insured values (higher rate limits)
-//   SETTLER_MIN_LIQUIDITY_USD   50000 (PRICEABLE_MIN_POOLED_USD): token price used only with this much pooled liquidity
+//   SETTLER_MIN_LIQUIDITY_USD   25000 (PRICEABLE_MIN_POOLED_USD): token price used only with this much pooled liquidity
 //   SETTLER_LIVE_WINDOW_SEC     300: token prices only within 5 minutes of the trade or horizon
 //   SETTLER_STALE_REF_SEC       900: no premium to the stock is measured against an older trade
 //   SETTLER_INTERVAL_SEC        20

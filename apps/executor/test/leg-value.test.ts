@@ -17,7 +17,7 @@ const contract = (o: Partial<GeminiContract> = {}): GeminiContract =>
   }) as GeminiContract;
 
 const LIQUID = { usdPrice: 101, liquidityUsd: 80_000 };
-const THIN = { usdPrice: 101, liquidityUsd: 49_999 };
+const THIN = { usdPrice: 101, liquidityUsd: 24_999 };
 const spot = (basis: NonNullable<LegToValue["spot"]>["basis"], o: Partial<NonNullable<LegToValue["spot"]>> = {}): LegToValue => ({
   kind: "spot",
   held: "back",
@@ -28,10 +28,10 @@ const spot = (basis: NonNullable<LegToValue["spot"]>["basis"], o: Partial<NonNul
 type Row = [name: string, leg: LegToValue, market: LegMarket, want: { price: number; rule: string; returnBps: number | null } | { reason: RegExp }];
 
 const rows: Row[] = [
-  // Spot: token first with the $50k floor, the stock as the fallback, the entry's source kept.
+  // Spot: token first with the $25k floor, the stock as the fallback, the entry's source kept.
   ["spot, no entry yet: a liquid token prices it", spot(null), { token: LIQUID, stock: 99 }, { price: 101, rule: "issuer-token", returnBps: 100 }],
   ["spot, no entry yet: a thin token falls back to the stock", spot(null), { token: THIN, stock: 99 }, { price: 99, rule: "stock", returnBps: -100 }],
-  ["spot: exactly $50k pooled is tradeable", spot(null), { token: { usdPrice: 101, liquidityUsd: 50_000 }, stock: 99 }, { price: 101, rule: "issuer-token", returnBps: 100 }],
+  ["spot: exactly $25k pooled is tradeable", spot(null), { token: { usdPrice: 101, liquidityUsd: 25_000 }, stock: 99 }, { price: 101, rule: "issuer-token", returnBps: 100 }],
   ["spot: a token with 2 underlying units per UI token", spot(null, { perUi: 2 }), { token: { usdPrice: 202, liquidityUsd: 80_000 } }, { price: 101, rule: "issuer-token", returnBps: 100 }],
   ["spot, token entry: the token while it's liquid", spot({ source: "token", premium: 1.01 }), { token: LIQUID, stock: 90 }, { price: 101, rule: "issuer-token", returnBps: 100 }],
   ["spot, token entry, thin now: the stock times the entry's premium", spot({ source: "token", premium: 1.01 }), { token: THIN, stock: 100 }, { price: 101, rule: "stock-adjusted", returnBps: 100 }],

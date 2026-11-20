@@ -6,7 +6,7 @@
 //
 //   every token       tradeable only with both: the bank's $100 probe routes
 //                     under 1% (the trade router's price-impact rule), and the floor
-//                     (PRICEABLE_MIN_POOLED_USD, $50k) pooled. XLEx had $110 pooled but passed
+//                     (PRICEABLE_MIN_POOLED_USD, $25k) pooled. XLEx had $110 pooled but passed
 //                     the $100 probe on one order book, so the old one-off build called it tradeable;
 //   other tokens      also need a known ratio: with no stock to fall back to, a token whose units
 //                     can't be compared can't be priced;

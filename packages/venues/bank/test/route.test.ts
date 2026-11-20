@@ -152,7 +152,7 @@ test("minPooledUsd skips issuers whose pool is too thin to price, or unknown", a
   assert.ok(!quoted.includes(bySymbol(state, "NVDAx").mint), "the thin issuer is never quoted");
   assert.ok(!quoted.includes(bySymbol(state, "NVDA").mint), "an issuer with no pool data isn't quoted");
   assert.equal(r.skipped.find((s) => s.symbol === "NVDA")!.reason, "pooled liquidity unknown");
-  assert.match(r.skipped.find((s) => s.symbol === "NVDAx")!.reason, /^thin pool: \$63 pooled, under \$50,000$/);
+  assert.match(r.skipped.find((s) => s.symbol === "NVDAx")!.reason, /^thin pool: \$63 pooled, under \$25,000$/);
   // Without the option nothing changes.
   const plain = await bestIssuer("equity:US:NVDA", 100, { ...opts(), state });
   assert.equal(plain.winner?.symbol, "NVDAx");

@@ -144,7 +144,7 @@ export type Price = { usd: number; change24hPct: number | null; source?: "token"
  * packages/venues/bank/src/route.ts). No band against the stock: a token with
  * this much pooled trades close to it, and real after-hours moves aren't errors.
  */
-export const MIN_POOLED_USD = 50_000;
+export const MIN_POOLED_USD = 25_000;
 
 type JupPrice = { usdPrice?: number; priceChange24h?: number; liquidity?: number; stockData?: { price?: number } | null; scaledUiConfig?: unknown };
 
