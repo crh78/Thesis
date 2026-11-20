@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "studio": "remotion studio src/index.ts",
-    "render": "remotion render src/index.ts Film out/film-nomusic.mp4 --codec=h264 --crf=18 && ./mix.sh out/film-nomusic.mp4",
+    "render": "remotion render src/index.ts Film out/film.mp4",
     "still": "remotion still src/index.ts"
   },
   "dependencies": {

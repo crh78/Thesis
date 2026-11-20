@@ -4,6 +4,7 @@
   python3 gen.py refs [--force]
   python3 gen.py shots [--res 480p|720p] [--only s1,s6] [--takes N]
   python3 gen.py cost [--res 720p] [--only ...] [--takes N]
+  python3 gen.py --config shots-16x9.json shots   # the landscape v2 cut → out-16x9/
 
 The Replicate token comes from $REPLICATE_API_TOKEN, else the macOS Keychain (service "replicate-api-token").
 Existing outputs are skipped, so rerunning only fills in what's missing.
@@ -95,8 +96,11 @@ def ref_file(name):
     return None
 
 
+CONFIG = "shots.json"
+
+
 def load():
-    return json.loads((ROOT / "shots.json").read_text())
+    return json.loads((ROOT / CONFIG).read_text())
 
 
 def selected(cfg, only):
@@ -111,21 +115,22 @@ def cmd_refs(args):
     cfg = load()
     jobs = []
     style_name = cfg.get("style_ref")
-    for name, prompt in cfg["refs"].items():
+    for name, ref in cfg["refs"].items():
+        prompt, aspect = (ref, "9:16") if isinstance(ref, str) else (ref["prompt"], ref.get("aspect", "9:16"))
         existing = ref_file(name)
         # Never overwrite the style reference: everything else is drawn to match it.
         if existing and (not args.force or name == style_name):
             print(f"  {name}: {existing.name} exists, skipping")
             continue
-        jobs.append((name, prompt, ROOT / "refs" / f"{name}.png"))
+        jobs.append((name, prompt, aspect, ROOT / "refs" / f"{name}.png"))
     style_file = ref_file(style_name) if style_name else None
     style_url = upload(style_file) if style_file and jobs else None
     print(f"Generating {len(jobs)} reference images (~${len(jobs) * PRICE_PER_IMAGE:.2f})"
           + (f", in the style of {style_file.name}" if style_url else ""))
 
     def job(j):
-        name, prompt, dest = j
-        inp = {"prompt": prompt, "aspect_ratio": "9:16", "size": "2K"}
+        name, prompt, aspect, dest = j
+        inp = {"prompt": prompt, "aspect_ratio": aspect, "size": "2K"}
         if style_url:
             inp["image_input"] = [style_url]
         url = run(IMAGE_MODEL, inp, name)
@@ -148,7 +153,7 @@ def cmd_shots(args):
     jobs = []
     for s in shots:
         for take in range(1, args.takes + 1):
-            dest = ROOT / "out" / args.res / f"{s['id']}-{s['name']}-take{take}.mp4"
+            dest = ROOT / cfg.get("out", "out") / args.res / f"{s['id']}-{s['name']}-take{take}.mp4"
             if dest.exists():
                 print(f"  {dest.name}: exists, skipping")
                 continue
@@ -164,8 +169,8 @@ def cmd_shots(args):
             "reference_images": [ref_urls[r] for r in s["refs"]],
             "duration": s["duration"],
             "resolution": args.res,
-            "aspect_ratio": "9:16",
-            "generate_audio": True,
+            "aspect_ratio": cfg.get("aspect", "9:16"),
+            "generate_audio": s.get("audio", True),  # intros are muted in the cut anyway
         }
         url = run(VIDEO_MODEL, inp, f"{s['id']} take{take}")
         if url:
@@ -183,6 +188,7 @@ def cmd_cost(args):
 
 def main():
     p = argparse.ArgumentParser()
+    p.add_argument("--config", default="shots.json", help="shot list, e.g. shots-16x9.json")
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("refs")
     r.add_argument("--force", action="store_true", help="regenerate existing reference images")
@@ -192,6 +198,8 @@ def main():
         s.add_argument("--only", help="comma-separated shot ids, e.g. s1,s6")
         s.add_argument("--takes", type=int, default=1, help="variations per shot")
     args = p.parse_args()
+    global CONFIG
+    CONFIG = args.config
     {"refs": cmd_refs, "shots": cmd_shots, "cost": cmd_cost}[args.cmd](args)
 
 

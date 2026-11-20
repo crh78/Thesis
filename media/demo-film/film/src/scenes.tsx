@@ -22,7 +22,7 @@ export const LogoScene: React.FC<{ dur: number }> = ({ dur }) => {
     <Scene dur={dur} edge={8}>
       <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
         <div style={{ transform: `translateY(${lift}px)`, display: "flex", flexDirection: "column", alignItems: "center" }}>
-          <Mark size={330} assemble />
+          <Mark size={330} assemble from={[1511 - 795, 619 - 300]} />
           <div style={{ marginTop: -18 }}>
             <Wordmark size={120} start={60} tagline="social trading for ideas" />
           </div>
@@ -325,7 +325,7 @@ const AssetVisual: React.FC<{ i: number; t: number }> = ({ i, t }) => {
 
 export const AssetScene: React.FC<{ dur: number }> = ({ dur }) => {
   const f = useCurrentFrame();
-  const step = 30;
+  const step = 52; // ~1.7s per asset class, long enough to take each one in
   const start = 16;
   const active = Math.min(5, Math.max(0, Math.floor((f - start) / step)));
   const t = f - start - active * step;

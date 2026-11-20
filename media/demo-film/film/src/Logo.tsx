@@ -9,7 +9,8 @@ const rects = (logo as { rects: { x: number; y: number; w: number; fill: string 
  * The Pixel reactions mark. With `assemble`, its 82 squares fly in from a scattered cloud and snap
  * onto the grid, then the two reaction avatars pop in. `size` is the mark's box in px (viewBox 100).
  */
-export const Mark: React.FC<{ size: number; assemble?: boolean; start?: number }> = ({ size, assemble = false, start = 0 }) => {
+/** `from`: px offset (from the mark's top-left) the squares burst out of, starting red, like taillights breaking apart. */
+export const Mark: React.FC<{ size: number; assemble?: boolean; start?: number; from?: [number, number] }> = ({ size, assemble = false, start = 0, from }) => {
   const frame = useCurrentFrame() - start;
   const { fps } = useVideoConfig();
   const k = size / 100;
@@ -19,19 +20,21 @@ export const Mark: React.FC<{ size: number; assemble?: boolean; start?: number }
     <div style={{ position: "relative", width: size, height: size }}>
       {rects.map((r, i) => {
         const dist = Math.hypot(r.x - cx, r.y - cy);
-        const delay = assemble ? 4 + dist * 0.55 + rand(i) * 10 : 0;
+        const delay = assemble ? (from ? 2 + rand(i) * 16 : 4 + dist * 0.55 + rand(i) * 10) : 0;
         const s = assemble ? sp(frame, fps, delay, 16, 0.9) : 1;
         const ang = rand(i + 1) * Math.PI * 2;
         const far = 260 + rand(i + 2) * 520;
-        const x0 = Math.cos(ang) * far, y0 = Math.sin(ang) * far;
+        const x0 = from ? from[0] - r.x * k + (rand(i + 4) - 0.5) * 40 : Math.cos(ang) * far;
+        const y0 = from ? from[1] - r.y * k + (rand(i + 5) - 0.5) * 24 : Math.sin(ang) * far;
         const rot = (rand(i + 3) - 0.5) * 360;
-        const o = assemble ? interpolate(frame, [delay - 6, delay + 4], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) : 1;
+        const o = assemble ? (from ? interpolate(frame, [0, 3], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) : interpolate(frame, [delay - 6, delay + 4], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })) : 1;
+        const red = from && assemble ? Math.max(0, 1 - s * 1.6) : 0;
         const glow = assemble ? Math.max(0, 1 - Math.abs(frame - delay - 12) / 10) : 0;
         return (
           <div key={i} style={{
-            position: "absolute", left: r.x * k, top: r.y * k, width: r.w * k, height: r.w * k, borderRadius: 0.5 * k, background: r.fill,
+            position: "absolute", left: r.x * k, top: r.y * k, width: r.w * k, height: r.w * k, borderRadius: 0.5 * k, background: red > 0.5 ? "#FF3B30" : r.fill,
             opacity: o, transform: `translate(${x0 * (1 - s)}px, ${y0 * (1 - s)}px) rotate(${rot * (1 - s)}deg) scale(${0.4 + 0.6 * s})`,
-            boxShadow: glow > 0 ? `0 0 ${14 * glow}px ${r.fill}` : undefined,
+            boxShadow: red > 0 ? `0 0 ${18 * red}px #FF3B30` : glow > 0 ? `0 0 ${14 * glow}px ${r.fill}` : undefined,
           }} />
         );
       })}

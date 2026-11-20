@@ -1,0 +1,196 @@
+{
+  "aspect": "16:9",
+  "out": "out-16x9",
+  "style": "Stylized 3D animated feature-film look, soft cinematic lighting, expressive cartoon acting, exactly matching the art style and character designs of the reference images. Widescreen 16:9 cinematic framing, fast viral skit pacing. Clear spoken dialogue with restaurant ambience. No captions, no subtitles, no background music. No logos and no on-screen text unless the shot asks for them; when it does, copy them exactly from the reference image.",
+  "style_ref": "him",
+  "refs": {
+    "him": "Stylized 3D animated character turnaround of a young man working at a burger diner: navy cap, orange polo, navy apron with a STAFF badge, grey cargo pants.",
+    "her": "Character turnaround sheet laid out exactly like the reference image, in exactly the same stylized 3D animated art style, lighting and plain warm-grey background: one large full-body front view on the left, and on the right a full-body side profile, a full-body back view and a full-body three-quarter view, all the same person in the same outfit. The character: a very attractive, glamorous 23-year-old woman with long wavy blonde hair, bright blue eyes, glossy lips, gold hoop earrings, a fitted cream knit top under a tan wool coat, slim jeans, ankle boots and a small plain tan leather shoulder bag with no logo or pattern. Confident, slightly bored expression. No text, no logos, no brand patterns.",
+    "newguy": "Character turnaround sheet laid out exactly like the reference image, in exactly the same stylized 3D animated art style, lighting and plain warm-grey background: one large full-body front view on the left, and on the right a full-body side profile, a full-body back view and a full-body three-quarter view, all the same person in the same outfit. The character: an extremely jacked 26-year-old bodybuilder with huge arms, a massive chest and broad shoulders, a slicked-back fade haircut, a skin-tight black t-shirt that's barely holding on, a thin chain necklace, an unbranded flashy watch, grey joggers and white sneakers, with a cocky smirk. No text, no logos.",
+    "place-wide": {
+      "prompt": "One single continuous wide interior shot, not a collage or split panel, in exactly the same stylized 3D animated art style as the reference image: a busy casual American burger diner at night, orange and navy colour scheme matching the staff uniform, red vinyl booths along the windows, a counter with a kitchen pass behind it, and a host stand by a glass front door with the street outside at night. Wide 16:9 landscape framing, no people. No signs, no readable text, no logos.",
+      "aspect": "16:9"
+    }
+  },
+  "shots": [
+    {
+      "id": "i1a",
+      "name": "intro-lotto-drum",
+      "duration": 5,
+      "refs": [
+        "him",
+        "place-wide"
+      ],
+      "prompt": "The young man is {him}. The diner is {place-wide}. Opening shot from INSIDE a clear glass lottery ball drum on the diner counter, looking out through its curved round window. Dozens of white numbered lottery balls tumble and bounce slowly around the edges of the frame as the drum turns, framing a round clear opening in the middle. Through it, out of focus, the young man in his uniform wipes the counter in the warm diner at night. The drum slowly rolls to a stop and one ball settles in the center. Locked-off camera, anamorphic widescreen look, slow motion, very shallow depth of field, deep shadows with warm practical light, slight vignette, quiet and hypnotic. Keep the center of the frame calm for a title. No text, no logos.",
+      "audio": false
+    },
+    {
+      "id": "i1b",
+      "name": "intro-kitchen-porthole",
+      "duration": 5,
+      "refs": [
+        "him",
+        "place-wide"
+      ],
+      "prompt": "The young man is {him}. The diner is {place-wide}. Opening shot from inside the dark, steamy diner kitchen, framed on the round porthole window of the swinging kitchen door. Steam rolls slowly across the glass and droplets run down it. Through the porthole the warm diner glows: red booths, neon reflections, the young man in his uniform carrying plates. The camera pushes slowly toward the porthole until it fills the frame and the door swings open into the diner. Locked-off camera, anamorphic widescreen look, slow motion, very shallow depth of field, deep shadows with warm practical light, slight vignette, quiet and hypnotic. Keep the center of the frame calm for a title. No text, no logos.",
+      "audio": false
+    },
+    {
+      "id": "i1c",
+      "name": "intro-dish-machine",
+      "duration": 5,
+      "refs": [
+        "him",
+        "place-wide"
+      ],
+      "prompt": "The young man is {him}. The diner is {place-wide}. Opening shot from INSIDE a commercial dishwasher, looking out through its round fogged window. Water jets spray in slow motion, plates and glasses spin on the rack around the edges of the frame, bubbles and foam swirl, framing a round clear spot in the middle. Then the spray stops, the door lifts open with a burst of steam and the young man in his uniform leans in and pulls out the rack. Locked-off camera, anamorphic widescreen look, slow motion, very shallow depth of field, deep shadows with warm practical light, slight vignette, quiet and hypnotic. Keep the center of the frame calm for a title. No text, no logos.",
+      "audio": false
+    },
+    {
+      "id": "i1d",
+      "name": "intro-pie-carousel",
+      "duration": 5,
+      "refs": [
+        "him",
+        "place-wide"
+      ],
+      "prompt": "The young man is {him}. The diner is {place-wide}. Opening shot from INSIDE a rotating glass dessert carousel on the diner counter. Slices of cherry pie and cake on glass shelves glide slowly past the lens in a circle, glinting under the case light, framing a round clear gap in the middle. Through the curved glass, out of focus, the young man in his uniform behind the counter glances up at camera. Locked-off camera, anamorphic widescreen look, slow motion, very shallow depth of field, deep shadows with warm practical light, slight vignette, quiet and hypnotic. Keep the center of the frame calm for a title. No text, no logos.",
+      "audio": false
+    },
+    {
+      "id": "s1",
+      "name": "dumped",
+      "duration": 7,
+      "refs": [
+        "him",
+        "her",
+        "place-wide"
+      ],
+      "prompt": "The young man is {him}. The woman is {her}, his girlfriend. The diner is {place-wide}. By the host stand, the young man in his uniform holds a tray of dirty plates and smiles hopefully at her. She stands facing him in her coat, crosses her arms, rolls her eyes and says, \"We're done. I'm not dating a guy who makes twelve dollars an hour.\" She pulls off a necklace he gave her, drops it on his tray with a clink, flips her blonde hair, turns and walks out through the glass front door. He stands frozen holding the tray, heartbroken, as the door swings shut behind her. Medium shot, then the camera holds on his face."
+    },
+    {
+      "id": "s2",
+      "name": "the-pattern",
+      "duration": 6,
+      "refs": [
+        "him",
+        "place-wide",
+        "bet-knicks",
+        "bet-oscars"
+      ],
+      "prompt": "The young man is {him}. The diner is {place-wide}. Three fast cuts, about two seconds each, as he brings food to different booths, always one small tray with a single burger and fries, never more. Shot 1: two young guys in hoodies stare at one phone that clearly shows exactly this screen, {bet-knicks}, and one shouts, \"Two hundred on the Knicks!\" Shot 2: a woman in her thirties scrolls a weather app with a rain cloud on her phone and says to her friend, \"I just bet it rains tomorrow.\" Shot 3: a sweet elderly grandmother with glasses taps her phone, which clearly shows exactly this screen, {bet-oscars}, with a gold trophy and \"Best Picture\", and says with total focus, \"I've got money on the Oscars.\" In each shot he pauses, looking from the phone to the customer, puzzled."
+    },
+    {
+      "id": "s3",
+      "name": "who-wins",
+      "duration": 5,
+      "refs": [
+        "him"
+      ],
+      "prompt": "The young man is {him}. In the diner kitchen at night, with steel counters and steam from the grill, he leans against a counter scrolling his phone, his face lit by the screen. He mutters, \"Everyone's betting on everything...\" then stops, looks up slowly, and slow dramatic push-in on his face as his eyes narrow and a smile forms: \"So who's actually winning? ...The house.\""
+    },
+    {
+      "id": "s3b",
+      "name": "own-the-house",
+      "duration": 6,
+      "refs": [
+        "him",
+        "app-bet",
+        "logos"
+      ],
+      "prompt": "The young man is {him}. In the diner kitchen on his break, he types a sentence into an app on his phone and hits enter. Over-the-shoulder close-up: for about one second the screen faces the camera and shows exactly this app screen, {app-bet}, with a colorful ring chart and a list of five picks. Then five glowing app-icon tiles float up out of the phone and orbit around his hand like a basket coming together: exactly the five logo tiles in {logos}, the Kalshi K, the DraftKings crown, the Polymarket mark, the Coinbase C and the Robinhood feather, each logo copied exactly. He smirks and whispers, \"Don't bet on the game. Own the house.\" and taps the button."
+    },
+    {
+      "id": "s4a",
+      "name": "jump-1-20k",
+      "duration": 5,
+      "refs": [
+        "him",
+        "place-wide",
+        "app-money-1",
+        "logos"
+      ],
+      "prompt": "The young man is {him}. The diner is {place-wide}. A TV mounted above the diner counter shows a news anchor next to the Polymarket and Kalshi logo tiles from {logos}, with a big red banner that reads \"PREDICTION MARKETS HIT RECORD\". The young man, wiping the counter, glances from the TV to his phone. Close-up of the screen for about one second showing exactly this app screen, {app-money-1}, a dark phone screen with a big white balance, a green gain under it and a green line chart climbing. Glowing gold text \"+$20K\" pops up into the air above the phone with a few sparkles. His eyes go wide and he grins."
+    },
+    {
+      "id": "s4x",
+      "name": "phone-blows-up",
+      "duration": 7,
+      "refs": [
+        "him",
+        "notifs-big"
+      ],
+      "prompt": "The young man is {him}, in his diner uniform. Late at night on his break, he sits on an upturned milk crate in the alley behind the diner under a warm light, and his phone will not stop buzzing. Close-up: he holds the phone up and its lock screen faces the camera, showing exactly this screen, {notifs-big}: three big glowing banners that read \"128 BACKED\", \"1,284 COPYING\" and \"+$412\", large and perfectly readable, copied exactly, with no other text on the screen. Then three big glowing speech bubbles float up out of the phone into the air around him, each with only these few words in large clear letters: \"is this ur take??\", \"BACKED\", \"copying u on X\". No other text anywhere. He looks up from the phone, stunned, then grins and says, \"Wait... they're copy trading me?\""
+    },
+    {
+      "id": "s4b",
+      "name": "jump-2-100k",
+      "duration": 5,
+      "refs": [
+        "him",
+        "app-money-2"
+      ],
+      "prompt": "The young man is {him}, still in his diner uniform. At 3am in a tiny messy studio apartment, lit only by his phone in the dark, he lies on his bed as the phone buzzes again and again with group-chat message bubbles popping up: \"ur take is printing\", \"im backing it\", \"BRO\". Close-up of the screen for about one second showing exactly this app screen, {app-money-2}, a dark phone screen with a big white balance, a green gain under it and a green line chart climbing. Bigger glowing gold text \"+$100K\" bursts into the air above him and a flurry of dollar bills swirls around the room. He falls back on the bed laughing in disbelief."
+    },
+    {
+      "id": "s4c",
+      "name": "jump-3-1-25m",
+      "duration": 6,
+      "refs": [
+        "him",
+        "place-wide",
+        "app-money-3",
+        "logos"
+      ],
+      "prompt": "The young man is {him}. The diner is {place-wide}. The TV above the diner counter flashes a red breaking-news banner that reads \"KALSHI RAISES AT $40B\", next to a big Kalshi logo tile, the green K on white copied exactly from the first tile in {logos}. Behind the counter in his uniform, the young man looks at his phone. Close-up of the screen for about one second showing exactly this app screen, {app-money-3}, a dark phone screen with a big white balance, a green gain under it and a green line chart climbing. Then an explosion of golden light: huge glowing gold text \"+$1.25M\" erupts into the air above his head and a storm of dollar bills rains down over the whole diner. Customers stare, a coworker drops a spatula and yells, \"BROOO!\" He stands there calmly, sunglasses suddenly on. Slow motion, low angle, epic and celebratory."
+    },
+    {
+      "id": "s5",
+      "name": "shes-back",
+      "duration": 7,
+      "refs": [
+        "him",
+        "her",
+        "newguy",
+        "place-wide",
+        "bet-knicks-40"
+      ],
+      "prompt": "The young man is {him}. The woman is {her}. Her new boyfriend is {newguy}. The diner is {place-wide}. The woman walks in through the glass front door arm in arm with her new boyfriend, who is staring at his phone, which clearly shows exactly this sports-betting screen, {bet-knicks-40}, and pumps his fist: \"Up forty bucks on the Knicks, baby!\" They spot the young man, still in his diner uniform and carrying two plates of burgers. The new boyfriend smirks and says loudly, \"Babe, is that your ex? Bro's still flipping burgers.\" She laughs: \"Told you he'd be broke forever.\""
+    },
+    {
+      "id": "s6",
+      "name": "punchline",
+      "duration": 7,
+      "refs": [
+        "him",
+        "her",
+        "newguy",
+        "place-wide",
+        "bet-knicks-40"
+      ],
+      "prompt": "The young man is {him}. The woman is {her}. Her new boyfriend is {newguy}. The diner is {place-wide}. Calm and confident, the young man sets the two plates down on their booth table, glances at the boyfriend's phone, which clearly shows exactly this sports-betting screen, {bet-knicks-40}, not a food menu, and smirks: \"You bet on the game. I own the house.\" Beat. \"And the place.\" Behind him, an older manager in a sharp grey suit walks past, nods and says, \"Morning, boss.\" The new boyfriend's smirk fades and the woman's smile freezes."
+    },
+    {
+      "id": "s7",
+      "name": "first-million",
+      "duration": 8,
+      "refs": [
+        "him",
+        "her",
+        "newguy",
+        "place-wide"
+      ],
+      "prompt": "The young man is {him}. The woman is {her}. Her new boyfriend is {newguy}. The diner is {place-wide}. The young man tosses a car key in the air, catches it and walks out the glass front door. Quick cut: inside, the woman and her new boyfriend press against the window, jaws on the floor. Outside at the curb sits a gleaming blue-and-black hypercar shaped like a Bugatti Chiron, with no badges or logos. He stops at the open door, turns and looks straight into the camera, breaking the fourth wall, and says with a confident grin, \"I made my first million. Lemme show you how you can do it too.\" He winks."
+    },
+    {
+      "id": "s8",
+      "name": "drive-off",
+      "duration": 4,
+      "refs": [
+        "him",
+        "called-it"
+      ],
+      "prompt": "The young man is {him}. He slides into the driver's seat of the blue-and-black hypercar, and for about one second his phone on the dash faces the camera showing exactly this card, {called-it}, a dark card with a green \"CALLED IT\" pill and a big green \"+104.2%\". The engine roars and the hypercar launches off down the dark city street at night. The camera stays put as the glowing red taillights streak away into the distance and shrink to two tiny points of light, until the frame is almost completely black."
+    }
+  ]
+}
