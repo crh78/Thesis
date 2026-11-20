@@ -26,7 +26,13 @@
 //                                        user's take with that buy-in;
 //                                      back | fade: { take_id, usd };
 //                                      sell: { take_id, side?: back|fade, bps? | usd? } (all of it
-//                                        when neither).
+//                                        when neither). Sides are take-relative, as the fork API
+//                                        reads them: back agrees with the take, fade disagrees (on
+//                                        an inverted take, agreeing is an on-chain fade). A sale
+//                                        with no side sells the side held (back when both or none).
+//                                      A draft the builder read as inverted posts an inverted take
+//                                        (the buy-in fades the basket); 400 legs_not_fadeable when
+//                                        a leg can't be faded.
 //                                      → { status: landed|pending|failed, trade_id, take_id, url,
 //                                        usd, signatures, closes_take?, error? }. The same surface +
 //                                      ref is the same trade (a retried message never trades twice).
@@ -35,13 +41,14 @@
 //                                      to trade it by hand), 409 draft_posted, 403
 //                                      draft_for_other_account; a fork refusal passes through as
 //                                      { error, message } with its status
-//   POST   /agent/positions          { who } → { positions } open positions (the fork API's portfolio)
+//   POST   /agent/positions          { who } → { positions } open positions (the fork API's portfolio;
+//                                      side take-relative, and each take's inverted)
 //   POST   /agent/score              { x_username } → { found: false } or { found: true, handle,
 //                                      display_name, made, return_pct, backers_made, backers_pct,
 //                                      takes }: the Thesis account that links this X account, and its
 //                                      two scores as its profile shows them (the X bot's "score")
-//   POST   /agent/takes              { take_id } → { claim, author, status } a live take (the
-//                                      bots' confirmation text names it); 404 no_such_take
+//   POST   /agent/takes              { take_id } → { claim, author, status, inverted } a live take
+//                                      (the bots' confirmation text names it); 404 no_such_take
 //   A trade with wait: false answers once the fork accepted it (status pending) and follows it
 //   to the end in the background (EdgeRuntime.waitUntil), so a bot can say "you're in" sooner.
 //
@@ -61,7 +68,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { privyDid } from "../_shared/privy.ts";
 import { embeddedSolana, hasSigner, linkedX, PrivyError, privyClient } from "./privy.ts";
 import {
-  ACTIONS, type Action, HARD_MAX_USD, isRequote, LINK_TTL_MS, linkToken, MAX_USD, MIN_USD, normalizeHandle, parseLimitOverrides, readLimits, readWho, sha256Hex,
+  ACTIONS, type Action, HARD_MAX_USD, heldTakeSide, isRequote, LINK_TTL_MS, linkToken, MAX_USD, MIN_USD, normalizeHandle, parseLimitOverrides, readLimits, readWho, sha256Hex,
   SURFACES, type Surface, takeLegs, topicGuess, type Who,
 } from "./rules.ts";
 
@@ -290,7 +297,9 @@ type Submission = { status?: string; signatures?: string[]; error?: { code?: str
 
 type TradeReq = {
   who: Who; surface: Surface; ref: string | null; action: Action; wait: boolean;
-  takeId: string | null; draftId: string | null; usd: number | null; bps: number | null; side: "back" | "fade";
+  takeId: string | null; draftId: string | null; usd: number | null; bps: number | null;
+  /** Take-relative (the fork API's sides); null: a sale that didn't say, which sells the side held. */
+  side: "back" | "fade" | null;
 };
 
 function readTrade(b: Record<string, unknown>): TradeReq {
@@ -310,7 +319,8 @@ function readTrade(b: Record<string, unknown>): TradeReq {
   if (action === "post") check(draftId && usd !== null && usd >= MIN_USD, draftId ? "invalid_usd" : "invalid_draft_id");
   if (action === "back" || action === "fade") check(takeId && usd !== null && usd >= MIN_USD, takeId ? "invalid_usd" : "invalid_take_id");
   if (action === "sell") check(takeId, "invalid_take_id");
-  return { who, surface, ref, action, takeId, draftId, usd, bps, side: b.side === "fade" ? "fade" : "back", wait: b.wait !== false };
+  const side = b.side === "fade" ? "fade" : b.side === "back" ? "back" : null;
+  return { who, surface, ref, action, takeId, draftId, usd, bps, side, wait: b.wait !== false };
 }
 
 async function finish(id: string, fields: Record<string, unknown>) {
@@ -327,10 +337,13 @@ async function createFromDraft(g: Grant, draftId: string): Promise<{ takeId: str
   if (d.for_x && d.for_x !== g.x_username) throw new HttpError(403, "draft_for_other_account");
   const legs = takeLegs(Array.isArray(d.legs) ? d.legs : []);
   check(legs.length, "draft_has_no_legs");
+  // The builder read it as a bet against the basket: the buy-in fades every leg.
+  const inverted = d.inverted === true;
+  if (inverted) check(legs.every((l) => l.fade_how), "legs_not_fadeable");
   const { topic, tags } = topicGuess(d.claim, legs);
   const { data: takeId, error: e2 } = await db.rpc("create_take", {
     p_author: g.profile_id, p_claim: d.claim, p_topic: topic, p_risk: d.risk, p_horizon: null,
-    p_tags: tags, p_legs: legs, p_status: "posting",
+    p_tags: tags, p_legs: legs, p_status: "posting", p_inverted: inverted,
   });
   if (e2?.message?.includes("takes_one_posting_claim")) throw new HttpError(409, "already_posting");
   dbCheck(e2);
@@ -346,7 +359,7 @@ async function createFromDraft(g: Grant, draftId: string): Promise<{ takeId: str
 function buildFor(t: TradeReq, g: Grant, takeId: string): Promise<Built> {
   if (t.action === "post") return fork<Built>("POST", `/takes/${takeId}/publish`, { author: g.wallet, usd: t.usd });
   if (t.action === "sell") {
-    return fork<Built>("POST", `/takes/${takeId}/sell`, { owner: g.wallet, side: t.side, ...(t.bps ? { bps: t.bps } : t.usd ? { usd: t.usd } : {}) });
+    return fork<Built>("POST", `/takes/${takeId}/sell`, { owner: g.wallet, side: t.side ?? "back", ...(t.bps ? { bps: t.bps } : t.usd ? { usd: t.usd } : {}) });
   }
   return fork<Built>("POST", `/takes/${takeId}/trades`, { owner: g.wallet, side: t.action, usd: t.usd });
 }
@@ -363,6 +376,20 @@ async function signAndSend(t: TradeReq, g: Grant, takeId: string): Promise<{ bui
       throw e;
     }
   }
+}
+
+/**
+ * The take-relative side the wallet holds on this take (rules.ts heldTakeSide), from the chain
+ * rows the stream keeps: "back" when it holds both, none, or they can't be read.
+ */
+async function heldSide(wallet: string, takeId: string): Promise<"back" | "fade"> {
+  const { data: ct } = await db.from("chain_takes").select("address, inverted")
+    .eq("network", NETWORK).eq("take_id", takeId)
+    .order("created_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+  if (!ct) return "back";
+  const { data: held } = await db.from("chain_positions").select("side")
+    .eq("network", NETWORK).eq("take", ct.address).eq("owner", wallet).is("exited_at", null).is("settled_at", null);
+  return heldTakeSide((held ?? []).map((p) => String(p.side)), ct.inverted === true);
 }
 
 /** Waits up to ~25 s for a pending submit to land. */
@@ -408,6 +435,7 @@ async function trade(b: Record<string, unknown>) {
       created = true;
       await finish(tradeId, { take_id: takeId });
     }
+    if (t.action === "sell" && !t.side) t.side = await heldSide(g.wallet, takeId!);
     const { built, sub } = await signAndSend(t, g, takeId!);
     if (!t.wait && sub.status === "pending") {
       // Answer now; follow it to the end in the background.
@@ -449,11 +477,12 @@ async function trade(b: Record<string, unknown>) {
 async function takeInfo(b: Record<string, unknown>) {
   const id = typeof b.take_id === "string" && UUID_RE.test(b.take_id) ? b.take_id : null;
   check(id, "invalid_take_id");
-  const { data, error } = await db.from("takes").select("claim, status, profiles:author_id(handle)").eq("id", id).maybeSingle();
+  const { data, error } = await db.from("takes").select("claim, status, inverted, profiles:author_id(handle)").eq("id", id).maybeSingle();
   dbCheck(error);
   if (!data || data.status !== "live") throw new HttpError(404, "no_such_take");
   const author = (data.profiles as { handle?: string | null } | null)?.handle ?? null;
-  return json(200, { claim: data.claim, author, status: data.status });
+  // Inverted: it bets against its basket (backing it is an on-chain fade); the fork API's sides are the take's.
+  return json(200, { claim: data.claim, author, status: data.status, inverted: data.inverted === true });
 }
 
 async function score(b: Record<string, unknown>) {
@@ -483,9 +512,19 @@ async function positions(b: Record<string, unknown>) {
   const g = await grantFor(who);
   if (!g || g.revoked_at) throw new HttpError(403, "not_linked");
   const p = await fork<{ positions?: Record<string, unknown>[] }>("GET", `/wallets/${g.wallet}/portfolio`);
-  const open = (p.positions ?? []).filter((x) => !x.exited).map((x) => ({
-    take_id: x.takeId, claim: x.claim, side: x.side, stake_usd: x.stakeUsd, value_usd: x.valueUsd,
-    return_bps: x.returnBps, can_exit: x.canExit, closes_take_if_sold_all: x.closesTakeIfSoldAll ?? false,
+  const held = (p.positions ?? []).filter((x) => !x.exited);
+  // Which of these takes are inverted (bet against their basket), from the app's takes. side is
+  // already take-relative (the fork API's): back agrees with the take.
+  const ids = [...new Set(held.map((x) => x.takeId).filter((id): id is string => typeof id === "string" && UUID_RE.test(id)))];
+  const inverted = new Set<string>();
+  if (ids.length) {
+    const { data, error } = await db.from("takes").select("id").in("id", ids).eq("inverted", true);
+    dbCheck(error);
+    for (const t of data ?? []) inverted.add(t.id as string);
+  }
+  const open = held.map((x) => ({
+    take_id: x.takeId, claim: x.claim, side: x.side, inverted: inverted.has(String(x.takeId)), stake_usd: x.stakeUsd,
+    value_usd: x.valueUsd, return_bps: x.returnBps, can_exit: x.canExit, closes_take_if_sold_all: x.closesTakeIfSoldAll ?? false,
   }));
   return json(200, { positions: open });
 }

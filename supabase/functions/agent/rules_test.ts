@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { isRequote, normalizedWeights, normalizeHandle, parseLimitOverrides, readLimits, readWho, takeLegs, topicGuess } from "./rules.ts";
+import { heldTakeSide, isRequote, normalizedWeights, normalizeHandle, parseLimitOverrides, readLimits, readWho, takeLegs, topicGuess } from "./rules.ts";
 
 Deno.test("limits: at least $10 a trade, the day at least a trade, both at most $1,000", () => {
   assertEquals(readLimits({ per_trade_usd: 50, daily_usd: 200 }), { perTradeUsd: 50, dailyUsd: 200 });
@@ -62,4 +62,16 @@ Deno.test("limit overrides: a bigger max for listed wallets only, capped at $10,
   assertEquals(parseLimitOverrides(`${w}=50000`).get(w), 10000);
   assertEquals(readLimits({ per_trade_usd: 2500, daily_usd: 10000 }, 10000), { perTradeUsd: 2500, dailyUsd: 10000 });
   assertEquals(readLimits({ per_trade_usd: 2500, daily_usd: 10000 }), null);
+});
+
+Deno.test("a sale with no side sells the side held, take-relative", () => {
+  // An inverted take's author holds an on-chain fade: that agrees with the take, a "back".
+  assertEquals(heldTakeSide(["fade"], true), "back");
+  // Disagreeing with an inverted take is an on-chain back: a "fade".
+  assertEquals(heldTakeSide(["back"], true), "fade");
+  assertEquals(heldTakeSide(["back"], false), "back");
+  assertEquals(heldTakeSide(["fade", "fade"], false), "fade");
+  // Both sides, or nothing found: "back", as before.
+  assertEquals(heldTakeSide(["back", "fade"], false), "back");
+  assertEquals(heldTakeSide([], true), "back");
 });

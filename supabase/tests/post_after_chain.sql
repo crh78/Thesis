@@ -1,5 +1,6 @@
 -- Checks posting takes (migrations/*_post_after_chain.sql): hidden from everyone but the author
--- until the chain's takeCreated for the author's wallet makes them live.
+-- until the chain's takeCreated for the author's wallet makes them live. Inverted takes
+-- (migrations/*_inverted_takes.sql) go live only on an inverted takeCreated.
 -- Run against a scratch database with the migrations applied (it rolls back):
 --   psql "$SCRATCH_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/post_after_chain.sql
 -- Each check raises if it fails.
@@ -167,6 +168,39 @@ begin
     'data', jsonb_build_object('take', 'TG2', 'author', 'WALLET_A', 'claimHash', hash,
       'horizonEnd', floor(extract(epoch from (select settles_at from public.takes where id = posting)))::bigint::text))));
   if (select status from public.takes where id = other) <> 'posting' then raise exception 'an earlier take''s event made the newer post live'; end if;
+
+  -- Inverted takes (migrations/*_inverted_takes.sql): the author's buy-in fades every leg, so
+  -- each must be fadeable; the take goes live on a takeCreated that says it's inverted, and not on
+  -- one that doesn't.
+  begin
+    perform public.create_take('00000000-0000-4000-8000-0000000000a1', 'Crypto sucks', 'topic-coin', 'high', null, '{}', legs, 'posting', true);
+    raise exception 'an inverted take with a leg that can''t be faded was created';
+  exception when invalid_parameter_value then null;
+  end;
+  posting := public.create_take('00000000-0000-4000-8000-0000000000a1', 'Crypto sucks', 'topic-coin', 'high', null, '{}',
+    '[{"name":"Bitcoin","kind":"Leveraged","weight":60,"fade_how":"Bets it falls"},{"name":"Ether","kind":"Leveraged","weight":40,"fade_how":"Bets it falls"}]',
+    'posting', true);
+  if (select inverted from public.takes where id = posting) is not true then raise exception 'create_take must store inverted'; end if;
+  if (select inverted from public.takes where id = live) is not false then raise exception 'takes aren''t inverted by default'; end if;
+  j := public.take_for_chain(posting);
+  if (j ->> 'inverted')::boolean is not true then raise exception 'take_for_chain must say it''s inverted: %', j; end if;
+  select to_jsonb(array_agg(get_byte(sha256(convert_to('Crypto sucks', 'UTF8')), i) order by i))
+    into hash from generate_series(0, 31) i;
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(jsonb_build_object(
+    'signature', 'x6', 'ordinal', 0, 'slot', 6, 'block_time', extract(epoch from now()), 'name', 'takeCreated',
+    'data', jsonb_build_object('take', 'TI0', 'author', 'WALLET_A', 'claimHash', hash, 'inverted', false))));
+  if (select status from public.takes where id = posting) <> 'posting' then raise exception 'a takeCreated that isn''t inverted made an inverted take live'; end if;
+  if (select take_id from public.chain_takes where network = 'solana-mainnet-fork' and address = 'TI0') is not null then
+    raise exception 'an on-chain take that isn''t inverted was linked to an inverted take';
+  end if;
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(jsonb_build_object(
+    'signature', 'x7', 'ordinal', 0, 'slot', 7, 'block_time', extract(epoch from now()), 'name', 'takeCreated',
+    'data', jsonb_build_object('take', 'TI1', 'author', 'WALLET_A', 'claimHash', hash, 'inverted', true))));
+  if (select status from public.takes where id = posting) <> 'live' then raise exception 'its inverted takeCreated must make it live'; end if;
+  if (select (take_id, inverted) from public.chain_takes where network = 'solana-mainnet-fork' and address = 'TI1')
+     is distinct from (posting, true) then
+    raise exception 'TI1 not linked to its inverted take';
+  end if;
 
   if not exists (select 1 from cron.job where jobname = 'delete-stale-posting-takes') then raise exception 'cleanup job missing'; end if;
   raise notice 'post_after_chain: all checks passed';

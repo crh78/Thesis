@@ -1,6 +1,6 @@
 -- Checks ingest_chain_events() and take_json()'s network header (migrations/*_chain_events.sql), and
--- takeClosed / settled_at (migrations/*_author_sale_closes.sql), and partial-sale price events
--- (migrations/*_partial_sales.sql).
+-- takeClosed / settled_at (migrations/*_author_sale_closes.sql), partial-sale price events
+-- (migrations/*_partial_sales.sql), and inverted takes (migrations/*_inverted_takes.sql).
 -- Run against a scratch database with the migrations applied (it rolls back):
 --   psql "$SCRATCH_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/chain_events.sql
 -- Each check raises if it fails. Events are shaped like functions/quicknode-stream sends them.
@@ -17,6 +17,11 @@ insert into public.take_legs (take_id, idx, name, kind, weight, slot) values ('0
 insert into public.takes (id, author_id, claim, risk, horizon, settles_at, created_at) values
   ('00000000-0000-4000-8000-0000000000be', '00000000-0000-4000-8000-0000000000ad', 'Chip stocks keep leading', 'medium', '3mo', now() + interval '90 days', now() + interval '1 minute');
 update public.take_stats set backs = 7, fades = 1, money_in = 140 where take_id = '00000000-0000-4000-8000-0000000000bb';
+-- An inverted take ("Crypto sucks" on a bullish basket), and a newer one with the same claim that
+-- isn't: each on-chain take must link to the one that bets its way.
+insert into public.takes (id, author_id, claim, risk, horizon, settles_at, inverted, created_at) values
+  ('00000000-0000-4000-8000-0000000000bf', '00000000-0000-4000-8000-0000000000aa', 'Crypto sucks', 'high', '12mo', now() + interval '365 days', true, now()),
+  ('00000000-0000-4000-8000-0000000000b0', '00000000-0000-4000-8000-0000000000aa', 'Crypto sucks', 'high', '12mo', now() + interval '365 days', false, now() + interval '1 minute');
 
 do $$
 declare
@@ -128,6 +133,55 @@ begin
     raise exception 'an unknown moment must be refused';
   exception when check_violation then null;
   end;
+  -- Inverted takes (migrations/*_inverted_takes.sql). A position can arrive before its take's
+  -- takeCreated: the row it makes doesn't know yet. The author's buy-in is a fade; F1 agrees (a
+  -- fade), B1 disagrees (a back). The chain keeps the on-chain sides; take_json reads them as
+  -- agree / disagree.
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature', 'i0', 'ordinal', 0, 'slot', 40, 'block_time', 1800060000, 'name', 'positionOpened',
+      'data', jsonb_build_object('take', 'TI', 'position', 'PI_B', 'owner', 'B1', 'side', 'back', 'stake', '25000000'))));
+  if (select inverted from public.chain_takes where network = 'solana-mainnet-fork' and address = 'TI') is not null then
+    raise exception 'a take whose takeCreated hasn''t arrived isn''t known to be inverted or not';
+  end if;
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature', 'i1', 'ordinal', 0, 'slot', 41, 'block_time', 1800060060, 'name', 'takeCreated',
+      'data', jsonb_build_object('take', 'TI', 'author', 'A1', 'inverted', true, 'claimHash',
+        (select to_jsonb(array_agg(get_byte(sha256(convert_to('Crypto sucks', 'UTF8')), i) order by i)) from generate_series(0, 31) i))),
+    jsonb_build_object('signature', 'i1', 'ordinal', 1, 'slot', 41, 'block_time', 1800060060, 'name', 'positionOpened',
+      'data', jsonb_build_object('take', 'TI', 'position', 'PI_A', 'owner', 'A1', 'side', 'fade', 'stake', '10000000')),
+    jsonb_build_object('signature', 'i2', 'ordinal', 0, 'slot', 42, 'block_time', 1800060120, 'name', 'positionOpened',
+      'data', jsonb_build_object('take', 'TI', 'position', 'PI_F', 'owner', 'F1', 'side', 'fade', 'stake', '20000000')),
+    -- The same claim on-chain, not inverted (an event from before the flag reads as not inverted).
+    jsonb_build_object('signature', 'i3', 'ordinal', 0, 'slot', 43, 'block_time', 1800060180, 'name', 'takeCreated',
+      'data', jsonb_build_object('take', 'TJ', 'author', 'A1', 'claimHash',
+        (select to_jsonb(array_agg(get_byte(sha256(convert_to('Crypto sucks', 'UTF8')), i) order by i)) from generate_series(0, 31) i)))));
+  select * into c from public.chain_takes where network = 'solana-mainnet-fork' and address = 'TI';
+  if (c.inverted, c.take_id, c.backers, c.faders, c.backed_usd, c.faded_usd)
+     is distinct from (true, '00000000-0000-4000-8000-0000000000bf'::uuid, 1, 2, 25.00, 30.00) then
+    raise exception 'inverted chain take (on-chain sides kept): %', row_to_json(c);
+  end if;
+  if (select (inverted, take_id) from public.chain_takes where network = 'solana-mainnet-fork' and address = 'TJ')
+     is distinct from (false, '00000000-0000-4000-8000-0000000000b0'::uuid) then
+    raise exception 'a take that isn''t inverted links to the app take that isn''t';
+  end if;
+  select public.take_json(t) into j from public.takes t where t.id = '00000000-0000-4000-8000-0000000000bf';
+  if (j->>'inverted')::boolean is not true or (j->>'backs')::int <> 2 or (j->>'fades')::int <> 1
+     or (j->>'money_in')::numeric <> 55 or j->>'on_chain' <> 'TI' then
+    raise exception 'an inverted take''s backs are who agrees (on-chain fades): %', j;
+  end if;
+  select public.take_json(t) into j from public.takes t where t.id = '00000000-0000-4000-8000-0000000000b0';
+  if (j->>'inverted')::boolean is not false or j->>'on_chain' <> 'TJ' or (j->>'backs')::int <> 0 or (j->>'fades')::int <> 0 then
+    raise exception 'a take that isn''t inverted: %', j;
+  end if;
+  -- Without the header: the play-money counts, which already are agree / disagree.
+  perform set_config('request.headers', '{}', true);
+  update public.take_stats set backs = 3, fades = 4 where take_id = '00000000-0000-4000-8000-0000000000bf';
+  select public.take_json(t) into j from public.takes t where t.id = '00000000-0000-4000-8000-0000000000bf';
+  if (j->>'backs')::int <> 3 or (j->>'fades')::int <> 4 or (j->>'inverted')::boolean is not true then
+    raise exception 'play-money counts stay as they are on an inverted take: %', j;
+  end if;
+  perform set_config('request.headers', '{"x-thesis-network":"solana-mainnet-fork"}', true);
+
   raise notice 'chain_events: all checks passed';
 end $$;
 rollback;

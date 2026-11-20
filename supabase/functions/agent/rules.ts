@@ -152,3 +152,14 @@ export function topicGuess(claim: string, legs: { name: string }[]): { topic: st
 /** A fork API refusal that a fresh build is expected to fix (prices moved; nothing left the wallet). */
 export const isRequote = (code: string | undefined, body: Record<string, unknown> | undefined) =>
   body?.requote === true || code === "requote" || code === "quote_stale" || code === "build_gone";
+
+/**
+ * The side a sale sells when the message didn't say, take-relative as the fork API reads it
+ * ("back" agrees with the take, "fade" disagrees): the one side the wallet holds, else "back". On
+ * an inverted take (it bets against its basket) agreeing is an on-chain fade, so its author's buy-in,
+ * an on-chain fade, sells as "back". `chainSides`: the on-chain sides of the wallet's open positions.
+ */
+export function heldTakeSide(chainSides: string[], inverted: boolean): "back" | "fade" {
+  const sides = new Set(chainSides.map((s) => ((s === "fade") !== inverted ? "fade" : "back")));
+  return sides.size === 1 && sides.has("fade") ? "fade" : "back";
+}
