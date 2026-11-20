@@ -11,7 +11,7 @@ Reply to any post with `@yourthesisxyz` plus:
 | *(nothing)*, `make this a take` | A basket for the post, saved as a draft for the asker; it waits in the web app ("Your takes from X") once they sign in with that X account, and only they can post it |
 | `<your own take>` | A basket for your take, saved the same way |
 | `back $20` (`in for $20`) | Trades from your own Thesis account within your `/limits`: the basket becomes your take with that buy-in. Under a Thesis take (a `/t/<id>` link) or under the bot's reply to someone's trade, it backs that take; under the bot's draft reply to you, it buys that exact basket |
-| `fade $20` (`bet against this $20`) | As back, on the other side: under any post, your take on the opposite view; under a Thesis take, a fade of it |
+| `fade $20` (`bet against this $20`) | As back, on the other side: under any post, your take on the opposite view (built inverted when it's bearish: the reply reads "Betting against: …"); under a Thesis take, a fade of it |
 | `sell`, `sell half`, `sell 25%`, `sell $20` | Under the bot's reply to your trade, under a take you hold, or anywhere in the thread you traded in |
 | `score`, `score @handle`, `score me` | The Thesis record of the account linked to that X account (under someone's post: its author): own P&L, made for backers, takes, and a card with its P&L line (`/u/<handle>/score.png`). In-app data only; someone not on Thesis "isn't on Thesis yet" |
 | `copy`, `copytrade`, `copy @handle` | Auto-copy that account at $20 a call, 3 a day (less if your per-trade limit is lower). An account that's on Thesis is copied as a trader: its takes are backed as they're posted. See [copy trading](../../docs/share-and-copy.md#auto-copy) |

@@ -264,7 +264,7 @@ export class Guard {
     const proxy = header(req, "x-thesis-proxy-key");
     const claimed = header(req, "x-thesis-client-ip");
     if (proxy && claimed && this.#o.proxyKey && sameSecret(proxy, this.#o.proxyKey)) return `client:${claimed.trim()}`;
-    // Caddy (and Tailscale Funnel, while it still serves older builds) proxies from loopback and
+    // Caddy (and Tailscale Funnel, if it's turned back on) proxies from loopback and
     // sets the address it saw as X-Forwarded-For's last entry: only that entry is ours to trust.
     const forwarded = header(req, "x-forwarded-for")?.split(",").map((s) => s.trim()).filter(Boolean).at(-1);
     const peer = req.socket.remoteAddress ?? "unknown";

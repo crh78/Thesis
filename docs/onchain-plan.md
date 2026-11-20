@@ -32,6 +32,7 @@ The user's own wallet does the trading (Jupiter swaps, Jupiter Lend, Phoenix). I
 | Prices | Settler-signed. Token first, at any hour: the issuer token's Jupiter price when it has a $25k pool and a $100 buy moves it under 1%; the stock's Alpaca price only as a fallback. Prices are the first at or after the moment |
 | Badges | Author only, each once per user: first take posted, first take at +50%, first at +100%, ten takes at +50%, a take at +1,000% |
 | Selling all | `exit_position` records it in the same transaction as the swaps back to USDC, while the take is open or closed and before the 365-day mark, and returns the escrowed paper share; the settler signs prices at or after the sale and the position settles right away. No fee. The author's sale of all of their buy-in also closes the take (above) |
+| Inverted takes | A bearish take bets against its basket (`Take.inverted`, set at posting): the agreeing side is the fade (`agree_side()`), so the author's buy-in is a fade, and every leg must be fadeable (a Phoenix short or a prediction leg's other side). The author can add to their own side but never take the other (`AuthorCannotFade`, both ways). The take's result is still the author's position |
 | Partial sales | `sell_part` sells `bps` of what's left (1–9,999), with the swaps of that fraction, and returns that fraction of the escrow. What stays must be at least the minimum stake, and at most 8 parts of a position wait to settle (`MAX_OPEN_PARTS`). Each part is priced at or after its sale (`record_part_prices`), scores on the cost basis sold, and settles on its own (`settle_part`, in order, before the position). Never closes the take, even for the author. No fee |
 | Proof of trade | `begin_trade` / `trade_step` brackets, a program allowlist with its own key, exact USDC drop, output accounts that grow, settler-side asset and 90% value checks ([`hardening-plan.md`](hardening-plan.md) §1) |
 | Paper legs | Gemini prediction legs ([`gemini-plan.md`](gemini-plan.md)) and Collector Crypt card legs ([`cards-plan.md`](cards-plan.md)): share escrowed and returned in full, P&L in the score only |
@@ -79,7 +80,7 @@ Solana Actions/Blinks were step 9 until the Blink was closed; the code stays in 
 | 8. Asset bank and venues: best-issuer routing, Jupiter, Jupiter Lend, Gemini, Phoenix, Collector Crypt, the composer | Done on the fork |
 | 9. The X Blink | Closed |
 | 10. Dogfood on the fork | Ongoing: the web app (`yourthesis.xyz`) runs on the shared fork. Trading by text through Privy session signers, the X bot, iMessage trading and copy trading are live there; X copy trading is dogfooded, the X bot's trades and iMessage trading not yet |
-| 10b. No-timeline takes, then partial sales | Done (program changes reach the fork through a fresh-fork reset: [`cards-reset.md`](cards-reset.md)) |
+| 10b. No-timeline takes, partial sales, inverted takes | Done (program changes reach the fork through a fresh-fork reset: [`cards-reset.md`](cards-reset.md)) |
 | 11. Hardening: proof of trade, security review, property tests, verifiable build, self-CPI events | Done ([`hardening-plan.md`](hardening-plan.md)); M-3 open ([`security-review.md`](security-review.md)) |
 | 12. Mainnet launch | Phase 2 (private program), then phase 3 (real users) |
 

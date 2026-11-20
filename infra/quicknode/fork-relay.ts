@@ -122,7 +122,7 @@ export function quicknodeHeaders(body: string, payload: unknown, token?: string)
 // --- Runner ------------------------------------------------------------------------------
 
 const REPO_ROOT = join(import.meta.dirname, "../..");
-/** Every RPC call gives up after this long, so one hung call (Surfpool waiting on Helius) can't stall the queue. */
+/** Every RPC call gives up after this long, so one hung call (Surfpool waiting on its mainnet datasource) can't stall the queue. */
 const RPC_TIMEOUT_MS = 15_000;
 const POST_TIMEOUT_MS = 30_000;
 
