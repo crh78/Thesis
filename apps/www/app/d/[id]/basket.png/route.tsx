@@ -5,33 +5,30 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { basketFrom, type Leg } from "@/lib/compose";
-import { assetKeys, getDraft, isCardKind, SERIES } from "@/lib/data";
-import LOGOS from "@/lib/logos.json";
+import { assetKeys, getDraft, SERIES } from "@/lib/data";
+import { logoUrl } from "@/lib/logo";
 import { INK, ogCache, ogFonts } from "@/lib/og";
 
 export const revalidate = 300;
 
 const W = 1200;
 const H = 675;
-const CACHED = LOGOS as Record<string, string>;
-const CARD_LOGO = "https://www.google.com/s2/favicons?domain=collectorcrypt.com&sz=128";
 
-/** A logo as a data URL: our cached copy, else the public stock-logo endpoint the app uses; null: none. */
+/**
+ * A logo as a data URL, chosen the way the app chooses it (`logoUrl`: our cached copy, a coin's icon
+ * for known coins, else the public stock-logo endpoint); null: none (a monogram). A coin's ticker can
+ * also be a stock's ("SOL" is ReneSola), so this must not guess on its own.
+ */
 async function logoData(ticker: string | null, kind: string): Promise<string | null> {
-  const fetchData = async (url: string) => {
-    const r = await fetch(url, { signal: AbortSignal.timeout(2500), next: { revalidate: 86400 } }).catch(() => null);
-    if (!r?.ok || !(r.headers.get("content-type") ?? "").startsWith("image/")) return null;
-    return `data:${r.headers.get("content-type")};base64,${Buffer.from(await r.arrayBuffer()).toString("base64")}`;
-  };
-  if (isCardKind(kind)) return fetchData(CARD_LOGO);
-  const t = ticker?.toUpperCase();
-  if (!t || !/^[A-Z0-9.]{1,12}$/.test(t)) return null;
-  if (CACHED[t]) {
-    const png = await readFile(join(process.cwd(), "public/logos", CACHED[t])).catch(() => null);
-    if (png) return `data:image/png;base64,${png.toString("base64")}`;
+  const url = logoUrl(ticker, kind);
+  if (!url) return null;
+  if (url.startsWith("/logos/")) {
+    const png = await readFile(join(process.cwd(), "public", url)).catch(() => null);
+    return png ? `data:image/png;base64,${png.toString("base64")}` : null;
   }
-  if (kind.toLowerCase().startsWith("pre")) return null;
-  return fetchData(`https://financialmodelingprep.com/image-stock/${t}.png`);
+  const r = await fetch(url, { signal: AbortSignal.timeout(2500), next: { revalidate: 86400 } }).catch(() => null);
+  if (!r?.ok || !(r.headers.get("content-type") ?? "").startsWith("image/")) return null;
+  return `data:${r.headers.get("content-type")};base64,${Buffer.from(await r.arrayBuffer()).toString("base64")}`;
 }
 
 /** Cash, predictions and metals get a glyph, as in the app. */
