@@ -20,8 +20,10 @@ Railway project `thesis-bots`, service `bots`:
 - **Variables:** everything in `apps/imessage/.env.example` and `apps/x/.env.example`. The bots
   need only `THESIS_BOT_SECRET` from Thesis (the Vault's `bot_secret`), plus `SUPABASE_URL`,
   `OPENAI_API_KEY` and the Sendblue keys. The X bot is live (`X_DRY_RUN` unset since
-  2026-11-20); `X_UNLIMITED=chrisherzog78` lifts the reply caps for the owner. Trading and scores
-  go through the `agent` function with the same bot secret.
+  2026-11-20); `X_UNLIMITED` lifts the reply caps for the team's accounts. Trading, scores and
+  copy go through the `agent` function with the same bot secret. Rotating it means the Vault's
+  `bot_secret`, a redeploy of the `agent` and `source` functions (they cache it), then
+  `THESIS_BOT_SECRET` here.
 
 Deploy `main`, from a clean export, never the working tree (it would upload local folders such as
 `.claude/`, and changes that aren't merged):

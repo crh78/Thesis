@@ -1,6 +1,6 @@
 # @thesis/chain
 
-TypeScript client for the Thesis Anchor program (`anchor/`). Every surface (web app, iMessage agent, executor, Blink routes) builds Thesis instructions and reads Thesis accounts through this package.
+TypeScript client for the Thesis Anchor program (`anchor/`). The fork API (`scripts/fork`, which also serves the closed Blink's routes) and the executor build Thesis instructions and read Thesis accounts through this package; the apps and the agent reach the program through the fork API.
 
 - `idl/`: the program's IDL and generated types. Never edit by hand: run `anchor build` in `anchor/`, then copy `anchor/target/idl/thesis.json` and `anchor/target/types/*.ts` here. CI fails if they're stale.
 - `src/pda.ts`: account addresses (config, fee vault, profile, take, position, a trade's ticket, a sold position's exit, a partial sale, badge mint)

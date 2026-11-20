@@ -2,7 +2,9 @@
 
 A QuickNode Stream follows Solana mainnet, keeps only successful transactions that call the
 Thesis program, and POSTs them to a Supabase webhook. The webhook decodes the Anchor events and
-writes them to the database, which drives the live feed, notifications and iMessage updates.
+writes them to the database, which drives the live feed and notifications. Until mainnet, the
+fork's relay (`pnpm fork:relay`, [`scripts/fork`](../../scripts/fork/README.md#stream-relay--webhook))
+runs this same filter and delivers to the same webhook with `network: "solana-mainnet-fork"`.
 
 ```
 Solana mainnet ──► QuickNode Stream ──► thesis-filter.js ──► POST ──► Supabase webhook ──► chain_events ──► feed / push / iMessage
@@ -186,8 +188,8 @@ Omit `start_range` to start at the tip; `fix_block_reorgs: 1` needs a paid plan.
 - `chain_takes`: one row per on-chain take, with backers, faders, money in and the settled result,
   public. Each row maps to the app's take whose claim hashes (sha256) to the on-chain `claimHash`.
 - `take_json()` (every feed card and take page): with an `x-thesis-network` request header, a take
-  that's on-chain on that network shows the chain's counts and result. Fork-mode iOS builds send
-  `solana-mainnet-fork`; other builds send nothing and are unchanged.
+  that's on-chain on that network shows the chain's counts and result. The web app and fork-mode
+  iOS builds send `solana-mainnet-fork`.
 
 Tests: `deno test` in the function's folder (the decoding matches `@thesis/chain` on
 `fixtures/webhook-events.expected.json`, and the signature check), a `packages/chain` test that the

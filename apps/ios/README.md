@@ -2,6 +2,8 @@
 
 SwiftUI app for iOS 26, using native Liquid Glass. Design spec: [`docs/design`](../../docs/design/README.md).
 
+The public product in phase 1 is the web app ([`apps/www`](../www/README.md)). Until phase 3 (the paid Apple Developer Program, then the App Store), this app runs only as a development build on the team's own phones; free builds expire every 7 days.
+
 ## Setup
 
 ```sh
@@ -32,6 +34,7 @@ Bundle IDs: `xyz.yourthesis.app.dev` ("Thesis Dev", Debug) and `xyz.yourthesis.a
 | `Thesis/Session` | Privy sign-in, the Supabase APIs (session, social) and the fork API (`ForkAPI.swift`) |
 | `Thesis/Features` | Feed, Take page, Create flow (write → build → basket), Back/Fade sheet, Comments, Search, Scores, Profile |
 | `Thesis/Resources` | Geist fonts (OFL), avatars, topic images |
+| `ThesisShare` | Share extension: an article or X post shared from any app opens Thesis on a take drafted from it (through the URL scheme) |
 
 ## Liquid Glass
 
@@ -67,8 +70,8 @@ Privy dashboard, for sign-in to work: the iOS client must list both bundle IDs u
 
 The app runs only on the fork: Trade, Cash, posting and the take page go through the Thesis program on the shared mainnet fork (the Oracle VM) with fake money. There is no other money mode. Social data (feed, profiles, comments) comes from Supabase.
 
-1. `cp Config/Fork.local.xcconfig.example Config/Fork.local.xcconfig` (gitignored). Set `FORK_API_URL` to the team's shared fork, `https://<fork-host>` (the Oracle VM in [`infra/executor`](../../infra/executor/README.md)), which runs the fork, the fork API, the relay and the settler. Nothing needs to run on your Mac, and a real iPhone reaches it too. Debug and Release both read it. A build made before the fork API moved to Caddy still points at the old Tailscale Funnel address: update the file and rebuild.
-2. The team runs exactly one fork; don't start your own.
+1. `cp Config/Fork.local.xcconfig.example Config/Fork.local.xcconfig` (gitignored). Set `FORK_API_URL` to the team's shared fork, `https://<fork-host>` (the Oracle VM in [`infra/executor`](../../infra/executor/README.md)), which runs the fork, the fork API, the relay and the settler. Nothing runs on your Mac, and a real iPhone reaches it too. Debug and Release both read it. A build made before the fork API moved to Caddy points at the old Tailscale Funnel address, which is off: update the file and rebuild.
+2. There is exactly one fork; never start your own.
 3. `xcodegen generate`, build and sign in. Add cash first: on the fork it mints fake USDC into your Privy wallet.
 
 Without `FORK_API_URL` the app stops at launch on a screen that says so. Signing in also needs your Privy Solana wallet: if it couldn't be made, the app says so, and Try again makes it again. UI tests and `-screen` previews run on mock data and need neither.

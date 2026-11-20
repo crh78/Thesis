@@ -26,7 +26,7 @@ Always Free Arm (2 OCPUs, 12 GB) runs always-on at no cost, and the stack is sma
 
 ## Load
 
-Read load test (2026-11-18, from the VM through Caddy): 200 concurrent visitors, no failures; 500, no failures but p90 of 2–4 s (the VM is the limit). Through Tailscale Funnel, 19% of requests failed at 200, which is why Caddy replaced it. A load test with trades is still to do.
+Reads (2026-11-18, from the VM through Caddy): 200 concurrent visitors, no failures; 500, no failures but p90 of 2–4 s (the VM is the limit). Through Tailscale Funnel, 19% failed at 200, which is why Caddy replaced it. Trades (`pnpm fork:load-trades`, 2026-11-19, 5 users ×3): every trade landed, 14 of 15 sales confirmed, Phoenix sends queued up to ~2 s.
 
 ## Secrets
 

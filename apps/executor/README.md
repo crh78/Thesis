@@ -4,7 +4,7 @@ Long-running worker that holds the Thesis settler key. It never holds user funds
 
 | Command | What it does |
 | --- | --- |
-| `pnpm --filter @thesis/executor settler [-- --once]` | The settler price service (below). On the shared fork it runs as the `thesis-settler` service on the VM ([`infra/executor`](../../infra/executor/README.md)); `pnpm fork:settler` runs it against a fork on this machine. |
+| `pnpm --filter @thesis/executor settler [-- --once]` | The settler price service (below). On the one fork it runs as the `thesis-settler` service on the VM ([`infra/executor`](../../infra/executor/README.md)); `pnpm fork:settler` is the same command. |
 | `pnpm --filter @thesis/executor asset-bank [-- --once]` | The asset bank poller ([`packages/venues/bank/README.md`](../../packages/venues/bank/README.md)). The settler reads the bank to map legs and mints to underlyings. |
 | `pnpm --filter @thesis/executor marker [-- --once] [--dry-run]` | Live returns (below). On the VM it runs as `thesis-marker`. |
 
@@ -16,7 +16,7 @@ Every 5 minutes (`MARKER_INTERVAL_SEC`) the marker prices every pick of every op
 
 - each open on-chain position's live return, from the entry prices the settler signed into its account;
 - each take's live return: its author's buy-in's live return once the settler has signed the author's entry prices (what the take settles on), and until then an index of its picks since it was posted;
-- each pick's base and mark (`take_legs`), and the take's hourly history (`take_stats`), which `take_price()` and paper positions read.
+- each pick's base and mark (`take_legs`), and the take's hourly history (`take_stats`).
 
 It reads positions and takes from the chain 100 at a time (`getMultipleAccounts`), and skips an address the chain doesn't have until the hourly full check, so deleted positions don't cost an RPC call each run. It signs nothing and needs no key.
 
@@ -69,11 +69,11 @@ Environment or the repo-root `.env`; keys are never printed.
 
 | Variable | Default | |
 | --- | --- | --- |
-| `SOLANA_RPC_URL` | `http://127.0.0.1:18899` (the fork) | |
+| `SOLANA_RPC_URL` | `http://127.0.0.1:18899` (the fork, on the VM) | |
 | `SETTLER_KEYPAIR` | `.data/fork/settler.json` | Must be the config's settler |
 | `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY` | required | Free Alpaca account, market data |
 | `JUPITER_API_KEY` | required | Token prices (Price v3, read in batches of 50 per tick, resting 30 s to 2 min after a 429) and yield legs, on api.jup.ag |
-| `SETTLER_MIN_LIQUIDITY_USD` | 50000 (`PRICEABLE_MIN_POOLED_USD`) | The router's floor too |
+| `SETTLER_MIN_LIQUIDITY_USD` | 25000 (`PRICEABLE_MIN_POOLED_USD`) | The router's floor too |
 | `SETTLER_LIVE_WINDOW_SEC` | 300 | |
 | `SETTLER_MIN_RECEIVED_RATIO` | 0.9 | A spot leg's tokens at entry must be worth this share of its part of the stake |
 | `SETTLER_INTERVAL_SEC` | 20 | |

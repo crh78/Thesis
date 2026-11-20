@@ -46,7 +46,7 @@ Hand-kept facts (issuers, restrictions, themes, permissioned exclusions) are in 
 
 ### Classes
 
-- **tradeable:** a $100 USDC buy routes on Jupiter at `maxAccounts=30` and costs under 1%. (This one-off build's rule. The live rule, which the asset-bank poller syncs into the catalog, also needs $50k pooled: `packages/take-builder/src/liquidity-sync.ts`.) Cost is the larger of Jupiter's `priceImpactPct` and the slippage against the $10 quote's rate, plus any Token-2022 transfer fee.
+- **tradeable:** a $100 USDC buy routes on Jupiter at `maxAccounts=30` and costs under 1%. (This one-off build's rule. The live rule, which the asset-bank poller syncs into the catalog, also needs $25k pooled, `PRICEABLE_MIN_POOLED_USD` in `packages/venues/bank/src/route.ts`, synced by `packages/take-builder/src/liquidity-sync.ts`.) Cost is the larger of Jupiter's `priceImpactPct` and the slippage against the $10 quote's rate, plus any Token-2022 transfer fee.
 - **thin:** it routes, but costs more than that, or only $10 routes.
 - **price-only:** no usable route, but a Jupiter or Pyth price exists. Usable as a price-tracked leg.
 - **no-market:** no route and no price. Listed compactly in `assets.json` under `noMarket`.

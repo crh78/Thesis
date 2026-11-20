@@ -4,11 +4,13 @@
 
 What it does: a Solana Action and browser checkout per take, served by the fork API. The buyer's own wallet signs one transaction with up to three spot or yield legs (through the fork API's Jupiter and Jupiter Lend routing), the proof-of-trade instructions and the Thesis receipt. When the routes don't fit 1,232 bytes it drops its lightest leg and leaves the rest to the app; the Action lists omitted legs. Verified on the fork in Chrome over loopback and HTTPS, including replay and tamper refusals; the take link opens the iOS receipt (`yourthesis-dev://take/<take-id>`).
 
-## Run it on a fork
+## Run it
+
+Only on the one fork's API (the VM; never start a second fork API): build the checkout and give the fork API a Blink port.
 
 ```sh
 pnpm --filter @thesis/web build
-FORK_BLINK_PORT=18902 pnpm fork:api
+# FORK_BLINK_PORT=18902 in the fork API's environment, then restart it
 pnpm fork:blink http://127.0.0.1:18902/api/actions/back/<take-id>   # acts as the wallet
 ```
 
