@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://yourthesis.xyz"><b>yourthesis.xyz</b></a> (live web app) ·
   <a href="https://x.com/yourthesisxyz"><b>@yourthesisxyz</b></a> (live X bot) ·
-  <a href="media/demo-film/film/out/thesis-film-walkthrough.mp4"><b>Demo film</b></a>
+  <a href="https://explorer.solana.com/address/5nD2cGdowj4h2rXiTPjiY3sNvqnQj9XyZEiai2gTtMLM?cluster=devnet"><b>Program on devnet</b></a>
 </p>
 
 <p align="center"><b>Consumer Applications</b> · <b>Best use of Solana</b> · <b>Gemini Prediction Markets</b> · <b>QuickNode Streams</b></p>
@@ -41,18 +41,19 @@ flowchart LR
     F --> G["🏆 Settled on-chain<br/>scores · leaderboards · badges"]
 ```
 
+<p align="center"><img src="docs/readme/x-bot-reply.png" alt="A reply on X: '@yourthesisxyz back $10', and the bot answering 'You're in: $10' with the basket picture" width="520"></p>
+
+<p align="center"><sub>A live trade from X: one reply, and the bot buys the basket and answers with its picture.</sub></p>
+
 <table>
   <tr>
     <td><img src="docs/readme/basket-crypto.png" alt="Crypto take: Bitcoin perp 2x, Strategy, Coinbase, Circle"></td>
-    <td><img src="docs/readme/basket-solana.png" alt="Solana take: Solana, Jupiter, Jito and Raydium perps at 2x"></td>
-  </tr>
-  <tr>
     <td><img src="docs/readme/basket-gold.png" alt="Low-risk gold take: gold 75%, cash earning interest 25%"></td>
     <td><img src="docs/readme/basket-cards.png" alt="Pokémon card take: a 2000 Team Rocket 1st Edition card"></td>
   </tr>
 </table>
 
-<sub>Real baskets the X bot built from people's posts, as it attaches them to its replies. They're drawn by the web app at <code>/d/&lt;id&gt;/basket.png</code>, with no model involved.</sub>
+<sub>More baskets the X bot built from people's posts, as it attaches them to its replies. The web app draws them at <code>/d/&lt;id&gt;/basket.png</code>, with no model involved.</sub>
 
 ## What it does
 
@@ -111,7 +112,7 @@ flowchart LR
 
 ---
 
-## 🏅 Why Thesis wins each track
+## Track fit
 
 ### Consumer Applications: the crypto is invisible
 - **Sign in with X, Google or email.** A Privy embedded wallet appears at sign-in. There's no seed phrase, no extension and no SOL, and **the app pays every fee and every rent deposit**.
@@ -121,7 +122,14 @@ flowchart LR
 - **Safe by default:** play money ($1,000 per account), per-trade and daily limits on anything an agent does, revocable any time, and a confirmation before every texted trade.
 
 ### Best use of Solana
-**Program ID:** `HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe`, Anchor 1.2.2 ([`anchor/programs/thesis`](anchor/programs/thesis)). It's deployed at its real address on our **Surfpool fork of Solana mainnet**, which every surface uses. That gives us every real mainnet venue, liquidity and transaction-size limit, with fake money. Devnet has none of these venues.
+The Thesis program is written in Anchor 1.2.2 ([`anchor/programs/thesis`](anchor/programs/thesis)):
+
+| Where | Program ID | |
+|---|---|---|
+| **Devnet** (view it) | [`5nD2cGdowj4h2rXiTPjiY3sNvqnQj9XyZEiai2gTtMLM`](https://explorer.solana.com/address/5nD2cGdowj4h2rXiTPjiY3sNvqnQj9XyZEiai2gTtMLM?cluster=devnet) | The same program, built from `main` (`cb29e98`) with this address, so anyone can inspect it in an explorer |
+| **Mainnet fork** (the live product) | `HbuuheBxMwf3FVwPYgqzTYdC3uHxqAQCky16rem4wbVe` | The address in `declare_id`, deployed on our **Surfpool fork of Solana mainnet**, where every surface trades |
+
+The product runs on the fork because that gives it every real mainnet venue, all their liquidity and mainnet's transaction-size limits, with fake money. Devnet has none of these venues (no Jupiter liquidity, no Phoenix), so the devnet copy is there to be inspected, not traded.
 
 **Programs Thesis composes with**, in the same transactions as its own receipt:
 
