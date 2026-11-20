@@ -83,6 +83,10 @@ export type Take = {
   source?: { url: string; label: string; kind: "link" | "x" } | null;
 };
 
+/** The X post a take was made from (the post its author replied to, or copied), or null. */
+export const xSource = (t: { source?: Take["source"] }) =>
+  t.source?.kind === "x" && /^https:\/\/(x|twitter)\.com\//.test(t.source.url) ? t.source.url : null;
+
 export type ReceiptLeg = {
   index: number;
   name: string;
