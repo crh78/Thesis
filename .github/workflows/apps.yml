@@ -62,7 +62,7 @@ jobs:
         run: pnpm --filter @thesis/imessage typecheck && pnpm --filter @thesis/agent typecheck && pnpm --filter @thesis/x typecheck
 
       - name: Test
-        run: pnpm --filter @thesis/imessage test && pnpm --filter @thesis/x test
+        run: pnpm --filter @thesis/imessage test && pnpm --filter @thesis/agent test && pnpm --filter @thesis/x test
 
   source:
     name: Typecheck and test supabase/functions/source

@@ -42,7 +42,7 @@ type BuilderReply = {
 };
 
 export type BasketResult =
-  | { verdict: "basket"; summary: string; legs: { name: string; weight: number; side: string; why: string }[]; link: string }
+  | { verdict: "basket"; summary: string; legs: { name: string; weight: number; side: string; why: string }[]; link: string; draftId: string }
   | { verdict: "no_clean_exposure"; reason: string }
   | { verdict: "error"; reason: string };
 
@@ -95,6 +95,7 @@ export async function buildBasket(cfg: BasketConfig, args: BasketArgs, meta: Dra
     // A cash pick's catalog name ("jupiter lend USDC (Jupiter Lend Earn)") reads as "Cash" in a reply.
     legs: out.legs.map((l) => ({ name: l.kind === "yield" ? "Cash" : plainName(l.name), weight: l.weight, side: l.side ?? "long", why: l.why })),
     link: `${cfg.webUrl.replace(/\/$/, "")}/d/${id}`,
+    draftId: id,
   };
 }
 

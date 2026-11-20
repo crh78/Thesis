@@ -51,7 +51,7 @@ test("replies in the group, skips its own messages and reactions", async () => {
   server.close();
 
   assert.equal(seen.length, 1);
-  assert.deepEqual(seen[0], { provider: "bluebubbles", chatId: "iMessage;+;chat42", chatType: "group", senderId: "+15550001111", text: "thesis nvidia keeps winning" });
+  assert.deepEqual(seen[0], { provider: "bluebubbles", chatId: "iMessage;+;chat42", chatType: "group", senderId: "+15550001111", messageId: "m1", text: "thesis nvidia keeps winning" });
   assert.equal(sent.length, 1);
   assert.equal(sent[0].chatGuid, "iMessage;+;chat42");
   assert.equal(sent[0].message, "on it");

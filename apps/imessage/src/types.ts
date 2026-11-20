@@ -7,8 +7,10 @@ export type Inbound = {
   /** Stable conversation id (DM or group chat). */
   chatId: string;
   chatType: "dm" | "group";
-  /** Sender handle (E.164 phone or email); undefined if the provider has none. */
+  /** Sender handle (E.164 phone or email); undefined if the provider has none. Never logged in full. */
   senderId: string | undefined;
+  /** The provider's id for this message: a trade it asks for is keyed on it, so a redelivery never trades twice. */
+  messageId?: string;
   text: string;
 };
 
