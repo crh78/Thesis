@@ -1,6 +1,6 @@
 // Live marks on the fork API follow the settler's and the marker's rules (valueLeg): the token's
 // ScaledUiAmount multiplier since the entry (a 10-for-1 split or a reinvested dividend isn't read as
-// a loss), the $50k liquidity floor with the stock times the entry's premium behind it, and no
+// a loss), the $25k liquidity floor with the stock times the entry's premium behind it, and no
 // prediction mark from a book that doesn't add up.
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -57,18 +57,18 @@ test("a stock-priced entry holding a token is scaled the same way", async () => 
 });
 
 test("a liquid token is marked on itself, without reading the stock", async () => {
-  const s = setup({ tokenUsd: 101, liquidityUsd: 50_000, stockUsd: 100, basis: { source: "token", mint: M, underlyingPerUiToken: 1, premium: 1.01 } });
+  const s = setup({ tokenUsd: 101, liquidityUsd: 25_000, stockUsd: 100, basis: { source: "token", mint: M, underlyingPerUiToken: 1, premium: 1.01 } });
   assert.equal(usd(await s.mark()), 101);
   assert.equal(s.stockReads(), 0);
 });
 
-test("a token under the $50k floor: the stock times the entry's premium, as the settler and the marker do", async () => {
-  const { mark } = setup({ tokenUsd: 150, liquidityUsd: 49_000, stockUsd: 100, basis: { source: "token", mint: M, underlyingPerUiToken: 1, premium: 1.01 } });
+test("a token under the $25k floor: the stock times the entry's premium, as the settler and the marker do", async () => {
+  const { mark } = setup({ tokenUsd: 150, liquidityUsd: 24_000, stockUsd: 100, basis: { source: "token", mint: M, underlyingPerUiToken: 1, premium: 1.01 } });
   assert.equal(usd(await mark()), 101);
 });
 
 test("a token under the floor with no premium recorded: no mark, not the thin token's price", async () => {
-  const { mark } = setup({ tokenUsd: 150, liquidityUsd: 49_000, stockUsd: 100, basis: { source: "token", mint: M, underlyingPerUiToken: 1, premium: null } });
+  const { mark } = setup({ tokenUsd: 150, liquidityUsd: 24_000, stockUsd: 100, basis: { source: "token", mint: M, underlyingPerUiToken: 1, premium: null } });
   assert.equal(await mark(), null);
 });
 
