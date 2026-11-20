@@ -24,7 +24,7 @@ export type Source = { url: string; label: string; kind: "x" | "link" };
 
 export type Leg = {
   name: string;
-  /** "Stock", "Prediction · Yes", "Stock · 3x", "Earns interest". */
+  /** "Stock", "Prediction · Yes", "Perp · 3x", "Earns interest". */
   kind: string;
   weight: number;
   why: string;
@@ -87,7 +87,8 @@ export type Built = { verdict: string; summary?: string | null; reason?: string 
 export function fromBuilt(b: BuiltLeg, slot: number): Leg {
   const label: Record<string, string> = { etf: "ETF", commodity: "Commodity", "pre-ipo": "Pre-IPO", leveraged: "Leveraged", yield: "Earns interest", card: "Cards" };
   // No default leverage: without the builder's number the leg says "Leveraged".
-  const kind = b.kind === "perp" ? (b.leverage ? `Stock · ${b.leverage}x` : "Leveraged")
+  // "Perp", not "Stock": perps cover crypto too (BTC, SOL), as on iOS. The fork API reads only the "3x".
+  const kind = b.kind === "perp" ? (b.leverage ? `Perp · ${b.leverage}x` : "Leveraged")
     : b.kind === "prediction" ? (b.side === "no" ? "Prediction · No" : "Prediction · Yes")
     : label[b.kind] ?? "Stock";
   return {
@@ -99,7 +100,7 @@ export function fromBuilt(b: BuiltLeg, slot: number): Leg {
     slot,
     // The take builder answers `canShort` (legJSON); `can_short` was read here before, so every web
     // post went on-chain with no leg a fade could take.
-    fadeHow: (b.canShort ?? b.can_short) ? (b.kind === "prediction" ? "Bets No" : "Bets the stock falls") : null,
+    fadeHow: (b.canShort ?? b.can_short) ? (b.kind === "prediction" ? "Bets No" : b.kind === "perp" ? "Bets it falls" : "Bets the stock falls") : null,
     assetId: b.id,
     assetKey: b.key ?? b.id,
     ...(b.kind === "card" ? { insuredValueUsd: b.insuredValueUsd ?? null, imageUrl: b.imageUrl ?? null } : {}),
@@ -166,7 +167,7 @@ export function adding(a: PickAsset, legs: Leg[], inverted = false): Leg[] {
     weight: share,
     why: a.about ?? "",
     slot: nextSlot(legs),
-    fadeHow: a.canShort ? (a.kind === "prediction" ? "Bets No" : "Bets the stock falls") : null,
+    fadeHow: a.canShort ? (a.kind === "prediction" ? "Bets No" : a.kind === "perp" ? "Bets it falls" : "Bets the stock falls") : null,
     assetId: a.id,
     assetKey: a.key,
   };
