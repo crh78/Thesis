@@ -589,7 +589,7 @@ const withListed = (system: string, listed: Listed) => `${system}\n\nListed (num
 type Source = { text: string; label: string | null; kind: "holdings" | "post" | "article" };
 const sourceJSON = (s: Source) => ({ kind: s.kind, from: s.label ?? `a ${s.kind}`, text: s.text });
 
-type Agent = { out: Picked; calls: string[]; rounds: number; model: string; speculated?: boolean };
+type Agent = { out: Picked; calls: string[]; rounds: number; model: string; speculated?: boolean; thoughts?: string[] };
 
 /**
  * How a build runs. The defaults are what ships; an admin request (the eval) can try others
@@ -599,10 +599,12 @@ type Agent = { out: Picked; calls: string[]; rounds: number; model: string; spec
 type Variant = {
   listed: boolean; markets: boolean; rounds: number; speculate: boolean;
   search: "bm25" | "db"; reasoning: "none" | "low" | "medium"; timeoutMs: number;
+  /** The model's reasoning summaries in the debug reply (the bots' traces). */
+  thoughts: boolean;
 };
 // Reasoning low (from the 100-case eval): same quality as none, and the model
 // is sure enough to skip searches, so p90 fell from 5.8 s to 4.0 s.
-const SHIPPED: Variant = { listed: true, markets: true, rounds: 2, speculate: true, search: "bm25", reasoning: "low", timeoutMs: AGENT_TIMEOUT_MS };
+const SHIPPED: Variant = { listed: true, markets: true, rounds: 2, speculate: true, search: "bm25", reasoning: "low", timeoutMs: AGENT_TIMEOUT_MS, thoughts: false };
 
 function variantOf(raw: unknown): Variant {
   const v = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -614,6 +616,7 @@ function variantOf(raw: unknown): Variant {
     speculate: pick("speculate", (x) => typeof x === "boolean", SHIPPED.speculate),
     search: pick("search", (x) => x === "bm25" || x === "db", SHIPPED.search),
     reasoning: pick("reasoning", (x) => x === "none" || x === "low" || x === "medium", SHIPPED.reasoning),
+    thoughts: pick("thoughts", (x) => typeof x === "boolean", SHIPPED.thoughts),
     timeoutMs: Math.max(2000, Math.min(45_000, pick("timeoutMs", (x) => Number.isFinite(x), SHIPPED.timeoutMs))),
   };
 }
@@ -626,7 +629,7 @@ async function runAgent(system: string, input: unknown, index: Index, shown: Sho
   try {
     const r = await toolCall<Picked>(system, input, [tool, ...extra], "basket", PICK_SCHEMA, {
       timeoutMs: v.timeoutMs, maxTokens: maxTokens + (v.reasoning === "none" ? 0 : 2500), priority: true, rounds: v.rounds,
-      fresh: v.speculate ? () => shown.size > before : undefined, reasoning: v.reasoning,
+      fresh: v.speculate ? () => shown.size > before : undefined, reasoning: v.reasoning, thoughts: v.thoughts,
     });
     return { ...r, model: FAST_MODEL };
   } catch (e) {
@@ -967,6 +970,7 @@ function debugOf(agent: Agent | null, shown: Shown, copied: Security[] = []) {
   return {
     debug: {
       rounds: agent?.rounds ?? null, speculated: agent?.speculated ?? false, searches: agent?.calls ?? [], raw: agent?.out ?? null, copied: copied.map((s) => s.symbol),
+      ...(agent?.thoughts?.length ? { thoughts: agent.thoughts } : {}),
       picked: (agent?.out.picks ?? []).map((p) => {
         const r = shown.resolve(p.n, p.name);
         return r ? line(r, p.n) + (r !== shown.get(p.n) ? ` (fixed from ${p.n} for "${p.name}")` : "") : `${p.n} "${p.name}" (never shown)`;

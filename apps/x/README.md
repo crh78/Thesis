@@ -27,10 +27,17 @@ Saved for you: sign in with X at the link in our bio to post it as your take.
 
 Every event the bot logs is also saved to Supabase, in `bot_events` (migration 0061), through the source function's `POST /source/bot-events` (the same `THESIS_BOT_SECRET`). That covers every mention it handled: `replied` (with the reply's text, its X id, the mention's text, whether it had the picture, any trade), `would reply` in a dry run, `skip` with the reason (vetted out, a cap, opted out, not signed up), `reply refused` and `reply failed` (X's answer), `plan failed`, `image failed`, plus `starting`, `stopped` and `poll failed` (at most every 10 minutes). Events go out in one batch after each poll; if Supabase is down they wait for the next one, and a reply never waits on them. Rows are kept 90 days. `X_TELEMETRY=0` turns it off.
 
+Each event about a mention also carries `data.trace`, how the bot decided: `trace.vet` is what the vetting model saw (`input`), answered (`output`, the verdict and its reason) and a summary of its reasoning (`thoughts`); `trace.build` is the take builder's verdict and picks, its reasoning summaries per round (`trace.build.trace.thoughts`), its searches and its raw picks before the house rules. OpenAI never returns the reasoning itself, only a summary, and skips it when the model barely reasoned. The traces stay out of Railway's logs.
+
 ```sql
 -- The last day's replies
 select at, author, what, data->>'text' as reply, data->>'mention' as mention
 from bot_events where bot = 'x' and event = 'replied' and at > now() - interval '1 day' order by at desc;
+
+-- Why it answered (or didn't) one mention
+select event, what, data->'trace'->'vet'->>'reason' as vet_reason, data->'trace'->'vet'->'thoughts' as vet_thoughts,
+  data->'trace'->'build'->'trace'->'thoughts' as build_thoughts, data->'trace'->'build'->'trace'->'searches' as searches
+from bot_events where ref = '<mention id>';
 
 -- What it did, by kind, this week
 select event, coalesce(what, data->>'reason') as why, count(*) from bot_events

@@ -191,8 +191,16 @@ const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice
 
 type BuiltLeg = { name: string; weight: number; side?: string | null; kind?: string; why?: string };
 const DRAFT_COLUMNS = "id, summary, legs";
-const drafted = (d: { id: string; summary: string | null; legs: unknown }, existing: boolean) =>
-  json(200, { verdict: "basket", id: d.id, summary: d.summary, legs: d.legs, existing });
+const drafted = (d: { id: string; summary: string | null; legs: unknown }, existing: boolean, trace?: Trace) =>
+  json(200, { verdict: "basket", id: d.id, summary: d.summary, legs: d.legs, existing, ...(trace ? { trace } : {}) });
+
+/** How the take builder got there, for the bots' telemetry (bot_events): never stored on the draft. */
+type Trace = { thoughts?: string[]; searches?: string[]; picked?: string[]; raw?: unknown; rounds?: number | null; speculated?: boolean; ms?: unknown };
+function traceOf(built: { debug?: Record<string, unknown>; ms?: unknown }): Trace | undefined {
+  const d = built.debug;
+  if (!d) return undefined;
+  return { thoughts: d.thoughts as string[] | undefined, searches: d.searches as string[], picked: d.picked as string[], raw: d.raw, rounds: d.rounds as number | null, speculated: d.speculated as boolean, ms: built.ms };
+}
 
 /**
  * A bot's take → the take builder's basket, saved as a draft → { verdict: "basket", id, summary,
@@ -236,15 +244,17 @@ async function buildDraft(b: Record<string, unknown>) {
       // A bot's draft is a public reply, and its asker isn't waiting on a composer: the builder
       // thinks longer (reasoning medium, ~3 s instead of ~1.5) and gets a take's direction right
       // more often ("$TSLA demand is collapsing" isn't a Tesla buy).
-      variant: { reasoning: "medium", timeoutMs: 20_000 },
+      // thoughts: the model's reasoning summaries come back in debug, passed on as `trace`.
+      variant: { reasoning: "medium", timeoutMs: 20_000, thoughts: true },
     }),
     signal: AbortSignal.timeout(25_000),
   });
   if (!r.ok) throw new Error(`take-builder ${r.status}`);
-  const built = await r.json() as { verdict: string; summary?: string; reason?: string | null; legs?: BuiltLeg[] };
+  const built = await r.json() as { verdict: string; summary?: string; reason?: string | null; legs?: BuiltLeg[]; debug?: Record<string, unknown>; ms?: unknown };
+  const trace = traceOf(built);
   const legs = (built.legs ?? []).filter((l) => l && typeof l.name === "string").slice(0, 10);
   if (built.verdict !== "basket" || !legs.length) {
-    return json(200, { verdict: "no_clean_exposure", reason: built.reason || "Nothing you can buy tracks this closely enough yet." });
+    return json(200, { verdict: "no_clean_exposure", reason: built.reason || "Nothing you can buy tracks this closely enough yet.", ...(trace ? { trace } : {}) });
   }
 
   const row = {
@@ -257,15 +267,15 @@ async function buildDraft(b: Record<string, unknown>) {
     source_label: sourceUrl ? str(src!.label, 60) || "the post" : null,
     source_kind: sourceUrl ? (src!.kind === "x" ? "x" : "link") : null,
   };
-  return saveDraft(row, ref, origin);
+  return saveDraft(row, ref, origin, trace);
 }
 
 /** Inserts a draft under a fresh id (retrying a taken one); a racing retry of the same ref returns the winner. */
-async function saveDraft(row: Record<string, unknown> & { summary: string | null; legs: unknown }, ref: string | null, origin: string) {
+async function saveDraft(row: Record<string, unknown> & { summary: string | null; legs: unknown }, ref: string | null, origin: string, trace?: Trace) {
   for (let i = 0; i < 3; i++) {
     const id = draftId();
     const { error } = await db.from("take_drafts").insert({ id, ...row });
-    if (!error) return drafted({ id, summary: row.summary, legs: row.legs }, false);
+    if (!error) return drafted({ id, summary: row.summary, legs: row.legs }, false, trace);
     if (error.code !== "23505") dbCheck(error);
     // A taken id (or a racing retry of the same ref): try again, or return the winner.
     if (ref) {
@@ -432,7 +442,9 @@ async function botEvents(b: Record<string, unknown>) {
       const { t, at, event, ref, author, what, ...rest } = e;
       const when = new Date(String(at ?? t ?? ""));
       let data = rest;
-      if (JSON.stringify(data).length > 15_000) data = { truncated: JSON.stringify(rest).slice(0, 15_000) };
+      // A long trace loses its reasoning first, then everything is cut.
+      if (JSON.stringify(data).length > 60_000 && data.trace) data = { ...rest, trace: { cut: JSON.stringify(rest.trace).slice(0, 30_000) } };
+      if (JSON.stringify(data).length > 60_000) data = { truncated: JSON.stringify(rest).slice(0, 60_000) };
       return {
         at: Number.isNaN(when.getTime()) ? new Date().toISOString() : when.toISOString(),
         bot,

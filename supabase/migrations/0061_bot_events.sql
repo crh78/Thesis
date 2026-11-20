@@ -10,7 +10,9 @@
 --   author  the X username ("@jake") or a masked handle; never an iMessage number in full
 --   what    the reply's kind: take, trade, sell, no_exposure, explain, not_linked, opt_out, ...
 --   data    everything else the bot logged: the reply's text, its id, the mention's text, the
---           skip reason, the trade, whether it had a picture
+--           skip reason, the trade, whether it had a picture, and `trace`: what the vetting model
+--           saw, answered and (in summary) reasoned, and the take builder's reasoning summaries,
+--           searches and raw picks
 --
 -- Kept 90 days.
 
@@ -22,7 +24,7 @@ create table public.bot_events (
   ref     text check (ref is null or char_length(ref) <= 60),
   author  text check (author is null or char_length(author) <= 60),
   what    text check (what is null or char_length(what) <= 40),
-  data    jsonb not null default '{}'::jsonb check (octet_length(data::text) <= 16000)
+  data    jsonb not null default '{}'::jsonb check (octet_length(data::text) <= 64000)
 );
 
 create index bot_events_at on public.bot_events (at desc);
