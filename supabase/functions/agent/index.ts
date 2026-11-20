@@ -47,9 +47,11 @@
 //                                      display_name, made, return_pct, backers_made, backers_pct,
 //                                      takes }: the Thesis account that links this X account, and its
 //                                      two scores as its profile shows them (the X bot's "score")
-//   POST   /agent/copy               { who: { x }, handle } the X bot's "copy": adds that X account to
-//                                      the asker's copies with auto-copy on → { copying, handle, usd,
-//                                      daily }; 403 not_linked, 409 copy_limit (10 accounts)
+//   POST   /agent/copy               { who: { x }, handle, username? } the X bot's "copy": copies that
+//                                      X account with auto-copy on; one that's on Thesis is copied as a
+//                                      trader (their takes, no X reads) → { copying, kind: x|trader,
+//                                      handle, thesis_handle?, usd, daily, already }; 403 not_linked,
+//                                      409 copy_limit (10 X accounts), 400 cant_copy_self
 //   POST   /agent/copy-run           the copy runner (pg_cron, every minute): runs queued copy_jobs
 //                                      (migrations/*_copy_trading.sql) → { ran, done, skipped, failed }
 //   POST   /agent/takes              { take_id } → { claim, author, status } a live take (the
@@ -596,16 +598,30 @@ async function botCopy(b: Record<string, unknown>) {
   check(/^[a-z0-9_]{1,15}$/.test(handle), "invalid_handle");
   const g = await grantFor(who);
   if (!g || g.revoked_at) throw new HttpError(403, "not_linked");
+  const usd = Math.min(20, Number(g.per_trade_usd));
+
+  // On Thesis: copy their real takes (backed as they post them), no X reads at all.
+  const user = await privy.userByXUsername(handle).catch(() => null);
+  const acct = user ? (await db.from("accounts").select("profile_id").eq("privy_did", user.id).maybeSingle()).data : null;
+  const trader = acct ? (await db.from("profiles").select("id, handle").eq("id", acct.profile_id).maybeSingle()).data : null;
+  if (trader?.handle && trader.id !== g.profile_id) {
+    const { data: hadT } = await db.from("trader_follows").select("auto, auto_usd, auto_daily").eq("profile_id", g.profile_id).eq("trader_id", trader.id).maybeSingle();
+    if (!hadT?.auto) {
+      dbCheck((await db.from("trader_follows").upsert({ profile_id: g.profile_id, trader_id: trader.id, auto: true, auto_since: new Date().toISOString(), ...(hadT ? {} : { auto_usd: usd }) }, { onConflict: "profile_id,trader_id" })).error);
+    }
+    return json(200, { copying: true, kind: "trader", handle, thesis_handle: trader.handle, usd: Number(hadT?.auto_usd ?? usd), daily: hadT?.auto_daily ?? 3, already: !!hadT?.auto });
+  }
+  if (trader?.id === g.profile_id) throw new HttpError(400, "cant_copy_self");
+
   const { count } = await db.from("x_follows").select("handle", { count: "exact", head: true }).eq("profile_id", g.profile_id);
   const { data: had } = await db.from("x_follows").select("auto").eq("profile_id", g.profile_id).eq("handle", handle).maybeSingle();
   if (!had && (count ?? 0) >= MAX_COPIED_X) throw new HttpError(409, "copy_limit");
   // The account row (its name and picture fill in on the next poll); posts before now are never copied.
   dbCheck((await db.from("x_accounts").upsert({ handle, username: typeof b.username === "string" ? b.username.slice(0, 15) : handle }, { onConflict: "handle", ignoreDuplicates: true })).error);
-  const usd = Math.min(20, Number(g.per_trade_usd));
   const row = { profile_id: g.profile_id, handle, auto: true, ...(had?.auto ? {} : { auto_since: new Date().toISOString(), auto_usd: usd }) };
   dbCheck((await db.from("x_follows").upsert(row, { onConflict: "profile_id,handle" })).error);
   const { data: now } = await db.from("x_follows").select("auto_usd, auto_daily").eq("profile_id", g.profile_id).eq("handle", handle).single();
-  return json(200, { copying: true, handle, usd: Number(now?.auto_usd ?? usd), daily: now?.auto_daily ?? 3, already: !!had?.auto });
+  return json(200, { copying: true, kind: "x", handle, usd: Number(now?.auto_usd ?? usd), daily: now?.auto_daily ?? 3, already: !!had?.auto });
 }
 
 type CopyJob = {

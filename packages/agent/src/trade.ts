@@ -25,6 +25,10 @@ export type TradeResult =
   | { ok: true; status: "landed" | "pending" | "failed"; takeId: string; url: string; usd: number | null; closesTake: boolean; existing: boolean; error?: string }
   | { ok: false; error: string; message?: string; perTradeUsd?: number; leftUsd?: number; confirmUrl?: string; takeId?: string };
 
+export type CopyResult =
+  | { copying: true; kind: "x" | "trader"; handle: string; thesis_handle?: string; usd: number; daily: number; already: boolean }
+  | { copying: false; error: string };
+
 export type Score =
   | { found: false }
   | { found: true; handle: string; display_name: string | null; made: number; return_pct: number; backers_made: number; backers_pct: number; takes: number };
@@ -75,6 +79,13 @@ export function agentApi(cfg: AgentApiConfig, f: typeof fetch = fetch) {
       const r = await post<{ url?: string; error?: string }>("links", { imessage });
       if (r.status !== 200 || !r.body.url) throw new Error(`agent links ${r.status}: ${r.body.error ?? ""}`);
       return r.body.url;
+    },
+
+    /** The X bot's "copy": the asker copies this X account (or, if it's on Thesis, its takes), auto-copy on. */
+    async copy(who: Who, handle: string, username?: string): Promise<CopyResult> {
+      const r = await post<CopyResult & { error?: string }>("copy", { who, handle, ...(username ? { username } : {}) });
+      if (r.status === 200) return r.body;
+      return { copying: false, error: typeof r.body.error === "string" ? r.body.error : `agent_${r.status}` };
     },
 
     /** The Thesis account that links this X username, and its two scores (the X bot's "score"). */
