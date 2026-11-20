@@ -1,4 +1,5 @@
--- Checks the notification triggers, the daily digest and the inbox (migrations/*_notifications.sql).
+-- Checks the notification triggers, the daily digest and the inbox (migrations/*_notifications.sql),
+-- and who traded or faded an inverted take (migrations/*_inverted_takes.sql).
 -- Run against a scratch database with the migrations applied (it rolls back):
 --   psql "$SCRATCH_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/notifications.sql
 begin;
@@ -95,6 +96,26 @@ begin
   from public.notifications n join public.profiles p on p.id = n.profile_id
   where n.kind = 'take_settled' and n.take_id = '00000000-0000-4000-8000-00000000b002';
   if got is distinct from 'author,seller' then raise exception 'take_settled after a close went to: %', got; end if;
+
+  -- Inverted takes (migrations/*_inverted_takes.sql): the author's buy-in is a fade. The fan fades
+  -- it too, which agrees (take_traded); the fader backs it, which disagrees (take_faded).
+  insert into public.takes (id, author_id, claim, risk, horizon, settles_at, inverted) values
+    ('00000000-0000-4000-8000-00000000b003', a, 'Crypto sucks', 'high', '12mo', now() + interval '365 days', true);
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature','v1','ordinal',0,'slot',21,'block_time',1800200000,'name','takeCreated',
+      'data', jsonb_build_object('take','TV','author','WALLET_A','inverted',true,'claimHash',
+        (select to_jsonb(array_agg(get_byte(sha256(convert_to('Crypto sucks', 'UTF8')), i) order by i)) from generate_series(0, 31) i))),
+    jsonb_build_object('signature','v1','ordinal',1,'slot',21,'block_time',1800200000,'name','positionOpened',
+      'data', jsonb_build_object('take','TV','position','PV_A','owner','WALLET_A','side','fade','stake','10000000')),
+    jsonb_build_object('signature','v2','ordinal',0,'slot',22,'block_time',1800200060,'name','positionOpened',
+      'data', jsonb_build_object('take','TV','position','PV_B','owner','WALLET_B','side','fade','stake','20000000')),
+    jsonb_build_object('signature','v3','ordinal',0,'slot',23,'block_time',1800200120,'name','positionOpened',
+      'data', jsonb_build_object('take','TV','position','PV_C','owner','WALLET_C','side','back','stake','15000000'))));
+  select string_agg(kind || '|' || title, ' ; ' order by id) into got
+  from public.notifications where profile_id = a and take_id = '00000000-0000-4000-8000-00000000b003';
+  if got is distinct from 'take_traded|@fan traded your take · $20 ; take_faded|@fader faded your take · $15' then
+    raise exception 'on an inverted take the author got: %', got;
+  end if;
   raise notice 'notifications: all checks passed';
 end $$;
 rollback;

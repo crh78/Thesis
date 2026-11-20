@@ -1,8 +1,16 @@
 // HTTP in front of ForkService. JSON in and out; errors are { error, message } with a status.
 //
 //   GET  /health
+// Sides are take-relative everywhere, in and out: "back" agrees with the take's text, "fade"
+// disagrees. On an inverted take (`inverted: true` on its receipt: it bets against its basket, like
+// "crypto sucks" over coin perps) agreeing is an on-chain fade (Phoenix shorts, prediction legs' other
+// side) and disagreeing an on-chain back; the service turns one into the other (chainSide). So the
+// receipt's backers/faders, canBack/canFade, fadeBlocked, legs' blocked/fadeBlocked, prediction
+// side and positions' side, the portfolio's and activity's sides, and incomplete trades' side all
+// mean agree/disagree. Phoenix directions (perp, short; long/short) stay literal.
+//
 //   GET  /takes/:id?viewer=<wallet>                 the on-chain receipt (or what would be on-chain): status
-//                                                     open | closed (its author sold) | settled, closedAt
+//                                                     open | closed (its author sold) | settled, closedAt, inverted
 //   POST /takes/:id/trades   { owner, side, usd, prebuild? }  → { buildId, transactions[], included, excluded, feeUsd,
 //                                                     expiresAt, quotedAt, prebuilt? }; prebuild: built ahead of the
 //                                                     tap (its own per-wallet window; the money action counts at
@@ -23,6 +31,8 @@
 //                                                     holding on that side (whole positions first, smallest first,
 //                                                     then at most one partial sale), plus positions[] sold
 //   POST /takes/:id/publish  { author, usd, prebuild? }  → same, for posting an app take with the author's buy-in
+//                                                     (an on-chain fade when the take is inverted; 422 not_fadeable
+//                                                     if one of its legs can't be faded), plus inverted
 //   POST /takes/:id/confirm                         → { onChain, take?, relayed }: is the author's publish
 //                                                     on-chain here? If so, its events go to the backend again
 //   POST /submit             { buildId, transactions[], until?, timings? }  signed by the user → { signatures[] }
@@ -246,6 +256,7 @@ export function forkApiServer(
         if (m === "GET" && parts.length === 2) return send(200, await service.receipt(parts[1], url.searchParams.get("viewer") ?? undefined));
         if (m === "POST" && parts[2] === "trades") {
           const b = await body(req);
+          // Take-relative: "back" agrees with the take (on an inverted take, an on-chain fade).
           const side = b.side === "fade" ? "fade" : b.side === "back" ? "back" : null;
           if (!side) throw new ApiError(400, "invalid_side");
           const owner = str(b.owner, "owner");

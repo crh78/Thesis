@@ -41,10 +41,16 @@ type BuilderReply = {
   summary: string;
   reason: string | null;
   legs: Leg[];
+  /** The take bets against these picks ("crypto sucks" over BTC/ETH/SOL): agreeing is short every one. */
+  inverted?: boolean;
 };
 
+/**
+ * A built basket as the bots show it. `inverted`: the take bets against its picks, so each leg's
+ * `side` is what agreeing holds: "short", or a prediction's other outcome.
+ */
 export type BasketResult =
-  | { verdict: "basket"; summary: string; legs: { name: string; weight: number; side: string; why: string }[]; link: string; draftId: string }
+  | { verdict: "basket"; summary: string; legs: { name: string; weight: number; side: string; why: string }[]; link: string; draftId: string; inverted: boolean }
   | { verdict: "no_clean_exposure"; reason: string }
   | { verdict: "error"; reason: string };
 
@@ -90,15 +96,30 @@ export async function buildBasket(cfg: BasketConfig, args: BasketArgs, meta: Dra
     return { verdict: "no_clean_exposure", reason: out.reason || "Nothing you can buy tracks this closely enough yet." };
   }
   const id = out.id;
+  const inverted = out.inverted === true;
 
   return {
     verdict: "basket",
     summary: out.summary,
     // A cash pick's catalog name ("jupiter lend USDC (Jupiter Lend Earn)") reads as "Cash" in a reply.
-    legs: out.legs.map((l) => ({ name: l.kind === "yield" ? "Cash" : plainName(l.name), weight: l.weight, side: l.side ?? "long", why: l.why })),
+    legs: out.legs.map((l) => ({ name: l.kind === "yield" ? "Cash" : plainName(l.name), weight: l.weight, side: legSide(l.side, inverted), why: l.why })),
     link: `${cfg.webUrl.replace(/\/$/, "")}/d/${id}`,
     draftId: id,
+    inverted,
   };
+}
+
+/** What agreeing with the take holds of a leg: long (a prediction's own side), or for a take that
+ *  bets against its picks, short (a prediction's other side). */
+export function legSide(side: string | null | undefined, inverted: boolean): string {
+  if (!inverted) return side ?? "long";
+  return side === "yes" ? "no" : side === "no" ? "yes" : "short";
+}
+
+/** The picks as one line each, `Name 40%`; a take that bets against them says so first. */
+export function picksLines(r: { inverted: boolean; legs: { name: string; weight: number }[] }): string[] {
+  const picks = r.legs.map((l) => `${l.name} ${Math.round(l.weight)}%`);
+  return r.inverted ? [`betting against: ${picks.join(", ")}`] : picks;
 }
 
 /** Boots the edge worker and its search index so the first real take is fast. */

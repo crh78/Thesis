@@ -15,12 +15,15 @@
 //   PUT    /follows/:profileId        follow someone
 //   DELETE /follows/:profileId
 //   GET    /takes/posting             → { takes } your takes still waiting for the chain
-//   POST   /takes                     { claim, topic, risk, tags, legs, await_chain? } → { take }
-//                                      (each leg may carry asset_id, its securities row). There's
-//                                      no horizon: a take runs until its author sells their buy-in,
-//                                      or 365 days at most (an old client's horizon is ignored). It's
-//                                      posting, seen by you only, until its on-chain takeCreated
-//                                      makes it live. Only a project with
+//   POST   /takes                     { claim, topic, risk, tags, legs, await_chain?, inverted? }
+//                                      → { take } (each leg may carry asset_id, its securities row).
+//                                      inverted: true bets against the basket (the author's buy-in
+//                                      is an on-chain fade); every leg must then carry a fade_how,
+//                                      else 400 legs_not_fadeable. There's no horizon: a take
+//                                      runs until its author sells their buy-in, or 365 days at
+//                                      most (an old client's horizon is ignored). It's posting,
+//                                      seen by you only, until its on-chain takeCreated (inverted
+//                                      the same way) makes it live. Only a project with
 //                                      TAKES_LIVE_WITHOUT_CHAIN=on lets a client post it live at
 //                                      once by leaving out await_chain: true (./rules.ts).
 //   DELETE /takes/:id                 discard your take while it's still posting
@@ -46,7 +49,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { privyDid } from "../_shared/privy.ts";
-import { takeStatus } from "./rules.ts";
+import { legsFadeable, takeInverted, takeStatus } from "./rules.ts";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -191,6 +194,10 @@ async function createTake(me: string, body: Record<string, unknown>) {
   check(Math.abs(total - 100) <= 1, "weights_must_total_100");
   // Every pick has its own slot (the composer's nextSlot): its color, and its leg on-chain.
   check(new Set(legs.map((l) => l.slot)).size === legs.length, "invalid_leg_slot");
+  // An inverted take bets against its basket: its author's buy-in fades every leg.
+  const inverted = takeInverted(body.inverted);
+  check(inverted !== null, "invalid_inverted");
+  if (inverted) check(legsFadeable(legs), "legs_not_fadeable");
 
   const id = await rpc<string>("create_take", {
     p_author: me,
@@ -204,6 +211,7 @@ async function createTake(me: string, body: Record<string, unknown>) {
     // The server decides, not the client: the take stays hidden from everyone but its author
     // until the on-chain buy-in's takeCreated event makes it live (migrations/*_post_after_chain.sql).
     p_status: takeStatus(body.await_chain),
+    p_inverted: inverted,
   });
   return json(201, { take: await rpc("take", { p_id: id }) });
 }

@@ -295,9 +295,12 @@ struct TakeListRow: View {
                     .font(.serif(18))
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(take.author.handle(then: "\(take.risk.short) · \(take.tags.joined(separator: " / ").uppercased())"))
-                    .font(.mono(11))
-                    .foregroundStyle(Palette.muted)
+                HStack(spacing: 6) {
+                    if take.inverted { AgainstBadge() }
+                    Text(take.author.handle(then: "\(take.risk.short) · \(take.tags.joined(separator: " / ").uppercased())"))
+                        .font(.mono(11))
+                        .foregroundStyle(Palette.muted)
+                }
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 4) {

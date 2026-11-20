@@ -49,6 +49,22 @@ type LegForReturn = { kind: object; weightBps: number; leverage: number };
  * no leg loses more than 100%. Prices are on-chain units (8 decimals). Pass
  * current prices as `exit` for a live return. Null if a needed price is missing.
  */
+/**
+ * The on-chain side that agrees with a take: "fade" when it's inverted (it bets against its
+ * basket, and its author's buy-in is a fade), else "back". Mirrors `Take::agree_side`.
+ */
+export function agreeSide(take: { inverted?: boolean | null }): "back" | "fade" {
+  return take.inverted ? "fade" : "back";
+}
+
+/**
+ * A take-relative side ("back" = with the take's claim, "fade" = against it) as the on-chain
+ * side for this take, and back again: the same flip both ways.
+ */
+export function chainSide(side: "back" | "fade", take: { inverted?: boolean | null }): "back" | "fade" {
+  return take.inverted ? (side === "back" ? "fade" : "back") : side;
+}
+
 export function positionReturnBps(
   legs: LegForReturn[],
   p: { side: object; legsMask: number; prices: { entry: bigint; exit: bigint }[] },

@@ -28,9 +28,11 @@
 //   POST   /source/drafts          header x-bot-secret: a chat bot's take { claim, risk,
 //                                  source?: { text, url, label }, origin: imessage|x, context?,
 //                                  origin_ref? } → the take builder's basket, saved as a draft:
-//                                  { verdict: "basket", id, summary, legs, existing } or
-//                                  { verdict: "no_clean_exposure", reason }. Its page is /d/<id> on
-//                                  the web; the same origin_ref returns the same draft.
+//                                  { verdict: "basket", id, summary, legs, inverted, existing } or
+//                                  { verdict: "no_clean_exposure", reason }. inverted: the builder
+//                                  read the take as betting against its basket ("crypto sucks" on
+//                                  BTC, ETH and SOL), so posting it fades them. Its page is
+//                                  /d/<id> on the web; the same origin_ref returns the same draft.
 //                                  for_x: the X bot's asker (their username), whose drafts wait for
 //                                  them in the web app, since the bot's replies carry no link.
 //                                  copy_of: another draft's id: its basket, saved again for this
@@ -38,7 +40,8 @@
 //                                  share one basket); 404 no_such_draft.
 //   GET    /source/drafts/mine     → { x, drafts } the X bot's unposted drafts for the X account
 //                                  linked to your Privy login (x null when none is linked), newest
-//                                  first, from the last 14 days: { id, claim, legs, context, created_at }
+//                                  first, from the last 14 days: { id, claim, legs, inverted, context,
+//                                  created_at }
 //   PUT    /source/drafts/:id      { take_id } you posted it: your live take → { posted, take_id }
 //                                  (posted false when someone else's live take got there first);
 //                                  404 unless the take is yours, 409 take_not_live while it's posting,
@@ -189,15 +192,15 @@ function draftId(): string {
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
 type BuiltLeg = { name: string; weight: number; side?: string | null; kind?: string; why?: string };
-const DRAFT_COLUMNS = "id, summary, legs";
-const drafted = (d: { id: string; summary: string | null; legs: unknown }, existing: boolean) =>
-  json(200, { verdict: "basket", id: d.id, summary: d.summary, legs: d.legs, existing });
+const DRAFT_COLUMNS = "id, summary, legs, inverted";
+const drafted = (d: { id: string; summary: string | null; legs: unknown; inverted?: boolean | null }, existing: boolean) =>
+  json(200, { verdict: "basket", id: d.id, summary: d.summary, legs: d.legs, inverted: d.inverted === true, existing });
 
 /**
  * A bot's take → the take builder's basket, saved as a draft → { verdict: "basket", id, summary,
- * legs } or { verdict: "no_clean_exposure", reason }. The builder runs here, with this project's
- * SECURITIES_INDEX_SECRET, so the bots hold only the bot secret. The same origin_ref returns the
- * same draft without building again.
+ * legs, inverted } or { verdict: "no_clean_exposure", reason }. The builder runs here, with this
+ * project's SECURITIES_INDEX_SECRET, so the bots hold only the bot secret. The same origin_ref
+ * returns the same draft without building again.
  */
 async function buildDraft(b: Record<string, unknown>) {
   const claim = str(b.claim, 140).replace(/\s+/g, " ");
@@ -220,7 +223,7 @@ async function buildDraft(b: Record<string, unknown>) {
   // The same basket for another asker: no second build.
   if (typeof b.copy_of === "string" && DRAFT_ID_RE.test(b.copy_of)) {
     const { data: from, error } = await db.from("take_drafts")
-      .select("claim, risk, horizon, legs, summary, source_url, source_label, source_kind").eq("id", b.copy_of).maybeSingle();
+      .select("claim, risk, horizon, legs, summary, inverted, source_url, source_label, source_kind").eq("id", b.copy_of).maybeSingle();
     dbCheck(error);
     if (!from) throw new HttpError(404, "no_such_draft");
     return saveDraft({ ...from, origin, context: str(b.context, 80) || null, origin_ref: ref, for_x: forX }, ref, origin);
@@ -240,7 +243,7 @@ async function buildDraft(b: Record<string, unknown>) {
     signal: AbortSignal.timeout(35_000),
   });
   if (!r.ok) throw new Error(`take-builder ${r.status}`);
-  const built = await r.json() as { verdict: string; summary?: string; reason?: string | null; legs?: BuiltLeg[] };
+  const built = await r.json() as { verdict: string; summary?: string; reason?: string | null; legs?: BuiltLeg[]; inverted?: boolean };
   const legs = (built.legs ?? []).filter((l) => l && typeof l.name === "string").slice(0, 10);
   if (built.verdict !== "basket" || !legs.length) {
     return json(200, { verdict: "no_clean_exposure", reason: built.reason || "Nothing you can buy tracks this closely enough yet." });
@@ -249,6 +252,8 @@ async function buildDraft(b: Record<string, unknown>) {
   const row = {
     claim, risk, horizon: LEGACY_HORIZON.key, legs, origin,
     summary: str(built.summary, 400) || null,
+    // The builder read it as a bet against the basket: posting it fades every leg.
+    inverted: built.inverted === true,
     context: str(b.context, 80) || null,
     origin_ref: ref,
     for_x: forX,
@@ -260,11 +265,15 @@ async function buildDraft(b: Record<string, unknown>) {
 }
 
 /** Inserts a draft under a fresh id (retrying a taken one); a racing retry of the same ref returns the winner. */
-async function saveDraft(row: Record<string, unknown> & { summary: string | null; legs: unknown }, ref: string | null, origin: string) {
+async function saveDraft(
+  row: Record<string, unknown> & { summary: string | null; legs: unknown; inverted?: boolean | null },
+  ref: string | null,
+  origin: string,
+) {
   for (let i = 0; i < 3; i++) {
     const id = draftId();
     const { error } = await db.from("take_drafts").insert({ id, ...row });
-    if (!error) return drafted({ id, summary: row.summary, legs: row.legs }, false);
+    if (!error) return drafted({ id, summary: row.summary, legs: row.legs, inverted: row.inverted }, false);
     if (error.code !== "23505") dbCheck(error);
     // A taken id (or a racing retry of the same ref): try again, or return the winner.
     if (ref) {
@@ -283,7 +292,7 @@ async function myDrafts(req: Request) {
   if (!x) return json(200, { x: null, drafts: [] });
   const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await db.from("take_drafts")
-    .select("id, claim, legs, context, created_at")
+    .select("id, claim, legs, inverted, context, created_at")
     .eq("for_x", x).is("take_id", null).gte("created_at", since)
     .order("created_at", { ascending: false }).limit(10);
   dbCheck(error);

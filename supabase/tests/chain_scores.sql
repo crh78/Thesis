@@ -1,5 +1,5 @@
--- Checks chain_positions and the chain leaderboard (migrations/*_chain_scores.sql), and partial
--- sales in them (migrations/*_partial_sales.sql).
+-- Checks chain_positions and the chain leaderboard (migrations/*_chain_scores.sql), partial
+-- sales in them (migrations/*_partial_sales.sql), and inverted takes (migrations/*_inverted_takes.sql).
 -- Run against a scratch database with the migrations applied (it rolls back):
 --   psql "$SCRATCH_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/chain_scores.sql
 -- Each check raises if it fails. Events are shaped like functions/quicknode-stream sends them.
@@ -315,6 +315,54 @@ begin
      or exists (select 1 from public.chain_position_parts where position = 'P_P1') then
     raise exception 'reused address keeps old partial sales';
   end if;
+
+  -- Inverted takes (migrations/*_inverted_takes.sql). Winner posts T5, inverted: their buy-in is a
+  -- fade. Backer agrees ($100 on-chain fade at +10%, $10): it counts toward what Winner made for
+  -- backers, not on the faders board. Fader disagrees ($20 on-chain back at +20%, $4): it counts
+  -- as a fade. A wallet with no profile disagrees too ($50 back, $-5): not a backer.
+  perform public.ingest_chain_events('solana-mainnet-fork', jsonb_build_array(
+    jsonb_build_object('signature','v1','ordinal',0,'slot',60,'block_time',t0,'name','takeCreated',
+      'data', jsonb_build_object('take','T5','author','W_WIN','inverted',true)),
+    jsonb_build_object('signature','v1','ordinal',1,'slot',60,'block_time',t0,'name','positionOpened',
+      'data', jsonb_build_object('take','T5','position','P_V0','owner','W_WIN','side','fade','stake','10000000','scored',true)),
+    jsonb_build_object('signature','v2','ordinal',0,'slot',61,'block_time',t0,'name','positionOpened',
+      'data', jsonb_build_object('take','T5','position','P_V1','owner','W_BACK','side','fade','stake','100000000','scored',true)),
+    jsonb_build_object('signature','v3','ordinal',0,'slot',62,'block_time',t0,'name','positionSettled',
+      'data', jsonb_build_object('take','T5','position','P_V1','owner','W_BACK','side','fade','returnBps','1000','pnl','10000000','scored',true,'exited',true)),
+    jsonb_build_object('signature','v4','ordinal',0,'slot',63,'block_time',t0,'name','positionOpened',
+      'data', jsonb_build_object('take','T5','position','P_V2','owner','W_FADE','side','back','stake','20000000','scored',true)),
+    jsonb_build_object('signature','v5','ordinal',0,'slot',64,'block_time',t0,'name','positionSettled',
+      'data', jsonb_build_object('take','T5','position','P_V2','owner','W_FADE','side','back','returnBps','2000','pnl','4000000','scored',true,'exited',true)),
+    jsonb_build_object('signature','v6','ordinal',0,'slot',65,'block_time',t0,'name','positionOpened',
+      'data', jsonb_build_object('take','T5','position','P_V3','owner','W_ANON','side','back','stake','50000000','scored',true)),
+    jsonb_build_object('signature','v7','ordinal',0,'slot',66,'block_time',t0,'name','positionSettled',
+      'data', jsonb_build_object('take','T5','position','P_V3','owner','W_ANON','side','back','returnBps','-1000','pnl','-5000000','scored',true,'exited',true))));
+  if (select side from public.chain_positions where address = 'P_V1') <> 'fade' then raise exception 'positions keep their on-chain side'; end if;
+  -- Winner's backers: $550 at $+45 before, plus Backer's agreeing $100 at $+10; still two wallets.
+  select * into s from public.chain_backer_stats('solana-mainnet-fork') where author = 'W_WIN';
+  if (s.backer_stake, s.backer_pnl, s.backers) is distinct from (650000000::numeric, 55000000::numeric, 2::bigint) then
+    raise exception 'an inverted take''s backers are who agreed (on-chain fades): %', row_to_json(s);
+  end if;
+  if (select (made, pct) from public.chain_backers_made('solana-mainnet-fork', 'W_WIN')) is distinct from (55.00::numeric, 8.4615::numeric) then
+    raise exception 'chain_backers_made on an inverted take: %', (select row_to_json(m) from public.chain_backers_made('solana-mainnet-fork', 'W_WIN') m);
+  end if;
+  -- Fader: $90 at $+42 before, plus the disagreeing $20 back at $+4; three positions.
+  select * into s from public.chain_fader_stats('solana-mainnet-fork') where owner = 'W_FADE';
+  if (s.fade_stake, s.fade_pnl, s.fades) is distinct from (110000000::numeric, 46000000::numeric, 3::bigint) then
+    raise exception 'an inverted take''s faders are who disagreed (on-chain backs): %', row_to_json(s);
+  end if;
+  if exists (select 1 from public.chain_fader_stats('solana-mainnet-fork') where owner in ('W_BACK', 'W_WIN')) then
+    raise exception 'agreeing with an inverted take (or posting it) isn''t a fade';
+  end if;
+  set local role anon;
+  perform set_config('request.headers', '{"x-thesis-network":"solana-mainnet-fork"}', true);
+  j := public.leaderboard('all', 100, 'faders');
+  if (select string_agg(x -> 'person' ->> 'handle', ',' order by o) from jsonb_array_elements(j) with ordinality y(x, o)) <> 'fader,loser'
+     or (select (x ->> 'cash')::numeric from jsonb_array_elements(j) x where x -> 'person' ->> 'handle' = 'fader') <> 46 then
+    raise exception 'the faders board on an inverted take: %', j;
+  end if;
+  perform set_config('request.headers', '{}', true);
+  reset role;
   raise notice 'chain_scores: all checks passed';
 end $$;
 rollback;

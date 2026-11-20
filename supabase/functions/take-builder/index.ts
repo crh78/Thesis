@@ -8,6 +8,8 @@
 //                                                      make the basket exactly those)
 //   POST { ..., mode: "edit", legs: [{ id, weight, why, side? }], ask: "add NVDA" }
 //                                                      change the basket the way the ask says
+//   inverted: true on an edit or risk change keeps an inverted basket inverted (send back what the
+//   build returned).
 //   POST { ..., mode: "risk", legs: [...] }            new risk, same picks: swaps only the cash
 //                                                      (low) or leveraged (high) pick, no model call
 //   legs[].leverage: 1, or for a perp the leverage chosen for it (by the model from the risk and
@@ -15,7 +17,10 @@
 //   There's no horizon: a take runs until its author sells their buy-in, or 365 days at most. An
 //   old client's horizon is ignored.
 //   header privy-token: <jwt>
-//   → { verdict: "basket"|"no_clean_exposure", summary, reason, legs: [...], note, ms, picker }
+//   → { verdict: "basket"|"no_clean_exposure", summary, reason, legs: [...], note, ms, picker, inverted }
+//     inverted: the take bets against this basket ("crypto sucks" over BTC/ETH/SOL perps): everyone who
+//     agrees, its author included, is short it (on-chain the author's buy-in is a fade). Every leg can
+//     be shorted (canShort).
 //     note: why an edit didn't do what was asked ("NVIDIA isn't available in the US yet.")
 //
 // How (replaces the gte-small embedding search):
@@ -624,15 +629,19 @@ const RISK_RULES: Record<string, string> = {
 type Picked = {
   verdict: "basket" | "no_clean_exposure";
   bearish?: boolean;
+  /** The basket is what a bearish take is against, held short by everyone who agrees (see `Take::inverted`). */
+  inverted?: boolean;
   summary: string;
   reason: string;
   picks: { n: number; name: string; weight: number; side: "yes" | "no"; gains_if_right?: boolean; why: string; leverage: number }[];
 };
 
 const PICK_SCHEMA = {
-  type: "object", additionalProperties: false, required: ["verdict", "bearish", "summary", "reason", "picks"],
+  type: "object", additionalProperties: false, required: ["verdict", "bearish", "inverted", "summary", "reason", "picks"],
   properties: {
     verdict: { type: "string", enum: ["basket", "no_clean_exposure"] },
+    /** A bearish take built as the basket it's against, held short (on-chain: the author fades it). */
+    inverted: { type: "boolean" },
     /** The take (or the post it copies) expects what it names to fall: its $cashtags aren't buys. */
     bearish: { type: "boolean" },
     summary: { type: "string" },
@@ -689,11 +698,16 @@ const BUILD_SYSTEM = [
   "(the S&P 500 isn't a utilities, airline, bank or Brazil bet). The S&P 500 and Nasdaq are for takes on the US market or",
   "economy as a whole. When nothing listed is in it, the answer is no_clean_exposure: an honest \"nothing fits yet\" beats",
   "a basket that doesn't move with the take.",
-  "Direction: every pick must gain if the take is right. A bearish take (a company, sector or the economy slumps, is in",
-  "trouble, loses customers, crashes, is a bubble) never gets that company, its rivals or the broad market bought as a",
-  "stand-in: use no on a market about it or an inverse fund on it (an inverse Nasdaq fund for a tech or market crash).",
-  "With neither, no_clean_exposure. A company whose own product causes the slump can go in (a GLP-1 drug maker when",
-  "food sales fall).",
+  "Direction: a bullish take (inverted: false) holds what gains if it's right. A bearish take (a company, coin, sector",
+  "or market slumps, is in trouble, crashes, is a bubble, sucks) is built inverted: inverted = true, and the basket is",
+  "what the take is against, held short: \"crypto sucks\": BTC, ETH, SOL; \"Tesla will crash\": Tesla; \"big tech is a",
+  "bubble\": NVIDIA, Microsoft, Meta. Everyone who agrees with an inverted take is short that basket, so in it every",
+  "pick is something that falls if the take is right (gains_if_right false), and only things that can be shorted: perps",
+  "(any coin, and companies with a perp, at any risk, leverage 1 below high risk), stocks that have a perp, and",
+  "prediction markets (pick the outcome the take is against, e.g. \"BTC above $70,000\"; it's held as No). Never cash or",
+  "cards in an inverted basket. Never mix: an inverted basket holds only what the take is against. If nothing it's against",
+  "can be shorted (a restaurant stock with no perp), no_clean_exposure. A company whose own product causes the slump",
+  "makes a bullish take instead (\"GLP-1s eat the food industry\": Eli Lilly, inverted false).",
   "A perp is how you hold a company or a coin that has no stock listed (TSMC, Netflix, Oracle, Marvell, ASML; BTC,",
   "ETH, SOL and every other coin): at low and medium risk too, at leverage 1, for the take's own names and its direct",
   "winners alike. A crypto take always has these to hold.",
@@ -728,13 +742,15 @@ const BUILD_SYSTEM = [
   "Of the markets that fit, prefer the one on the take's own timeframe when it names one (\"by December\"), and one",
   "that resolves by ends_by (a year from today, the longest a take runs). One resolving after ends_by is allowed:",
   "the take exits it at its price then.",
-  "side: yes for everything; for a prediction market, yes or no, whichever the take implies. Everything is bought: to",
-  "bet against something, use no on its market or an inverse fund, never its stock, and never call a pick a short.",
+  "side: yes for everything; for a prediction market, yes or no, whichever the take implies (in an inverted basket,",
+  "yes on the outcome the take is against). Never call a pick a short in a why: say what it is; the basket says the rest.",
   "leverage: 1 for everything except a perp.",
   "bearish: true when the take, or the post it copies, expects the companies or things it names to fall (\"foot",
   "traffic at $MCD is falling\"); a post's $cashtags are then what it's against, never what to hold.",
-  "gains_if_right: true only when that pick, on its side, goes up if the take comes true. A pick that would fall (a",
-  "restaurant's stock on \"restaurants are in trouble\") is false, and false picks are thrown out: leave them out.",
+  "gains_if_right: true when that pick, on its side, goes up if the take comes true. In a bullish basket false picks",
+  "are thrown out; in an inverted basket true picks are (it's short them), so every inverted pick is false.",
+  "summary for an inverted take says what has to fall (\"BTC, ETH and SOL fall\"); why says how the pick ties to the take.",
+  "Never say \"inverted\" in summary, reason or why.",
   "Cards (only when you have the cards tool): a collectible card is a pick when it moves with the take: the take is",
   "about collectibles, or a card tied to it (a Pok\u00e9mon card on a Nintendo take, a player's rookie card on their",
   "season). Search cards for it; how many cards and how much of the basket follows `cards` in the input.",
@@ -1056,6 +1072,11 @@ const EDIT_SYSTEM = [
   "the others; at 5 picks, the smallest goes. A company with \"market\" in its name is never one. Only when no market",
   "is about the take's assets or topic at all, return the basket unchanged and reason = \"There's no prediction",
   "market on this yet.\"",
+  "inverted (when present): the take bets against this basket and everyone who agrees is short it. Anything added",
+  "must be something the take is against, that can be shorted (a perp, a stock with a perp, a prediction market on",
+  "the outcome the take is against); never cash or cards. If the change asks for something else, return the basket",
+  "unchanged and say why in reason, in plain words (\"This take bets against crypto, so cash can't go in.\"); never say",
+  "\"inverted\" to the user. A perp's leverage is 1 below high risk.",
   "Plain words for a non-investor; never mention tokens, chains, USDC or wallets.",
 ].join(" ");
 
@@ -1083,11 +1104,12 @@ async function editByRules(current: Pick[], ask: string, usPerson: boolean): Pro
   return null;
 }
 
-async function edit(claim: string, risk: string, current: Pick[], ask: string, usPerson: boolean, source: Source | null, cardTake = false) {
+async function edit(claim: string, risk: string, current: Pick[], ask: string, usPerson: boolean, source: Source | null, cardTake = false, inverted = false) {
   const [index, blocked] = await Promise.all([indexFor(), blockedBy(ask, current.map((p) => p.s), usPerson)]);
   const { shown, listed } = shownFor(index, usPerson);
   const input = {
     take: claim, risk, ends_by: endsBy(), change: ask, cards: cardRule(cardTake),
+    ...(inverted ? { inverted: true } : {}),
     current: current.map((p) => ({
       n: shown.add(rowOf(p.s)), name: displayName(p.s.name), kind: p.s.kind, weight: p.weight, why: p.why,
       ...(p.s.kind === "prediction" ? { side: p.side } : {}),
@@ -1109,18 +1131,23 @@ async function edit(claim: string, risk: string, current: Pick[], ask: string, u
     // Asked for prediction markets: what's added has to be one (Robinhood Markets isn't).
     const held = new Set(current.map((p) => p.s.id));
     const wantsMarkets = /\bpredictions?\b|\bprediction markets?\b|\bodds\b|\bpolymarket\b|\bkalshi\b/i.test(ask);
-    const allowed = (s: Security) => !wantsMarkets || held.has(s.id) || s.kind === "prediction";
+    // Inverted, the basket is held short: only shortable things can join it.
+    const allowed = (s: Security) => (!wantsMarkets || held.has(s.id) || s.kind === "prediction") &&
+      (!inverted || held.has(s.id) || (s.can_short && s.kind !== "yield" && s.kind !== "card"));
     // Over the leg cap, what the change added stays and the smallest current picks go (the first
     // five in the model's order were the old basket, so "add markets" added nothing).
     const all = fromModel(agent.out, shown, rows, Infinity, whys, (s) => held.has(s.id) || (allowed(s) && (risk !== "low" || s.kind !== "card")));
     const cut = new Set(all.filter((p) => held.has(p.s.id)).sort((a, b) => a.weight - b.weight).slice(0, Math.max(0, all.length - MAX_LEGS)).map((p) => p.s.id));
-    const picks = normalize(capCards(all.filter((p) => !cut.has(p.s.id)).slice(0, MAX_LEGS), cardTake));
+    const picks = normalize(capCards(all.filter((p) => !cut.has(p.s.id)).slice(0, MAX_LEGS), cardTake))
+      // Inverted, a perp is how a pick is held, so below high risk it's held at 1x.
+      .map((p) => (inverted && p.s.kind === "perp" && risk !== "high" ? { ...p, leverage: 1 } : p));
     if (picks.length) {
       const unchanged = picks.length === current.length && picks.every((p, i) => p.s.id === current[i].s.id && Math.abs(p.weight - current[i].weight) < 1);
       return { picks, summary: agent.out.summary, note: blockedNote ?? (unchanged ? (agent.out.reason || "Nothing to change there.") : (agent.out.reason || null)), picker: agent.model, agent };
     }
   }
-  const ruled = await editByRules(current, ask, usPerson);
+  // No model, inverted: only removals by name (an add might not be shortable).
+  const ruled = inverted && /^(?:add|include|plus)\s/i.test(ask.trim()) ? null : await editByRules(current, ask, usPerson);
   return ruled
     ? { picks: ruled, summary: null, note: null, picker: "rules", agent }
     : { picks: current, summary: null, note: blockedNote ?? "Couldn't make that change. Try saying it another way.", picker: "rules", agent };
@@ -1193,7 +1220,7 @@ Deno.serve(async (req) => {
   const did = admin ? null : await privyDid(req);
   if (!admin && !did) return json(401, { error: "invalid_privy_token" });
 
-  let body: { claim?: string; risk?: string; mode?: string; legs?: unknown; ask?: string; include?: unknown; source?: { text?: unknown; label?: unknown; kind?: unknown }; system?: unknown; variant?: unknown };
+  let body: { claim?: string; risk?: string; mode?: string; legs?: unknown; ask?: string; include?: unknown; source?: { text?: unknown; label?: unknown; kind?: unknown }; system?: unknown; variant?: unknown; inverted?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -1232,15 +1259,20 @@ Deno.serve(async (req) => {
     if (!picks.length) return json(400, { error: "invalid_legs" });
     lap("load");
 
+    // An inverted basket is held short: a risk change keeps its picks (no cash, no stock swaps,
+    // which a fade couldn't hold) and only moves its perps' leverage.
+    const inverted = body.inverted === true;
     if (mode === "risk") {
-      const next = await adjustRisk(picks, risk, usPerson, cardTake);
+      const next = inverted
+        ? picks.map((p) => (p.s.kind === "perp" ? { ...p, leverage: risk === "high" ? ruleLeverage(p.s) : 1 } : p))
+        : await adjustRisk(picks, risk, usPerson, cardTake);
       lap("risk");
-      return json(200, { verdict: "basket", summary: null, reason: null, legs: await legsJSON(finalize(next, cardTake)), note: null, ms, picker: "rules" });
+      return json(200, { verdict: "basket", summary: null, reason: null, legs: await legsJSON(finalize(next, cardTake)), note: null, ms, picker: "rules", inverted });
     }
-    const out = await edit(claim, risk, normalize(picks), ask, usPerson, source, cardTake);
+    const out = await edit(claim, risk, normalize(picks), ask, usPerson, source, cardTake, inverted);
     lap("edit");
     return json(200, {
-      verdict: "basket", summary: out.summary, reason: null, legs: await legsJSON(finalize(out.picks, cardTake)), note: out.note, ms, picker: out.picker,
+      verdict: "basket", summary: out.summary, reason: null, legs: await legsJSON(finalize(out.picks, cardTake)), note: out.note, ms, picker: out.picker, inverted,
       ...(admin ? { debug: { rounds: out.agent?.rounds ?? null, searches: out.agent?.calls ?? [], raw: out.agent?.out ?? null } } : {}),
     });
   }
@@ -1283,8 +1315,13 @@ Deno.serve(async (req) => {
     source && source.kind !== "article" ? named(index, source.text, usPerson, 24, source.kind === "post") : Promise.resolve([] as Security[]),
   ]);
   lap("pick");
-  // A post against what it tags ("$MCD $WEN traffic is falling") isn't copied as buys of them.
-  const againstTags = source?.kind === "post" && agent?.out?.bearish === true;
+  // An inverted basket is what a bearish take is against, held short by everyone who agrees (the
+  // author's buy-in fades it on-chain). Only shortable things go in: perps, predictions, stocks
+  // with a perp; never cash or cards.
+  const inverted = agent?.out?.verdict === "basket" && agent.out.inverted === true;
+  // A post against what it tags ("$MCD $WEN traffic is falling") isn't copied as buys of them;
+  // inverted, its tags are the basket it shorts.
+  const againstTags = source?.kind === "post" && agent?.out?.bearish === true && !inverted;
   const copyKeys = copied.length >= 2 && !againstTags ? new Set(copied.map(key)) : null;
   // Holdings are positions someone holds: copied as they are. Anything else drops a pick that falls
   // if the take is right.
@@ -1299,10 +1336,13 @@ Deno.serve(async (req) => {
   // listed), at 1x, the same bet its stock would be. Without this the model's main pick was dropped
   // and its filler (cash, an off-topic market) became the whole basket.
   const onlyWay = (s: Security) => s.kind === "perp" && risk !== "high" && !spotKeys.has(key(s));
-  const allowed = (s: Security) => (RISK_KINDS[risk](s.kind) || onlyWay(s)) && (!copyKeys || copyKeys.has(key(s)) || s.kind === "yield");
+  const shortable = (s: Security) => s.can_short && s.kind !== "yield" && s.kind !== "card";
+  const allowed = (s: Security) => inverted
+    ? shortable(s) && (s.kind === "perp" || RISK_KINDS[risk](s.kind)) && (!copyKeys || copyKeys.has(key(s)))
+    : (RISK_KINDS[risk](s.kind) || onlyWay(s)) && (!copyKeys || copyKeys.has(key(s)) || s.kind === "yield");
   const debug = admin ? debugOf(agent, shown, copied) : {};
   const noExposure = (reason: string, summary = claim) =>
-    json(200, { verdict: "no_clean_exposure", summary, reason, legs: [], note: null, ms, ...debug });
+    json(200, { verdict: "no_clean_exposure", summary, reason, legs: [], note: null, ms, inverted: false, ...debug });
 
   const out = agent?.out;
   let picks: Pick[] = [];
@@ -1311,16 +1351,19 @@ Deno.serve(async (req) => {
   if (out?.verdict === "no_clean_exposure" && !must.length && !copyKeys) {
     return noExposure(out.reason || "Nothing you can buy tracks this closely enough yet.", out.summary || claim);
   }
-  // A pick the model itself says falls when the take is right moves against it (a long on a bearish
-  // take). Copied holdings are exempt. If that leaves nothing, nothing fits.
-  if (out?.verdict === "basket" && !holdingsCopy && out.picks.length && out.picks.every((p) => p.gains_if_right === false) && !must.length) {
-    return noExposure("Nothing you can buy goes up if this is right.", out.summary || claim);
+  // A pick that moves against the take is dropped: in a bullish basket one the model says falls if
+  // the take is right (a long on a bearish take); in an inverted one, held short, one that rises.
+  // Copied holdings are exempt. If that leaves nothing, nothing fits.
+  const against = (p: Picked["picks"][number]) => (inverted ? p.gains_if_right === true : p.gains_if_right === false);
+  if (out?.verdict === "basket" && !holdingsCopy && out.picks.length && out.picks.every(against) && !must.length) {
+    return noExposure(inverted ? "Nothing this is against can be bet against yet." : "Nothing you can buy goes up if this is right.", out.summary || claim);
   }
   if (out?.verdict === "basket") {
-    const kept = holdingsCopy ? out : { ...out, picks: out.picks.filter((p) => p.gains_if_right !== false) };
+    const kept = holdingsCopy ? out : { ...out, picks: out.picks.filter((p) => !against(p)) };
     picks = fromModel(kept, shown, await rowsFor(out, shown, [...must, ...found.values()]), copyKeys ? MAX_LEGS : 5, undefined, allowed, new Set(must.map((s) => s.id)));
     const held = new Set(picks.filter((p) => p.s.kind !== "perp").map((p) => key(p.s)));
-    picks = normalize(capCards(picks.filter((p) => p.s.kind !== "perp" || held.has(key(p.s)) || perpNamed(p.s) || must.some((m) => m.id === p.s.id)), cardTake))
+    // Inverted, perps are how the basket is held, so any shortable one stays.
+    picks = normalize(capCards(picks.filter((p) => inverted || p.s.kind !== "perp" || held.has(key(p.s)) || perpNamed(p.s) || must.some((m) => m.id === p.s.id)), cardTake))
       .map((p) => (p.s.kind === "perp" && risk !== "high" ? { ...p, leverage: 1 } : p));
     summary = out.summary || claim;
     // Nothing but cash left (the picks that were the take didn't hold up): that's not a basket for it.
@@ -1341,13 +1384,16 @@ Deno.serve(async (req) => {
     picks = copyKeys ? equalWeights(copied.slice(0, MAX_LEGS)) : await fromRules(index, words, risk, usPerson);
     if (!picks.length && !must.length) return noExposure("Couldn't build this one just now. Try again in a moment.");
   }
-  // The asset you started from is always in, at a fair share if the model left it out.
+  // The asset you started from is always in, at a fair share if the model left it out (not in an
+  // inverted basket when it can't be shorted).
   for (const s of must) {
-    if (picks.some((p) => p.s.id === s.id)) continue;
+    if (picks.some((p) => p.s.id === s.id) || (inverted && !shortable(s))) continue;
     picks = normalize([...picks.map((p) => ({ ...p, weight: p.weight * 0.8 })),
       { s, weight: picks.length ? 20 : 100, why: firstSentence(s.description) ?? "", role: roleFor(s, false), side: "long", purity: "partial", leverage: ruleLeverage(s) }]);
   }
   const note = included.length > must.length ? "That one isn't available in the US yet, so it's not in the basket." : null;
 
-  return json(200, { verdict: "basket", summary, reason: null, legs: await legsJSON(finalize(picks, cardTake)), note, ms, picker, ...debug });
+  // The rules fallback never inverts: it buys what the take names.
+  const isInverted = inverted && picker !== "rules";
+  return json(200, { verdict: "basket", summary, reason: null, legs: await legsJSON(finalize(picks, cardTake)), note, ms, picker, inverted: isInverted, ...debug });
 });

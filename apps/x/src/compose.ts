@@ -28,15 +28,19 @@ export const xLength = (s: string) => s.replace(/https?:\/\/\S+/g, "x".repeat(UR
 
 type Pick = { name: string; weight: number };
 
-/** "Cameco 40%, Vistra 35%, Uranium ETF 25%", as many as fit, then "+2 more". */
-function pickLine(picks: Pick[], room: number): string {
+/**
+ * "Cameco 40%, Vistra 35%, Uranium ETF 25%", as many as fit, then "+2 more". A take that bets
+ * against its picks (`inverted`: agreeing is short every one) reads "Betting against: Bitcoin 40%, …".
+ */
+function pickLine(picks: Pick[], room: number, inverted = false): string {
+  const lead = inverted ? "Betting against: " : "";
   const parts = picks.map((p) => `${p.name.replace(/[@#]/g, "").slice(0, 28)} ${Math.round(p.weight)}%`);
   for (let n = Math.min(parts.length, 4); n >= 1; n--) {
     const more = parts.length - n;
-    const line = parts.slice(0, n).join(", ") + (more ? `, +${more} more` : "");
+    const line = lead + parts.slice(0, n).join(", ") + (more ? `, +${more} more` : "");
     if (line.length <= room) return line;
   }
-  return `${parts.length} picks`;
+  return inverted ? `Betting against ${parts.length} picks` : `${parts.length} picks`;
 }
 
 /**
@@ -45,12 +49,12 @@ function pickLine(picks: Pick[], room: number): string {
  */
 export const TAKE_TAIL = "Saved for you: sign in with X at the link in our bio to post it as your take.";
 
-export function takeReply(claim: string, picks: Pick[]): string | null {
+export function takeReply(claim: string, picks: Pick[], inverted = false): string | null {
   if (picks.some((p) => NEVER.test(p.name))) return null;
   const head = `${claim}.`;
   const tail = TAKE_TAIL;
   const room = MAX - xLength(head) - xLength(tail) - 4;
-  const text = cleanReply(`${head}\n\n${pickLine(picks, room)}\n\n${tail}`);
+  const text = cleanReply(`${head}\n\n${pickLine(picks, room, inverted)}\n\n${tail}`);
   return xLength(text) <= MAX ? text : null;
 }
 
@@ -88,13 +92,13 @@ export function tradeIntent(text: string): Intent | null {
 const dollars = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
 export const BIO = "the link in our bio";
 
-/** A trade went through: it's the replier's take now (posted with their buy-in). */
-export function tradeReply(claim: string, picks: { name: string; weight: number }[], usd: number): string | null {
+/** A trade went through: it's the replier's take now (posted with their buy-in). `inverted`: it bets against its picks. */
+export function tradeReply(claim: string, picks: { name: string; weight: number }[], usd: number, inverted = false): string | null {
   if (picks.some((p) => NEVER.test(p.name))) return null;
   const head = `You're in: ${dollars(usd)} on "${claim}".`;
   const tail = `It's your take on Thesis now. See it at ${BIO}.`;
   const room = MAX - xLength(head) - xLength(tail) - 4;
-  const text = cleanReply(`${head}\n\n${pickLine(picks, room)}\n\n${tail}`);
+  const text = cleanReply(`${head}\n\n${pickLine(picks, room, inverted)}\n\n${tail}`);
   return xLength(text) <= MAX ? text : null;
 }
 

@@ -726,6 +726,9 @@ struct ForkReceipt: Decodable, Equatable {
     let fadeBlocked: String?
     /// Set when a take a real user posted isn't on this fork (it was reset since): why it can't be traded.
     let missing: String?
+    /// The take bets against its basket: a back (agree) is short every leg, a fade long. Every
+    /// side above is already take-relative. Missing on older fork APIs.
+    var inverted: Bool? = nil
 
     var leftOut: [Leg] { legs.filter { !$0.tradable } }
 }

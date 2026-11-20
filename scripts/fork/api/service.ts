@@ -28,7 +28,9 @@ import {
   TAKE_LIFETIME_SECS,
   THESIS_COMPUTE_UNITS,
   USDC_MINT_MAINNET,
+  agreeSide,
   backIx,
+  chainSide,
   cancelTradeIx,
   fadeIx,
   badgeMintAddress,
@@ -53,6 +55,7 @@ import {
 } from "@thesis/chain";
 import { cardLeg, underlyingIdHex, type BankState } from "@thesis/venues/bank";
 import { cardIdHex } from "@thesis/venues/collector-crypt";
+import { otherSide } from "@thesis/venues/gemini";
 import { jupiterBuy, jupiterLendRedeem, type JupiterBuy, type VenueLeg } from "@thesis/venues/jupiter";
 import { PERP_ASSET_MAP, PHOENIX_LEG_CU, PHOENIX_PROGRAM_ID } from "@thesis/venues/phoenix";
 import {
@@ -65,6 +68,9 @@ import {
   TAKE_ENDED,
   TAKE_MISSING,
   FADE_NOTHING,
+  AGAINST_INVERTED_NOTHING,
+  INVERTED_NOTHING,
+  INVERTED_NOT_FADEABLE,
   MIRROR_VERSION,
   SELLABLE,
   USD,
@@ -91,7 +97,7 @@ import {
 import { CreatorFees } from "./creator-fees.ts";
 import { dailyDigests } from "./digests.ts";
 import { PortfolioHistory } from "./history.ts";
-import { contractResolver, escrowedKind, mapLegs, nameResolver, onChainLegs, perpResolver, sameLegs, type AppLeg, type ContractResolver, type MappedLeg, type NameResolver, type PerpResolver } from "./legs.ts";
+import { contractResolver, escrowedKind, invertible, mapLegs, nameResolver, onChainLegs, perpResolver, sameLegs, type AppLeg, type ContractResolver, type MappedLeg, type NameResolver, type PerpResolver } from "./legs.ts";
 import { PhoenixDesk, type PhoenixClose } from "./phoenix.ts";
 import { withPhoenixLock } from "./phoenix-lock.ts";
 import { LANE, newUse, type JupiterUse, type Lane } from "./guard.ts";
@@ -125,7 +131,10 @@ export { digestFor } from "./digests.ts";
 /** A create_take, back or fade as built: what a split trade that stops partway needs (api/split.ts). */
 type TradeContext = {
   takeId: string;
+  /** The on-chain side. */
   side: "back" | "fade";
+  /** The take is inverted (its on-chain fade agrees with it): turns `side` take-relative for clients. */
+  inverted?: boolean;
   usd: number;
   included: number[];
   /** The receipt as built, before the composer appends the last bracket's outputs. */
@@ -475,7 +484,7 @@ export class ForkService {
     this.#router.phoenix = this.#phoenix;
     // The chart doesn't show badges: its snapshots skip reading them.
     this.#history = new PortfolioHistory(this.#store, o.connection, (addr, opts) => this.portfolio(addr, { ...opts, badges: false }), (addr) => this.#holds(addr));
-    this.#wallets = new Wallets(o, this.#store, this.#program, (addr) => this.#history.snapshot(addr));
+    this.#wallets = new Wallets(o, this.#store, this.#program, (addr) => this.#history.snapshot(addr), (take) => this.#isInverted(take));
     this.#fees = new CreatorFees(
       o,
       this.#program,
@@ -571,7 +580,7 @@ export class ForkService {
     const app = await appP;
     let legs = this.#mapLegs(app.legs);
     let onChainTake = takeP ? await takeP : null;
-    if (onChainTake && !sameLegs(onChainTake.legs, legs)) {
+    if (onChainTake && !sameLegs(onChainTake.legs, legs, { onChain: onChainTake.inverted, app: app.inverted })) {
       // A demo take whose legs changed in the app is mirrored again on its next trade; a take
       // its author posted keeps what's on-chain, and legs that no longer match can't be traded.
       if (mirror?.demoAuthorKey) onChainTake = null;
@@ -583,33 +592,46 @@ export class ForkService {
       const checked = Promise.all([this.#router.checkRoutes(legs).catch(() => {}), this.#router.refreshMarkets(legs)]);
       await Promise.race([checked, new Promise((r) => setTimeout(r, ROUTE_CHECK_WAIT_MS).unref())]);
     }
-    const leftOut = legs.map((l) => this.#router.leftOut(l));
+    // Sides here are take-relative: "back" agrees with the take, "fade" disagrees. An inverted take
+    // (on-chain, its TakeAccount says; before that, the app take) agrees with an on-chain fade.
+    const inverted = Boolean((onChainTake ?? app).inverted);
+    const dir = { inverted };
+    // An on-chain back buys the legs; an on-chain fade holds the other side of prediction legs
+    // (paper) and shorts the rest on Phoenix.
+    const now = Date.now();
+    const leftOut = legs.map((l) => this.#router.leftOut(l, now, chainSide("back", dir)));
     const canBuy = leftOut.some((why) => why === null);
-    // Fades hold the other side of prediction legs (paper) and short the rest on Phoenix.
-    const fadeOut = legs.map((l) => this.#router.leftOut(l, Date.now(), "fade"));
+    const fadeOut = legs.map((l) => this.#router.leftOut(l, now, chainSide("fade", dir)));
     const fadeable = fadeOut.some((why) => why === null);
     const legView = (onChain?: TakeAccount) =>
       legs.map((l, i) => ({
         index: l.index,
         name: l.name,
         underlying: l.key,
+        /** Agreeing with the take (a back; an inverted take's on-chain fade) can hold this leg; else why not. */
         tradable: leftOut[i] === null,
         blocked: leftOut[i],
-        /** Why a fade leaves this leg out (it holds a prediction's other side, or a Phoenix short); null if it can be faded. */
+        /**
+         * Why disagreeing (a fade, which holds a prediction's other side or a Phoenix short; an
+         * inverted take's on-chain back, which buys the leg) leaves this leg out; null if it can't.
+         */
         fadeBlocked: fadeOut[i],
-        /** A perp leg: the Phoenix market a back goes long on, and its leverage. */
+        /** A perp leg: the Phoenix market an on-chain back goes long on, and its leverage. */
         perp: l.phoenix ? { symbol: l.phoenix.symbol, leverage: l.spec.leverage } : null,
-        /** The Phoenix market a fade shorts this leg on, if any. */
+        /** The Phoenix market an on-chain fade shorts this leg on, if any. */
         short: l.short?.symbol ?? null,
         /** A yield leg (Jupiter Lend): it earns interest, priced as one vault share's value, which counts in the score. */
         yield: l.how === "lend",
-        /** A prediction leg, filled on paper at Gemini's prices: the side the take holds, and its market now. */
+        /**
+         * A prediction leg, filled on paper at Gemini's prices: the side agreeing with the take holds
+         * (an inverted take's agreers hold the leg's other side), and its market now.
+         */
         prediction: l.prediction
           ? {
               instrument: l.prediction.contract.instrumentSymbol,
               event: l.prediction.contract.eventTitle,
               label: l.prediction.contract.label,
-              side: l.prediction.side,
+              side: inverted ? otherSide(l.prediction.side) : l.prediction.side,
               ask: this.#router.contract(l.prediction.contract).ask,
               bid: this.#router.contract(l.prediction.contract).bid,
               expiry: l.prediction.contract.expiry,
@@ -621,21 +643,22 @@ export class ForkService {
           : null,
         weightBps: onChain?.legs[l.index]?.weightBps ?? l.spec.weightBps,
       }));
-    // Why a fade isn't possible right now: a prediction market's other side, or no Phoenix short.
-    const fadeBlocked = fadeable ? null : legs.some((l) => l.how === "paper") ? FADE_NO_MARKET : FADE_BLOCKED;
+    // Why disagreeing isn't possible right now: a fade needs a prediction market's other side, or a
+    // Phoenix short; against an inverted take it's a back, which needs a leg it can buy.
+    const fadeBlocked = fadeable ? null : inverted ? AGAINST_INVERTED_NOTHING : legs.some((l) => l.how === "paper") ? FADE_NO_MARKET : FADE_BLOCKED;
     if (!address || !onChainTake || !positionsP) {
       // A live take a real user posted that isn't on this fork: the fork was reset since. A live take
       // can't be published again, so its author has to post a new take. A demo take is mirrored on its first trade.
       const missing = app.status !== "posting" && (!!app.author_wallet || (!!mirror && !mirror.demoAuthorKey));
-      if (missing) return { takeId, onChain: false as const, legs: legView(), canBack: false, canFade: false, fadeBlocked: TAKE_MISSING, missing: TAKE_MISSING };
-      return { takeId, onChain: false as const, legs: legView(), canBack: canBuy, canFade: fadeable, fadeBlocked };
+      if (missing) return { takeId, onChain: false as const, inverted, legs: legView(), canBack: false, canFade: false, fadeBlocked: TAKE_MISSING, missing: TAKE_MISSING };
+      return { takeId, onChain: false as const, inverted, legs: legView(), canBack: canBuy, canFade: fadeable, fadeBlocked };
     }
 
     const take = onChainTake;
     const positions = await positionsP;
     const author = positions.find((p) => p.account.owner.equals(take.author) && p.account.id.isZero());
     const mine = viewer ? positions.filter((p) => p.account.owner.toBase58() === viewer) : [];
-    // Authors can't fade their own take (the program refuses it too).
+    // Authors can't fade (disagree with) their own take (the program refuses it too).
     const viewerIsAuthor = viewer === take.author.toBase58();
     const status = takeStatusName(take);
     const open = takeOpen(take);
@@ -696,14 +719,21 @@ export class ForkService {
       horizonEnd: take.horizonEnd.toNumber(),
       /** When the author sold their buy-in (closing the take), or null. Stays set once settled. */
       closedAt,
-      backers: take.backers,
-      faders: take.faders,
-      totalBackedUsd: take.totalBacked.toNumber() / USD,
-      totalFadedUsd: take.totalFaded.toNumber() / USD,
+      /**
+       * Every side below is take-relative: backers agree with the take, faders disagree. On an
+       * inverted take (it bets against its basket) agreeing is an on-chain fade, so these are the
+       * on-chain counters swapped. Phoenix directions (long, short) stay literal.
+       */
+      inverted,
+      backers: inverted ? take.faders : take.backers,
+      faders: inverted ? take.backers : take.faders,
+      totalBackedUsd: (inverted ? take.totalFaded : take.totalBacked).toNumber() / USD,
+      totalFadedUsd: (inverted ? take.totalBacked : take.totalFaded).toNumber() / USD,
       creatorFeesUnclaimedUsd: take.creatorFeesUnclaimed.toNumber() / USD,
       /**
        * Settled: the take's result. Closed: the author's sale, once its prices are in. Open: the
-       * author's position at current prices, once entry prices are in.
+       * author's position at current prices, once entry prices are in. The author's position is on
+       * the agreeing side, so this is agreeing's return either way.
        */
       returnBps: settled ? take.resultBps.toNumber() : status === "closed" ? sold() : author ? live(author) : null,
       legs: legView(take).map((l, i) => ({
@@ -725,7 +755,8 @@ export class ForkService {
           const priced = p.account.legsMask & ((1 << take.legs.length) - 1);
           return {
             address: p.publicKey.toBase58(),
-            side: "back" in p.account.side ? "back" : "fade",
+            /** Take-relative: "back" agrees with the take (an inverted take's on-chain fade). */
+            side: chainSide("back" in p.account.side ? "back" : "fade", take),
             exited,
             canExit,
             /** The cost basis still held, after partial sales. `stakeUsd` and `costUsd` stay what was first paid. */
@@ -767,7 +798,7 @@ export class ForkService {
             pendingNote: pending.length ? pendingNote(pending, p.account.openedAt.toNumber()) : null,
           };
         })),
-        ...(viewer ? this.#settledExits(address, viewer, new Set(mine.map((p) => p.publicKey.toBase58())), minStakeUsd) : []),
+        ...(viewer ? this.#settledExits(address, viewer, new Set(mine.map((p) => p.publicKey.toBase58())), minStakeUsd, inverted) : []),
       ],
       canBack: open && canBuy,
       canFade: open && fadeable && !viewerIsAuthor,
@@ -862,6 +893,21 @@ export class ForkService {
     }).map(([id]) => id);
   }
 
+  /**
+   * Whether the take at `address` is inverted (its on-chain fade agrees with it). That never changes
+   * for an account, so each is read once; a take that isn't there reads as not inverted, unkept.
+   */
+  async #isInverted(address: PublicKey): Promise<boolean> {
+    const key = address.toBase58();
+    const known = this.#invertedTakes.get(key);
+    if (known !== undefined) return known;
+    const take = await this.#program.account.take.fetchNullable(address);
+    if (!take) return false;
+    this.#invertedTakes.set(key, Boolean(take.inverted));
+    return Boolean(take.inverted);
+  }
+  #invertedTakes = new Map<string, boolean>();
+
   async #config() {
     if (!this.#configCache || this.#configCache.at < Date.now() - 60_000) this.#configCache = { at: Date.now(), value: await fetchConfig(this.#program) };
     return this.#configCache.value;
@@ -919,21 +965,20 @@ export class ForkService {
   // --- Trades -----------------------------------------------------------------------------
 
   /**
-   * A back or a fade. A fade holds the other side of each prediction leg, filled on paper with its
-   * share escrowed, and shorts the other legs on Phoenix; legs it can't short are left out with the reason.
+   * A back or a fade, take-relative: "back" agrees with the take, "fade" disagrees. On an inverted
+   * take those are an on-chain fade and back. An on-chain fade holds the other side of each
+   * prediction leg, filled on paper with its share escrowed, and shorts the other legs on Phoenix;
+   * legs it can't short are left out with the reason.
    */
   async buildTrade(takeId: string, owner: string, side: "back" | "fade", usd: number, o: BuildOpts = {}) {
     const ownerKey = parseKey(owner);
     const t = o.timings ?? new Timings();
     return this.#timed(`${side} build ${takeId.slice(0, 8)}`, t, async () => {
-      const { address, venue, included, excluded, ix, position, feeUsd, escrowUsd } =
-        await this.#prepareBack(takeId, ownerKey, usd, this.#o.appPayer.publicKey, undefined, side, t, o.prebuild).catch((e: unknown) => {
-          if (side === "fade" && e instanceof ApiError && e.code === "nothing_tradable") throw new ApiError(409, "fade_unavailable", FADE_NOTHING);
-          throw e;
-        });
-      const receiptCu = side === "back" ? THESIS_COMPUTE_UNITS.back : THESIS_COMPUTE_UNITS.fade;
+      const { address, venue, included, excluded, ix, position, feeUsd, escrowUsd, chain, inverted } =
+        await this.#prepareBack(takeId, ownerKey, usd, this.#o.appPayer.publicKey, undefined, side, t, o.prebuild);
+      const receiptCu = chain === "back" ? THESIS_COMPUTE_UNITS.back : THESIS_COMPUTE_UNITS.fade;
       const composed = await this.#compose(venue, ix, receiptCu, ownerKey, "back", position, true, false, {
-        trade: { takeId, side, usd, included, receipt: ix, receiptCu }, quotedAt: t.quotedAt, prebuilt: o.prebuild, timings: t,
+        trade: { takeId, side: chain, ...(inverted ? { inverted } : {}), usd, included, receipt: ix, receiptCu }, quotedAt: t.quotedAt, prebuilt: o.prebuild, timings: t,
       });
       return this.#keep({ ...composed, take: address.toBase58(), side, stakeUsd: usd, feeUsd, escrowUsd, included, excluded });
     });
@@ -1009,8 +1054,11 @@ export class ForkService {
       const mirror = this.#state.takes[takeId];
       if (!mirror) throw new ApiError(404, "take_missing");
       const takeKey = new PublicKey(mirror.address);
-      const held = (await this.#positionsOf(takeKey)).filter((p) =>
-        p.account.owner.equals(owner) && !p.account.exited && ("back" in p.account.side ? "back" : "fade") === side);
+      // `side` is take-relative ("back" agrees): on an inverted take that's its on-chain fades.
+      const [positions, inverted] = await Promise.all([this.#positionsOf(takeKey), this.#isInverted(takeKey)]);
+      const chain = chainSide(side, { inverted });
+      const held = positions.filter((p) =>
+        p.account.owner.equals(owner) && !p.account.exited && ("back" in p.account.side ? "back" : "fade") === chain);
       if (!held.length) throw new ApiError(404, "position_missing", "You hold nothing on that side of this take.");
       // A sale of these positions that stopped partway: selling again finishes that sale.
       await t.time("pending", () => this.#afterPending(owner.toBase58()));
@@ -1392,12 +1440,13 @@ export class ForkService {
   }
 
   /** Sales this service submitted whose positions have since settled and closed. */
-  #settledExits(take: PublicKey, viewer: string, live: Set<string>, minStakeUsd: number) {
+  #settledExits(take: PublicKey, viewer: string, live: Set<string>, minStakeUsd: number, inverted: boolean) {
     return Object.entries(this.#state.exits?.[take.toBase58()] ?? {})
       .filter(([address, exit]) => exit.owner === viewer && !live.has(address))
       .map(([address, exit]) => ({
         address,
-        side: exit.side ?? "back",
+        // Kept on-chain; shown take-relative, as the receipt's open positions are.
+        side: chainSide(exit.side ?? "back", { inverted }),
         exited: true,
         canExit: false,
         remainingStakeUsd: 0,
@@ -1428,7 +1477,8 @@ export class ForkService {
       claim: app.claim,
       handle: app.author?.handle,
       legs: app.legs,
-      canBack: existing !== null && onChainLegs(legs, existing.take.legs).some((leg) => !this.#router.leftOut(leg)),
+      // The Blink only backs on-chain: on an inverted take that would disagree with it, so it can't.
+      canBack: existing !== null && !existing.take.inverted && onChainLegs(legs, existing.take.legs).some((leg) => !this.#router.leftOut(leg)),
     };
   }
 
@@ -1520,10 +1570,14 @@ export class ForkService {
     const address = new PublicKey(mirror.address);
     const take = await this.#program.account.take.fetchNullable(address);
     if (!take || !("open" in take.status) || take.horizonEnd.toNumber() <= Math.floor(Date.now() / 1000)) return null;
-    if (mirror.demoAuthorKey && !sameLegs(take.legs, this.#mapLegs(app.legs))) return null;
+    if (mirror.demoAuthorKey && !sameLegs(take.legs, this.#mapLegs(app.legs), { onChain: take.inverted, app: app.inverted })) return null;
     return { address, take };
   }
 
+  /**
+   * A back or fade's receipt and venue legs. `side` is take-relative ("fade" disagrees); `chain`, in
+   * the answer, is the on-chain side it trades (flipped on an inverted take).
+   */
   async #prepareBack(takeId: string, owner: PublicKey, usd: number, payer: PublicKey, maxLegs?: number, side: "back" | "fade" = "back", t = new Timings(), prebuild = false) {
     checkAmount(usd);
     await t.time("funds", () => this.#checkFunds(owner, usd));
@@ -1536,19 +1590,29 @@ export class ForkService {
       throw takeClosedError(existing?.take);
     }
     const { address, take } = existing;
-    // Authors can't fade their own take. The program refuses it too; this says why before a build.
+    // Authors can't fade (disagree with) their own take. The program refuses it too; this says why
+    // before a build. Checked take-relative, before the side is turned into the on-chain one.
     if (side === "fade" && take.author.equals(owner)) throw new ApiError(409, "cannot_fade_own_take", FADE_OWN_TAKE);
+    const inverted = Boolean(take.inverted);
+    // The Blink only backs on-chain, and agreeing with an inverted take is a fade (blinkTake says it can't).
+    if (maxLegs !== undefined && inverted) throw new ApiError(409, "open_in_app", "This take bets against its basket. Open it in Thesis to trade it.");
+    const chain = chainSide(side, take);
     const use = newUse(laneOf(prebuild));
     const [{ venue, included, excluded }, config] = await t.time("legs", () => Promise.all([
       // The Blink (maxLegs) buys spot and yield legs only: Gemini legs are in the app.
-      this.#router.venueLegs(onChainLegs(this.#mapLegs(app.legs), take.legs), owner, usd, payer, maxLegs, { side, paper: maxLegs === undefined, lane: use.lane, use }),
+      this.#router.venueLegs(onChainLegs(this.#mapLegs(app.legs), take.legs), owner, usd, payer, maxLegs, { side: chain, paper: maxLegs === undefined, lane: use.lane, use }).catch((e: unknown) => {
+        // Nothing to disagree with right now: a fade (or, on an inverted take, a back) finds no leg.
+        if (side === "fade" && e instanceof ApiError && e.code === "nothing_tradable") throw new ApiError(409, "fade_unavailable", inverted ? AGAINST_INVERTED_NOTHING : FADE_NOTHING);
+        if (chain === "fade" && e instanceof ApiError && e.code === "nothing_tradable") throw new ApiError(422, "nothing_tradable", INVERTED_NOTHING);
+        throw e;
+      }),
       this.#config(),
     ])).finally(() => noteUse(t, use));
     t.quotedAt ??= Date.now();
     const mask = included.reduce((m, i) => m | (1 << i), 0);
     const id = randomPositionId();
     const stake = Math.round(usd * USD);
-    const build = side === "back" ? backIx : fadeIx;
+    const build = chain === "back" ? backIx : fadeIx;
     const ix = await build(this.#program, {
       owner, payer, take: address, id, stake: new BN(stake), legsMask: mask,
     });
@@ -1556,7 +1620,7 @@ export class ForkService {
     this.#recordPhoenix(position.address, owner, venue);
     const fee = splitFee(BigInt(stake), config.params, { isAuthor: take.author.equals(owner) });
     const escrow = escrowShare(onChainLegs(this.#mapLegs(app.legs), take.legs).filter((l) => included.includes(l.index)), BigInt(stake));
-    return { address, venue, included, excluded, ix, position, feeUsd: Number(fee.fee) / USD, escrowUsd: Number(escrow) / USD };
+    return { address, venue, included, excluded, ix, position, feeUsd: Number(fee.fee) / USD, escrowUsd: Number(escrow) / USD, chain, inverted };
   }
 
   /** Notes which Phoenix child each Phoenix leg of `position` trades in (deposit and order share one). */
@@ -1715,6 +1779,7 @@ export class ForkService {
         takeId: trade.takeId,
         kind: build.kind,
         side: trade.side,
+        ...(trade.inverted ? { inverted: true } : {}),
         usd: trade.usd,
         included: trade.included,
         remaining,
@@ -1830,9 +1895,10 @@ export class ForkService {
     });
     const quotedAt = Date.now();
     const receipt = deserializeIx(rec.receipt);
-    const trade: TradeContext = { takeId: rec.takeId, side: rec.side, usd: rec.usd, included: rec.included, receipt, receiptCu: rec.receiptCu };
+    const trade: TradeContext = { takeId: rec.takeId, side: rec.side, ...(rec.inverted ? { inverted: true } : {}), usd: rec.usd, included: rec.included, receipt, receiptCu: rec.receiptCu };
     const built = await this.#compose(venue, receipt, rec.receiptCu, owner, rec.kind, { take, address: position, publishTakeId: rec.publishTakeId }, true, false, { trade, retry: rec, quotedAt });
-    return this.#keep({ ...built, position: key, take: rec.take, side: rec.side, stakeUsd: rec.usd, legs: rec.remaining });
+    // Take-relative, as the trade's own build answered (rec.side is on-chain).
+    return this.#keep({ ...built, position: key, take: rec.take, side: chainSide(rec.side, rec), stakeUsd: rec.usd, legs: rec.remaining });
   }
 
   /**
@@ -2030,18 +2096,28 @@ export class ForkService {
     // (begin_trade) and lose what the landed part recorded. Retry or sweep it first.
     const stopped = this.#split.list(authorKey.toBase58()).find(([, t]) => t.publishTakeId === takeId);
     if (stopped) throw incompleteError(stopped[0], stopped[1], 409);
+    // An inverted take's author buys in on its agreeing side: an on-chain fade (Phoenix shorts,
+    // prediction legs' other side). Every leg must be one a fade can hold, or the program refuses it.
+    const legs = this.#mapLegs(app.legs);
+    if (app.inverted && !invertible(legs)) throw new ApiError(422, "not_fadeable", INVERTED_NOT_FADEABLE);
+    const side = agreeSide(app);
     await t.time("funds", () => this.#checkFunds(authorKey, usd));
     const use = newUse(laneOf(o.prebuild));
-    const [{ venue, included, excluded }, config] = await t.time("legs", () => Promise.all([this.#router.venueLegs(this.#mapLegs(app.legs), authorKey, usd, undefined, undefined, { lane: use.lane, use }), this.#config()]))
-      .finally(() => noteUse(t, use));
+    const [{ venue, included, excluded }, config] = await t.time("legs", () => Promise.all([
+      this.#router.venueLegs(legs, authorKey, usd, undefined, undefined, { side, lane: use.lane, use }).catch((e: unknown) => {
+        if (side === "fade" && e instanceof ApiError && e.code === "nothing_tradable") throw new ApiError(409, "fade_unavailable", INVERTED_NOTHING);
+        throw e;
+      }),
+      this.#config(),
+    ])).finally(() => noteUse(t, use));
     t.quotedAt ??= Date.now();
     const { ix, address } = await this.#createIx(app, authorKey, usd, included);
     const position = { take: address, address: positionAddress(address, authorKey, 0n), publishTakeId: takeId };
     this.#recordPhoenix(position.address, authorKey, venue);
     const built = await this.#compose(venue, ix, THESIS_COMPUTE_UNITS.createTake, authorKey, "publish", position, true, false, {
-      trade: { takeId, side: "back", usd, included, receipt: ix, receiptCu: THESIS_COMPUTE_UNITS.createTake }, quotedAt: t.quotedAt, prebuilt: o.prebuild, timings: t,
+      trade: { takeId, side, ...(app.inverted ? { inverted: true } : {}), usd, included, receipt: ix, receiptCu: THESIS_COMPUTE_UNITS.createTake }, quotedAt: t.quotedAt, prebuilt: o.prebuild, timings: t,
     });
-    return this.#keep({ ...built, take: address.toBase58(), stakeUsd: usd, feeUsd: Number(splitFee(BigInt(Math.round(usd * USD)), config.params, { isAuthor: true }).fee) / USD, included, excluded });
+    return this.#keep({ ...built, take: address.toBase58(), inverted: Boolean(app.inverted), stakeUsd: usd, feeUsd: Number(splitFee(BigInt(Math.round(usd * USD)), config.params, { isAuthor: true }).fee) / USD, included, excluded });
   }
 
   /**
@@ -2728,6 +2804,7 @@ export class ForkService {
       legs: legs.map((l) => l.spec),
       stake: new BN(Math.round(usd * USD)),
       legsMask: included.reduce((m, i) => m | (1 << i), 0),
+      inverted: Boolean(app.inverted),
     });
     return { ix, address: takeAddress(author, id) };
   }
@@ -2742,7 +2819,7 @@ export class ForkService {
     if (m && !staleDemo(m)) {
       const address = new PublicKey(m.address);
       const take = await this.#program.account.take.fetchNullable(address);
-      if (take && (!m.demoAuthorKey || sameLegs(take.legs, this.#mapLegs(app.legs)))) return { address, take };
+      if (take && (!m.demoAuthorKey || sameLegs(take.legs, this.#mapLegs(app.legs), { onChain: take.inverted, app: app.inverted }))) return { address, take };
       if (!take && !m.demoAuthorKey) throw new ApiError(409, "take_missing", TAKE_MISSING);
       this.#log(`demo take ${takeId} ${take ? "changed in the app" : "is missing on the fork"}; mirroring it again`);
     }
@@ -2754,6 +2831,7 @@ export class ForkService {
       if (found) return found;
       throw new ApiError(409, "take_missing", TAKE_MISSING);
     }
+    if (app.inverted && !invertible(this.#mapLegs(app.legs))) throw new ApiError(422, "not_fadeable", INVERTED_NOT_FADEABLE);
     const author = Keypair.generate();
     await this.#o.fork.addUsdc(author.publicKey, 100);
     let address: PublicKey;
@@ -2761,7 +2839,8 @@ export class ForkService {
     // past the quote's slippage) is rebuilt with fresh quotes and tried once more.
     for (let attempt = 1; ; attempt++) {
       try {
-        const { venue, included } = await this.#router.venueLegs(this.#mapLegs(app.legs), author.publicKey, DEMO_AUTHOR_BUY_IN_USD);
+        // An inverted demo take's stand-in author buys in on its agreeing side (an on-chain fade).
+        const { venue, included } = await this.#router.venueLegs(this.#mapLegs(app.legs), author.publicKey, DEMO_AUTHOR_BUY_IN_USD, undefined, undefined, { side: agreeSide(app) });
         const created = await this.#createIx(app, author.publicKey, DEMO_AUTHOR_BUY_IN_USD, included, { demo: true });
         address = created.address;
         this.#recordPhoenix(positionAddress(address, author.publicKey, 0n), author.publicKey, venue);

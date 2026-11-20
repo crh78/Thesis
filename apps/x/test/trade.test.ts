@@ -92,3 +92,21 @@ test("over the limit says so; without trading configured, a trade mention is jus
   const draft = await plan(mention, { vet, basket });
   assert.ok(draft.kind === "reply" && draft.what === "take");
 });
+
+test("a fade whose opposite view is bearish: the builder bets against the picks, still posted as the asker's take (a back)", async () => {
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    verdict: "basket", summary: "Nuclear names fall", reason: null, id: "Dr4ft002", inverted: true,
+    legs: [{ id: "ceg", name: "Constellation Energy", kind: "stock", weight: 60, why: "Nuclear fleet" },
+      { id: "ccj", name: "Cameco", kind: "stock", weight: 40, why: "Uranium" }],
+  }), { status: 200 })) as typeof fetch;
+  const { api, asks } = trading(() => ({ ok: true, status: "pending", takeId: TAKE, url: `https://w/t/${TAKE}`, usd: 50, closesTake: false, existing: false }));
+  const vet = async (): Promise<Verdict> => ({ action: "take", reason: "", claim: "Nuclear won't win the AI power race", risk: "medium", fromParent: true });
+  const out = await plan({ ...mention, text: "fade $50" }, { vet, basket, trading: api });
+  // No side mapping here: the fork API holds the author's buy-in short on a take like this.
+  assert.deepEqual(asks[0].ask, { action: "post", draftId: "Dr4ft002", usd: 50 });
+  assert.ok(out.kind === "reply" && out.what === "trade");
+  assert.ok(out.kind === "reply" && out.text.includes("Betting against: Constellation Energy 60%, Cameco 40%"), out.kind === "reply" ? out.text : "");
+  assert.ok(out.kind === "reply" && xLength(out.text) <= 280);
+  assert.equal(out.kind === "reply" && out.remember?.held?.side, "back");
+  assert.equal(out.kind === "reply" && out.remember?.post?.inverted, true);
+});

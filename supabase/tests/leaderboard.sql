@@ -1,5 +1,6 @@
 -- Checks the leaderboard's direction and the viewer's own rank
--- (migrations/*_leaderboard_dir_viewer.sql). A network of its own keeps other rows off the board.
+-- (migrations/*_leaderboard_dir_viewer.sql), and who fades an inverted take
+-- (migrations/*_inverted_takes.sql). A network of its own keeps other rows off the board.
 -- Run against a scratch database with the migrations applied (it rolls back):
 --   psql "$SCRATCH_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/leaderboard.sql
 -- Each check raises if it fails.
@@ -80,6 +81,18 @@ begin
      or (j -> 'viewer' ->> 'pct')::numeric <> 20 then
     raise exception 'fader board with a viewer: %', j;
   end if;
+
+  -- An inverted take (migrations/*_inverted_takes.sql): Sharp's on-chain fade of it agrees, so
+  -- it doesn't put Sharp on the faders board; Down's on-chain back disagrees, so it does.
+  reset role;
+  insert into public.chain_takes (network, address, author_wallet, inverted) values ('lb-test-net', 'LB_TI', 'LB_BIG', true);
+  insert into public.chain_positions (network, address, take, owner, side, stake, opened_at, settled_at, scored, pnl) values
+    ('lb-test-net', 'LB_P6', 'LB_TI', 'LB_SHARP', 'fade', 10000000, now() - interval '1 day', now(), true, 2000000),
+    ('lb-test-net', 'LB_P7', 'LB_TI', 'LB_DOWN', 'back', 10000000, now() - interval '1 day', now(), true, 3000000);
+  set local role anon;
+  j := public.leaderboard('all', 100, 'faders');
+  select string_agg(x -> 'person' ->> 'handle' || ':' || (x ->> 'cash'), ',' order by o) into order_of from jsonb_array_elements(j) with ordinality y(x, o);
+  if order_of <> 'lb_fader:8.00,lb_down:3.00' then raise exception 'faders board with an inverted take: %', order_of; end if;
 
   begin
     perform public.leaderboard('all', 100, 'own', 'cash', 'sideways');

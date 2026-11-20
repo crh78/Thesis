@@ -832,7 +832,12 @@ impl Env {
     ) -> Vec<Instruction> {
         let take = take_pda(&author.pubkey(), args.id);
         let position = position_pda(&take, &author.pubkey(), AUTHOR_POSITION_ID);
-        let trade = self.trade(author, &args.legs, args.legs_mask, args.stake, Side::Back);
+        let side = if args.inverted {
+            Side::Fade
+        } else {
+            Side::Back
+        };
+        let trade = self.trade(author, &args.legs, args.legs_mask, args.stake, side);
         let mut ixs =
             vec![self.begin_trade_ix(author, payer, &position, trade.outputs_mask, &trade.outputs)];
         ixs.extend(trade.swaps);
@@ -1280,7 +1285,22 @@ impl Env {
             legs_mask: ((1u32 << legs.len()) - 1) as u16,
             legs,
             stake,
+            inverted: false,
         }
+    }
+
+    /// `take_args` for a take that bets against its basket: the author's buy-in is a fade.
+    pub fn inverted_take_args(&self, id: u64, legs: Vec<LegSpec>, stake: u64) -> CreateTakeArgs {
+        CreateTakeArgs {
+            inverted: true,
+            ..self.take_args(id, legs, stake)
+        }
+    }
+
+    /// `create_take`, returning the transaction's result instead of expecting success.
+    pub fn try_create_take(&mut self, author: &User, args: CreateTakeArgs) -> TxResult {
+        let ixs = self.create_take_ix(author, &author.pubkey(), args);
+        self.send(&ixs, &[&author.key])
     }
 
     /// Creates a take paid for by the author; returns its address.

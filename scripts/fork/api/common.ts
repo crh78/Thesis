@@ -36,6 +36,12 @@ export type AppTake = {
   author: { handle?: string; name?: string } | null;
   /** The author's wallet (take_for_chain): set for a take a real user posted, null for a seeded demo take. */
   author_wallet?: string | null;
+  /**
+   * The take bets against its basket ("crypto sucks" over BTC/ETH/SOL perps): its author's buy-in
+   * is an on-chain fade, and agreeing with it is a fade too (`agreeSide`). Once the take is on-chain
+   * its TakeAccount's `inverted` is what counts.
+   */
+  inverted?: boolean;
   legs: AppLeg[];
 };
 
@@ -60,8 +66,10 @@ export type Snapshot = { at: number; value: number; netIn: number };
  * still held behind that value (after partial sales; missing on older marks).
  */
 export type DigestMark = { day: string; valueUsd: number; stakeUsd?: number };
-/** A sale this service submitted, kept so the receipt still shows it after its position settles and closes. */
-/** A sale this service submitted. `side` is missing on sales recorded before fades could be sold (all backs). */
+/**
+ * A sale this service submitted, kept so the receipt still shows it after its position settles and
+ * closes. `side` is the on-chain side, missing on sales recorded before fades could be sold (all backs).
+ */
 export type ExitReceipt = { horizonEnd: number; owner: string; side?: "back" | "fade"; stakeUsd: number; costUsd: number; openedAt: number; legsMask: number; exitedAt?: number };
 /** Everything the fork API keeps between restarts (`.data/fork/api-state.json`). */
 export type State = {
@@ -114,7 +122,10 @@ export type IncompleteTrade = {
   take: string;
   takeId: string;
   kind: "back" | "publish";
+  /** The on-chain side (what a retry or sweep trades); clients see it take-relative (`incompleteView`). */
   side: "back" | "fade";
+  /** The take is inverted: its on-chain fade agrees with it. Missing on records made before inverted takes. */
+  inverted?: boolean;
   usd: number;
   /** Take legs the receipt opens (its legs mask). */
   included: number[];
@@ -223,7 +234,14 @@ export const staleDemo = (m: Mirror | undefined) => Boolean(m?.demoAuthorKey) &&
 
 export const FADE_NOTHING = "None of this take's legs can be faded right now: a prediction leg needs a market on its other side, and other legs need a Phoenix market to short.";
 export const FADE_NO_MARKET = "Gemini has no market on the other side of this take's prediction legs right now. Try again in a moment.";
+/** Take-relative: the author can't take the side that disagrees with their own take (the program refuses it too). */
 export const FADE_OWN_TAKE = "You can't fade your own take.";
+/** An inverted take's legs must all be ones a fade can hold (the program refuses it otherwise). */
+export const INVERTED_NOT_FADEABLE = "A take that bets against its basket needs every leg to be one that can be bet against: a Phoenix-listed stock or coin, or a prediction. Yield and card legs can't.";
+/** An inverted take's author buys in by shorting its basket: nothing to short right now. */
+export const INVERTED_NOTHING = "None of this take's legs can be bet against right now: a prediction leg needs a market on its other side, and other legs need a Phoenix market to short.";
+/** Disagreeing with an inverted take is buying its basket: nothing can be bought right now. */
+export const AGAINST_INVERTED_NOTHING = "None of this take's legs can be bought on the fork right now.";
 export const TAKE_CLOSED = "This take has closed: its author sold. Positions already in it stay open until their owners sell.";
 export const TAKE_ENDED = "This take has reached its end: positions settle at today's prices.";
 

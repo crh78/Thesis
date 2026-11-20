@@ -157,6 +157,11 @@ export async function createTakeIx(
     stake: BN;
     /** Legs the author's buy-in bought (bit i = leg i), as on a back. */
     legsMask: number;
+    /**
+     * The take bets against its basket: the author's buy-in is a fade (`agreeSide`), so its trade
+     * opens the fade's legs (Phoenix shorts, prediction "No"). Every leg must be fadeable.
+     */
+    inverted?: boolean;
     usdcMint?: PublicKey;
     /** Output accounts of the legs bought in this (the trade's last) transaction, in leg order. */
     outputs?: PublicKey[];
@@ -174,6 +179,7 @@ export async function createTakeIx(
       legs: p.legs,
       stake: p.stake,
       legsMask: p.legsMask,
+      inverted: p.inverted ?? false,
     })
     .accountsPartial({
       author: p.author,

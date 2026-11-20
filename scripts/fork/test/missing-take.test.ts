@@ -90,7 +90,7 @@ async function fakeChain() {
         author, id: new BN(1), claimHash: Array(32).fill(0), risk: { medium: {} }, createdAt: new BN(0),
         horizonEnd: new BN(o.horizonEnd ?? Math.floor(Date.now() / 1000) + 86_400), legs: [], backers: 0, faders: 0, totalBacked: new BN(0),
         totalFaded: new BN(0), openPositions: 0, creatorFeesUnclaimed: new BN(0), platformFeesFromBacks: new BN(0),
-        status: o.status ?? { open: {} }, resultBps: new BN(0), bump: 255, closedAt: new BN(o.closedAt ?? 0),
+        status: o.status ?? { open: {} }, resultBps: new BN(0), bump: 255, closedAt: new BN(o.closedAt ?? 0), inverted: false,
       }),
   };
   return chain;

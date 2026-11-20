@@ -347,3 +347,25 @@ struct LockedNote: View {
         .frame(maxWidth: .infinity)
     }
 }
+
+/// Marks a take that bets against its basket ("crypto sucks" over BTC/ETH/SOL): agreeing with it
+/// is short every pick, so it gains when they fall.
+struct AgainstBadge: View {
+    var title = "Against"
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "arrow.down.right").font(.system(size: 9, weight: .bold))
+            Text(title.uppercased())
+        }
+        .font(.mono(11, .semibold))
+        .foregroundStyle(Palette.down)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Palette.downSoft, in: .capsule)
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Betting against these picks")
+        .accessibilityIdentifier("against-badge")
+    }
+}

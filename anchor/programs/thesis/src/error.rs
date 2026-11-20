@@ -98,7 +98,7 @@ pub enum ThesisError {
     FadeNeedsPredictionLegs,
     #[msg("The badge URI base must be an https:// URL ending in /, at most 128 bytes")]
     InvalidBadgeUriBase,
-    #[msg("A take's author can't fade it")]
+    #[msg("A take's author can't take the other side of it")]
     AuthorCannotFade,
     #[msg("What's left after a partial sale must be at least the minimum stake; sell all instead")]
     RemainderBelowMinimum,

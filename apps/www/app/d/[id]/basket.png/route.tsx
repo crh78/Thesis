@@ -81,7 +81,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     (
       <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: "48px 64px", background: INK.bg, color: INK.text, fontFamily: "Geist" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 26, color: INK.muted }}>
-          <span>{`${d.risk[0].toUpperCase()}${d.risk.slice(1)} risk · ${legs.length} ${legs.length === 1 ? "pick" : "picks"}`}</span>
+          {/* A take that bets against its picks says so up top, and each pick reads "Short". */}
+          <span>{`${d.risk[0].toUpperCase()}${d.risk.slice(1)} risk · ${d.inverted ? "betting against " : ""}${legs.length} ${legs.length === 1 ? "pick" : "picks"}`}</span>
           <span style={{ fontFamily: "Geist", fontWeight: 600, color: INK.text }}>thesis</span>
         </div>
         <div style={{ display: "flex", marginTop: 18, fontFamily: "Geist Serif", fontSize: claim.length > 60 ? 44 : 54, lineHeight: 1.12 }}>{claim}</div>
@@ -103,7 +104,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
                 )}
                 <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
                   <span style={{ fontSize: 32, fontWeight: 600 }}>{r.leg.name.length > 26 ? `${r.leg.name.slice(0, 25)}…` : r.leg.name}</span>
-                  <span style={{ fontSize: 22, color: INK.muted }}>{r.leg.kind}</span>
+                  <span style={{ fontSize: 22, color: INK.muted }}>{d.inverted ? `Short · ${r.leg.kind}` : r.leg.kind}</span>
                 </div>
                 <span style={{ fontFamily: "Geist Mono", fontSize: 36, color: INK.text }}>{`${Math.round(r.leg.weight)}%`}</span>
               </div>

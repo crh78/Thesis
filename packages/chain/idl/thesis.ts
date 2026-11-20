@@ -2415,7 +2415,7 @@ export type Thesis = {
     {
       "code": 6047,
       "name": "authorCannotFade",
-      "msg": "A take's author can't fade it"
+      "msg": "A take's author can't take the other side of it"
     },
     {
       "code": 6048,
@@ -2818,6 +2818,14 @@ export type Thesis = {
               "result is the author's real basket."
             ],
             "type": "u16"
+          },
+          {
+            "name": "inverted",
+            "docs": [
+              "The take bets against its basket: the author's buy-in is a fade, so every leg must be",
+              "fadeable (`Take::inverted`). Appended last, after `legs_mask`."
+            ],
+            "type": "bool"
           }
         ]
       }
@@ -3927,7 +3935,8 @@ export type Thesis = {
           {
             "name": "platformFeesFromBacks",
             "docs": [
-              "Platform's part of the fees from backs of this take, for the creator boost."
+              "Platform's part of the fees from the side that agrees with this take (backs, or fades of",
+              "an inverted take), for the creator boost."
             ],
             "type": "u64"
           },
@@ -3958,6 +3967,16 @@ export type Thesis = {
               "because the author's exit account closes once their buy-in settles."
             ],
             "type": "i64"
+          },
+          {
+            "name": "inverted",
+            "docs": [
+              "The take bets against its basket (\"crypto sucks\" over BTC/ETH/SOL perps): its author, and",
+              "everyone who agrees, hold `Side::Fade`; `Side::Back` disagrees. Sides stay literal",
+              "everywhere else (`backers`, `faders`, positions); `agree_side` says which one agrees.",
+              "Every leg of an inverted take can be faded. Appended, after `closed_at`."
+            ],
+            "type": "bool"
           }
         ]
       }
@@ -4027,6 +4046,13 @@ export type Thesis = {
           {
             "name": "stake",
             "type": "u64"
+          },
+          {
+            "name": "inverted",
+            "docs": [
+              "The take bets against its basket: the author's buy-in is a fade (`Take::inverted`)."
+            ],
+            "type": "bool"
           }
         ]
       }

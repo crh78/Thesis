@@ -188,6 +188,9 @@ a.tag-up:hover { background: rgba(169, 227, 186, 0.24); }
 /* A take made from an X post: links to the post. */
 .tag-x { text-decoration: none; height: 22px; padding: 0 9px; font-size: 11px; margin-left: auto; flex-shrink: 0; }
 .tag-x:hover { color: var(--text); }
+/* A take that bets against its basket ("crypto sucks" over BTC/ETH/SOL): agreeing is short every pick. */
+.tag-against { height: 22px; padding: 0 9px; font-size: 11px; margin-left: auto; flex-shrink: 0; }
+.tag-against + .tag-x { margin-left: 0; }
 
 .actions { display: flex; gap: 10px; margin-top: 16px; }
 

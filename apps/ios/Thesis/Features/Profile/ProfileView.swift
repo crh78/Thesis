@@ -416,7 +416,8 @@ private extension ProfileItem {
         let realized = p.realizedPnlUsd.map { "\(Fmt.usd($0, cents: true, signed: true)) realized" }
         let selling = selling || (p.pendingSales ?? []).contains { !$0.priced }
         let side: Side = p.side == "fade" ? .fade : .back
-        // Your own buy-in on an open take: selling all of it closes the take.
+        // Your own buy-in on an open take: selling all of it closes the take. Sides are
+        // take-relative (the fork API's), so an inverted take's buy-in is a back here too.
         let ownBuyIn = side == .back && take.map { $0.isOpen && $0.author.profileID == me.profileID } == true
         self.init(topic: p.topic ?? "topic-coin", claim: p.claim,
                   kind: selling ? "Selling…" : p.side == "fade" ? "Faded" : "Traded",
@@ -425,7 +426,7 @@ private extension ProfileItem {
                   value: Fmt.usd(p.valueUsd ?? p.heldStakeUsd, cents: true), ret: pnl ?? 0, take: take, showsReturn: pnl != nil,
                   share: pnl.map { CallCard(takeID: p.takeId, claim: p.claim, ret: $0, faded: p.side == "fade",
                                             author: p.authorHandle, name: me.name, handle: me.id, avatar: me.avatar,
-                                            since: take?.since, legs: take?.legs ?? []) },
+                                            since: take?.since, legs: take?.legs ?? [], inverted: take?.inverted ?? false) },
                   sale: selling || p.canExit != true || p.exited == true ? nil
                       : HoldingSale(takeID: p.takeId, claim: p.claim, side: side, worthUsd: p.valueUsd ?? p.heldStakeUsd,
                                     addresses: p.addresses, partialSales: p.hasPartialSales,
@@ -448,7 +449,7 @@ private extension ProfileItem {
                   value: Fmt.usd(p.value, cents: true), ret: p.ret, take: p.take,
                   share: CallCard(takeID: p.take.id, claim: p.take.claim, ret: p.ret, faded: p.side == .fade,
                                   author: p.take.author.handleID, name: me.name, handle: me.id, avatar: me.avatar,
-                                  since: p.take.since, legs: p.take.legs),
+                                  since: p.take.since, legs: p.take.legs, inverted: p.take.inverted),
                   sale: HoldingSale(takeID: p.take.id, claim: p.take.claim, side: p.side, worthUsd: p.value, addresses: [],
                                     partialSales: true, closesTake: false))
     }

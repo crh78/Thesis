@@ -165,6 +165,7 @@ const createTakeEvents = [
     horizonEnd: new BN(1_800_000_000),
     legs: 2,
     stake: STAKE,
+    inverted: false,
   }, 2),
   eventIx("PositionOpened", {
     take,

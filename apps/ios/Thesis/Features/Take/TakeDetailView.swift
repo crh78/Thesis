@@ -252,23 +252,33 @@ struct TakeDetailView: View {
         return Double(bps) / 100
     }
 
-    /// A leg's return: on the fork, the author's entry against the live price (nil until both are
-    /// in, or for legs the author didn't buy); otherwise the backend's number.
+    /// A leg's return for the take: on the fork, the author's entry against the live price (nil
+    /// until both are in, or for legs the author didn't buy); otherwise the backend's number. A
+    /// take against its basket is short every leg, so a falling leg is a gain for it.
     private func legReturnPct(_ leg: Leg) -> Double? {
-        guard app.isOnFork else { return leg.ret }
+        let sign: Double = current.inverted ? -1 : 1
+        guard app.isOnFork else { return leg.ret * sign }
         guard let l = receipt?.legs.first(where: { $0.name == leg.name }),
               let entry = l.authorEntryUsd, let now = l.currentUsd, entry > 0 else { return nil }
-        return (now / entry - 1) * 100
+        return (now / entry - 1) * 100 * sign
     }
 
     // MARK: Basket
 
     private var basket: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Basket").font(.geist(17, .semibold))
+                if current.inverted { AgainstBadge(title: "Short") }
                 Spacer()
                 Text("WEIGHT · RETURN").font(.mono(11)).foregroundStyle(Palette.muted)
+            }
+            if current.inverted {
+                Text("This take is betting against these picks. Trading it shorts them, so it gains when they fall.")
+                    .font(.geist(13))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("basket-against")
             }
             HStack(spacing: 18) {
                 BasketDonut(legs: take.legs, innerRatio: 0.68)

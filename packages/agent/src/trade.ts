@@ -36,6 +36,8 @@ export type Score =
 export type Position = {
   take_id: string; claim: string; side: "back" | "fade"; stake_usd: number; value_usd: number | null;
   return_bps: number | null; can_exit: boolean | null; closes_take_if_sold_all: boolean;
+  /** The take bets against its basket. `side` is still the take's (back = agreed), never the leg's. */
+  inverted?: boolean;
 };
 
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
@@ -95,12 +97,12 @@ export function agentApi(cfg: AgentApiConfig, f: typeof fetch = fetch) {
       return r.body;
     },
 
-    /** A take's claim and its author's handle (null when there's no such take). */
-    async takeInfo(takeId: string): Promise<{ claim: string; author: string | null } | null> {
-      const r = await post<{ claim?: string; author?: string | null; error?: string }>("takes", { take_id: takeId });
+    /** A take's claim, its author's handle, and whether it bets against its basket (null when there's no such take). */
+    async takeInfo(takeId: string): Promise<{ claim: string; author: string | null; inverted: boolean } | null> {
+      const r = await post<{ claim?: string; author?: string | null; inverted?: boolean; error?: string }>("takes", { take_id: takeId });
       if (r.status === 404) return null;
       if (r.status !== 200 || !r.body.claim) throw new Error(`agent takes ${r.status}: ${r.body.error ?? ""}`);
-      return { claim: r.body.claim, author: r.body.author ?? null };
+      return { claim: r.body.claim, author: r.body.author ?? null, inverted: r.body.inverted === true };
     },
 
     /** `wait: false` answers once the fork accepted the trade (status pending), not once it landed. */

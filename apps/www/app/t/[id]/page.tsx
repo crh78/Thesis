@@ -27,7 +27,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!take) return { title: "Thesis" };
   const who = authorName(take.author);
   // A closed take can't be traded any more: say how it ended instead.
-  const description = takeState(take).open ? `${who}'s take on Thesis. Trade it or fade it.` : `${who}'s take on Thesis. Closed at ${pct(take.ret)}.`;
+  const against = take.inverted ? " Betting against its picks." : "";
+  const description = takeState(take).open ? `${who}'s take on Thesis.${against} Trade it or fade it.` : `${who}'s take on Thesis.${against} Closed at ${pct(take.ret)}.`;
   return {
     title: `${take.claim} · Thesis`,
     description,
@@ -47,6 +48,8 @@ export default async function TakePage({ params }: Props) {
   // Each pick's ticker, for its logo in the basket (none if the catalog read fails).
   const keys = await assetKeys(take.legs.map((l) => l.asset_id ?? "")).catch(() => ({}));
   const handle = isDeleted(take.author) ? null : take.author.handle;
+  // Bets against its basket (the receipt says so too, on a database that doesn't yet).
+  const inverted = !!(take.inverted || receipt?.inverted);
 
   return (
     <main className="page">
@@ -87,11 +90,13 @@ export default async function TakePage({ params }: Props) {
       </div>
 
       <div className="section">
-        <h2>Basket <span className="caps">weight</span></h2>
-        <Basket legs={take.legs} receipt={receipt?.legs} keys={keys} />
+        <h2>{inverted ? "Betting against" : "Basket"} <span className="caps">weight</span></h2>
+        {/* A bearish take over its picks: agreeing is short every one, so they fall → it's up. */}
+        {inverted ? <p className="muted small" style={{ margin: "0 0 8px" }}>Trading this take is short every pick. Fading it holds them.</p> : null}
+        <Basket legs={take.legs} receipt={receipt?.legs} keys={keys} inverted={inverted} />
       </div>
 
-      <TradeDock takeId={take.id} author={authorName(take.author)} handle={handle} receipt={receipt} closed={state.open ? null : closedReason(state, handle)} />
+      <TradeDock takeId={take.id} author={authorName(take.author)} handle={handle} receipt={receipt} inverted={inverted} closed={state.open ? null : closedReason(state, handle)} />
 
       <Comments takeId={take.id} author={authorName(take.author)} claim={take.claim} initialCount={take.comments} />
     </main>

@@ -21,7 +21,9 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   ]);
   const claim = d?.claim ?? "A take on Thesis";
   const legs = d ? basketFrom({ verdict: "basket", summary: d.summary, legs: d.legs }).legs : [];
-  const top = legs.slice(0, 3).map((l) => `${l.name} ${Math.round(l.weight)}%`).join("  ·  ");
+  const picks = legs.slice(0, 3).map((l) => `${l.name} ${Math.round(l.weight)}%`).join("  ·  ");
+  // A take that bets against its picks: "Betting against BTC 40% · ETH 35% · …".
+  const top = d?.inverted ? `Betting against ${picks}` : picks;
   return new ImageResponse(
     (
       <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: 64, background: "#07080B", color: "#F2F3F5", fontFamily: "Geist" }}>

@@ -32,6 +32,8 @@ pub struct TakeCreated {
     pub horizon_end: i64,
     pub legs: u8,
     pub stake: u64,
+    /// The take bets against its basket: the author's buy-in is a fade (`Take::inverted`).
+    pub inverted: bool,
 }
 
 #[event]

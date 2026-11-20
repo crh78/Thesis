@@ -34,7 +34,13 @@ export type CardData = {
   legs: { name: string; color: string; weight: number }[];
   /** Set on a holder's P&L card: their side, and the take's author (handle) when it's someone else's. */
   holder?: { side: "back" | "fade"; author: string | null };
+  /** The take bets against its basket: its traders are short, its faders long. */
+  inverted?: boolean;
 };
+
+/** "12 LONG / 3 SHORT": who holds the basket which way (a take that bets against it is short when traded). */
+export const flowLine = (d: Pick<CardData, "backs" | "fades" | "inverted">) =>
+  d.inverted ? `${d.fades} LONG / ${d.backs} SHORT` : `${d.backs} LONG / ${d.fades} SHORT`;
 
 export function cardData(take: Take, receipt: Receipt | null): CardData {
   const ret = takeReturn(take, receipt);
@@ -56,6 +62,7 @@ export function cardData(take: Take, receipt: Receipt | null): CardData {
     backs: take.backs,
     fades: take.fades,
     onChain: !!receipt?.onChain,
+    inverted: !!(take.inverted || receipt?.inverted),
     legs: legs.map((l, i) => ({ name: legName(l.name), color: SERIES[i % SERIES.length], weight: l.weight })),
   };
 }

@@ -2,7 +2,7 @@
 // The iOS feed's TakeRow: avatar column, then the take. The claim, return, sparkline and allocation
 // bar open the take page; Trade / Fade open it with that sheet up; then comments, save and share.
 import Link from "next/link";
-import { authorName, closedReason, dayLabel, isDeleted, pct, SERIES, takeState, type Take, fadeable, xSource } from "@/lib/data";
+import { authorName, closedReason, dayLabel, isDeleted, pct, SERIES, takeState, type Take, fadeable, tradeable, xSource } from "@/lib/data";
 import Avatar from "./Avatar";
 
 export type FeedTake = Take & { tags?: string[]; history?: number[]; topic?: string; money_in?: number; posting?: boolean };
@@ -45,7 +45,8 @@ const Arrow = ({ down }: { down?: boolean }) => (
   </svg>
 );
 
-// `mine`: your own take, which you can't fade, so it shows no Fade pill.
+// `mine`: your own take, which you can't fade, so it shows no Fade pill. A take that bets against
+// its picks (`inverted`) is Trade = short them, Fade = hold them; its counts are already that way.
 export default function TakeRow({ take, saved, onSave, mine = false }: { take: FeedTake; saved: boolean; onSave: (on: boolean) => void; mine?: boolean }) {
   const up = take.ret >= 0;
   const href = `/t/${take.id}`;
@@ -72,6 +73,8 @@ export default function TakeRow({ take, saved, onSave, mine = false }: { take: F
             <b>{authorName(take.author)}</b>
             <span className="muted">{gone ? "" : `@${take.author.handle} · `}{age(take.created_at)}</span>
           </Link>
+          {/* Bets against its picks: Trade is short the basket, Fade is long. */}
+          {take.inverted ? <span className="tag tag-down tag-against" title="This take bets against its picks: trading it is short every one.">Against</span> : null}
           {xSource(take) ? (
             <a className="tag tag-x" href={xSource(take)!} target="_blank" rel="noopener noreferrer nofollow" aria-label="Take from X: open the post">Take from X ↗</a>
           ) : null}
@@ -93,7 +96,7 @@ export default function TakeRow({ take, saved, onSave, mine = false }: { take: F
           <div className="trow-actions">
             {state.open ? (
               <>
-                <Link href={`${href}?side=back`} className="sidepill up-pill"><Arrow /> Trade <span className="mono">{take.backs}</span></Link>
+                {tradeable(take) ? <Link href={`${href}?side=back`} className="sidepill up-pill"><Arrow /> Trade <span className="mono">{take.backs}</span></Link> : null}
                 {mine || !fadeable(take) ? null : <Link href={`${href}?side=fade`} className="sidepill down-pill"><Arrow down /> Fade <span className="mono">{take.fades}</span></Link>}
               </>
             ) : (

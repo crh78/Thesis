@@ -3,7 +3,8 @@ import { cardValue, isCardKind, legName, SERIES, type ReceiptLeg, type TakeLeg }
 
 // `receipt`: the on-chain legs, for what only the chain knows (a card leg's insured value).
 // `keys`: each catalog row's logo key by asset id (assetKeys), for the legs' logos.
-export default function Basket({ legs, receipt, keys = {} }: { legs: TakeLeg[]; receipt?: ReceiptLeg[]; keys?: Record<string, string> }) {
+// `inverted`: the take bets against these picks, so agreeing with it is short every one ("Short · …").
+export default function Basket({ legs, receipt, keys = {}, inverted = false }: { legs: TakeLeg[]; receipt?: ReceiptLeg[]; keys?: Record<string, string>; inverted?: boolean }) {
   const card = (l: TakeLeg) => receipt?.find((r) => r.card && r.name.toLowerCase() === l.name.toLowerCase())?.card ?? null;
   return (
     <>
@@ -20,7 +21,7 @@ export default function Basket({ legs, receipt, keys = {} }: { legs: TakeLeg[]; 
             {l.why ? <div className="note">{l.why}</div> : null}
           </div>
           <div className="mono small" style={{ textAlign: "right" }}>
-            {Math.round(l.weight)}%<div className="note">{isCardKind(l.kind) ? cardValue(card(l)?.insuredValueUsd) : l.kind}</div>
+            {Math.round(l.weight)}%<div className="note">{inverted ? <span className="down">Short · </span> : null}{isCardKind(l.kind) ? cardValue(card(l)?.insuredValueUsd) : l.kind}</div>
           </div>
         </div>
       ))}

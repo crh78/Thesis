@@ -109,6 +109,15 @@ impl LegKind {
     }
 }
 
+/// The side that agrees with a take: `Fade` when it's inverted, else `Back`.
+pub fn agree_side(inverted: bool) -> Side {
+    if inverted {
+        Side::Fade
+    } else {
+        Side::Back
+    }
+}
+
 /// How a fade takes the other side of a leg.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
 pub enum FadeVia {
@@ -168,7 +177,8 @@ pub struct Take {
     /// Positions not yet settled and closed.
     pub open_positions: u32,
     pub creator_fees_unclaimed: u64,
-    /// Platform's part of the fees from backs of this take, for the creator boost.
+    /// Platform's part of the fees from the side that agrees with this take (backs, or fades of
+    /// an inverted take), for the creator boost.
     pub platform_fees_from_backs: u64,
     pub status: TakeStatus,
     /// Headline return in bps: the author's position, entry to its sale (or to the horizon if
@@ -178,9 +188,19 @@ pub struct Take {
     /// When the author sold their buy-in and the take closed; 0 while they haven't. Kept here
     /// because the author's exit account closes once their buy-in settles.
     pub closed_at: i64,
+    /// The take bets against its basket ("crypto sucks" over BTC/ETH/SOL perps): its author, and
+    /// everyone who agrees, hold `Side::Fade`; `Side::Back` disagrees. Sides stay literal
+    /// everywhere else (`backers`, `faders`, positions); `agree_side` says which one agrees.
+    /// Every leg of an inverted take can be faded. Appended, after `closed_at`.
+    pub inverted: bool,
 }
 
 impl Take {
+    /// The side that agrees with the take's claim: the author's side.
+    pub fn agree_side(&self) -> Side {
+        agree_side(self.inverted)
+    }
+
     /// Account size for a take with `legs` legs, so rent is only paid for legs that exist.
     pub fn space(legs: usize) -> usize {
         8 + Self::INIT_SPACE - (MAX_LEGS - legs) * LegSpec::INIT_SPACE
