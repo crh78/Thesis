@@ -7,6 +7,32 @@ iMessage surface. Inbound message → `@thesis/agent` → reply. When someone st
 - `src/reply.ts` — hands each message to `@thesis/agent` (Luna + the `build_basket` tool).
 - `src/contact-card.ts` — the Thesis contact card (name and `assets/thesis-contact.png`) for Sendblue's Contact Sharing.
 
+## Using it
+
+The bot runs on Railway with the iMessage and X bots together (`infra/bots/README.md`). Its line is **+1 (347) 268-9632**.
+
+1. **Get added.** Sendblue's free plan replies only to verified contacts, up to 10. Someone with the Sendblue login runs `npx @sendblue/cli add-contact +1XXXXXXXXXX`.
+2. **Text the number once.** That verifies you. The first reply includes the Thesis contact card, so save it.
+3. **Text it a take** in plain words, like "AI power demand is underrated", "Eli Lilly keeps winning on GLP-1s" or "Tesla is overvalued". You can add a risk level ("high risk"); otherwise it uses medium. A take has no end date: it runs until you sell.
+4. **It replies** with one line on what has to be true and up to 5 picks (`Name 40%: why`). It ends with a link to a **draft take**. If nothing you can buy goes up when the take is right, it says so instead of guessing.
+5. **Tap the link and sign in.** The draft becomes your take: change the picks or the amount, then post it and buy in. Anyone you send the link to after that sees the live take and can back it or fade it.
+
+You can also just ask it things ("what's a fade?", "why Nvidia?"). It answers in a sentence or two and keeps track of the conversation. A reply with a basket can take up to about 20 seconds.
+
+### Trading by text
+
+It can also trade from your own Thesis account, within limits you set:
+
+- "make this a take for $20" posts the last basket as your take with a $20 buy-in.
+- "I'm in for $50 on Jake's take" backs a take; "fading Jake for $25" fades it. It finds the take from the chat or a `/t/` link, and asks which one if more than one fits.
+- "sell half my nuclear take", "sell 25%" or "sell $20" sells; "what do I hold?" lists your positions.
+
+The first time, it texts you a one-time link to connect your number and set a per-trade and daily limit (`/limits` on the web app). Every trade waits for you to confirm: it says "On it. Like this message or reply yes to confirm: …", and a like or "yes" within 10 minutes runs it ("no" drops it). Over your limit, it sends the take's link so you can do it yourself. `IMESSAGE_TRADING=0` on Railway turns trading off.
+
+**Doesn't work yet:** group chats (they need a paid dedicated line, or BlueBubbles below) and texting from a number that isn't verified (the bot doesn't see those messages).
+
+**If it stops replying:** check `railway logs --service bots` (lines start with `[imessage]`). Don't start the bot on your laptop while Railway runs it. Both copies would poll the same line and reply to every text twice.
+
 ## Group chats for free: BlueBubbles
 
 Sendblue's free line can't join group chats. BlueBubbles is a free, open-source server that runs on a Mac signed into Messages and exposes it over a REST API, so the bot can read and reply in any chat that Apple ID is in, groups included.
@@ -19,6 +45,8 @@ Sendblue's free line can't join group chats. BlueBubbles is a free, open-source 
 In a group the agent replies only when addressed ("thesis", "@thesis"), asked something, or someone states a take worth a basket. Typing bubbles and the contact card are Sendblue-only.
 
 ## Running it (Sendblue)
+
+Production runs on Railway (`infra/bots/README.md`). Run it locally only with Railway's copy off (`BOTS_IMESSAGE=0` on the `bots` service), for the reason above.
 
 Sendblue free plan: a number shared with other free accounts, and only verified contacts (up to 10, each texts the number once) can reach the bot. Group chats need a dedicated line (AI Agent plan, $100/mo). The free plan has no webhooks, so the adapter polls for new messages every 2 s and needs no public URL.
 
