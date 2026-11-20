@@ -34,6 +34,9 @@
 //                                  copy_of: another draft's id: its basket, saved again for this
 //                                  asker without building (several people replying under one post
 //                                  share one basket); 404 no_such_draft.
+//   POST   /source/bot-events      header x-bot-secret: { bot: x|imessage, events: [{ at, event,
+//                                  ref?, author?, what?, ...rest }] } (up to 100) → { saved }.
+//                                  What the bots did, kept in bot_events (rest goes to data).
 //   GET    /source/drafts/mine     → { x, drafts } the X bot's unposted drafts for the X account
 //                                  linked to your Privy login (x null when none is linked), newest
 //                                  first, from the last 14 days: { id, claim, legs, context, created_at }
@@ -413,6 +416,37 @@ async function poll() {
   return json(200, { accounts: followed.size, posts: posts.length, ...result });
 }
 
+// Bot telemetry --------------------------------------------------------------------------------
+
+const MAX_EVENTS = 100;
+const short = (v: unknown, n: number) => (typeof v === "string" && v ? v.slice(0, n) : null);
+
+/** POST /source/bot-events: what the bots did, one row per event (bot_events). */
+async function botEvents(b: Record<string, unknown>) {
+  const bot = b.bot;
+  check(bot === "x" || bot === "imessage", "invalid_bot");
+  check(Array.isArray(b.events) && b.events.length <= MAX_EVENTS, "invalid_events");
+  const rows = (b.events as unknown[])
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === "object" && !Array.isArray(e) && typeof (e as { event?: unknown }).event === "string")
+    .map((e) => {
+      const { t, at, event, ref, author, what, ...rest } = e;
+      const when = new Date(String(at ?? t ?? ""));
+      let data = rest;
+      if (JSON.stringify(data).length > 15_000) data = { truncated: JSON.stringify(rest).slice(0, 15_000) };
+      return {
+        at: Number.isNaN(when.getTime()) ? new Date().toISOString() : when.toISOString(),
+        bot,
+        event: String(event).slice(0, 60),
+        ref: short(ref, 60),
+        author: short(author, 60),
+        what: short(what, 40),
+        data,
+      };
+    });
+  if (rows.length) dbCheck((await db.from("bot_events").insert(rows)).error);
+  return json(200, { saved: rows.length });
+}
+
 // Server ---------------------------------------------------------------------------------------
 
 Deno.serve(async (req) => {
@@ -427,11 +461,11 @@ Deno.serve(async (req) => {
       if (!sameSecret(req.headers.get("x-poll-secret") ?? "", pollSecret)) return json(401, { error: "unauthorized" });
       return await poll();
     }
-    if (route === "POST drafts") {
+    if (route === "POST drafts" || route === "POST bot-events") {
       const botSecret = await secret("BOT_SECRET", "bot_secret");
       if (!botSecret) return json(503, { error: "not_configured" });
       if (!sameSecret(req.headers.get("x-bot-secret") ?? "", botSecret)) return json(401, { error: "unauthorized" });
-      return await buildDraft(await body(req));
+      return route === "POST drafts" ? await buildDraft(await body(req)) : await botEvents(await body(req));
     }
     switch (route) {
       case "POST ": {

@@ -23,6 +23,20 @@ Saved for you: sign in with X at the link in our bio to post it as your take.
 5. **Opting out** (X's automation rules require it): a mention that's just "stop" gets one confirmation and no more replies, kept across days; "start" turns replies back on. The help reply says so.
 6. **Limits:** 100 replies a day (`X_MAX_REPLIES_PER_DAY`), 10 per person a day (`X_MAX_PER_AUTHOR`; every reply counts: takes, "no clean exposure" and help alike), 3 per thread a day (`X_MAX_PER_THREAD`); `X_UNLIMITED` lists X usernames with no caps at all (the team's own accounts); mentions are polled every `X_POLL_SECONDS` (30). The bot never replies to itself or to retweets. On its first run it starts from the current time and never answers the backlog. State lives in `.data/state.json` and is saved after every mention, so a restart never answers a mention twice.
 
+## What it did (telemetry)
+
+Every event the bot logs is also saved to Supabase, in `bot_events` (migration 0061), through the source function's `POST /source/bot-events` (the same `THESIS_BOT_SECRET`). That covers every mention it handled: `replied` (with the reply's text, its X id, the mention's text, whether it had the picture, any trade), `would reply` in a dry run, `skip` with the reason (vetted out, a cap, opted out, not signed up), `reply refused` and `reply failed` (X's answer), `plan failed`, `image failed`, plus `starting`, `stopped` and `poll failed` (at most every 10 minutes). Events go out in one batch after each poll; if Supabase is down they wait for the next one, and a reply never waits on them. Rows are kept 90 days. `X_TELEMETRY=0` turns it off.
+
+```sql
+-- The last day's replies
+select at, author, what, data->>'text' as reply, data->>'mention' as mention
+from bot_events where bot = 'x' and event = 'replied' and at > now() - interval '1 day' order by at desc;
+
+-- What it did, by kind, this week
+select event, coalesce(what, data->>'reason') as why, count(*) from bot_events
+where bot = 'x' and at > now() - interval '7 days' group by 1, 2 order by 3 desc;
+```
+
 ## Cost
 
 X API pay-per-use (checked 2026-11-16, prepaid): reading the bot's own mentions is $0.001 a post. A reply with a link is up to $0.20. X also lists a "summoned" reply at $0.01, so the real price may be lower. Replies without a link are $0.015. So 100 take replies are at most about $20. Set a spending cap in the developer console too.
