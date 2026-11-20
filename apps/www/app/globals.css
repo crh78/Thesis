@@ -167,6 +167,9 @@ select.field { appearance: none; color: var(--text); }
 .tag-down { background: color-mix(in srgb, var(--down) 14%, transparent); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 30%, transparent); }
 a.tag-up:hover { background: rgba(169, 227, 186, 0.24); }
 .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+/* A take made from an X post: links to the post. */
+.tag-x { text-decoration: none; height: 22px; padding: 0 9px; font-size: 11px; margin-left: auto; flex-shrink: 0; }
+.tag-x:hover { color: var(--text); }
 
 .actions { display: flex; gap: 10px; margin-top: 16px; }
 

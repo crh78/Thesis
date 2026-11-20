@@ -2,7 +2,7 @@
 // The iOS feed's TakeRow: avatar column, then the take. The claim, return, sparkline and allocation
 // bar open the take page; Trade / Fade open it with that sheet up; then comments, save and share.
 import Link from "next/link";
-import { authorName, closedReason, dayLabel, isDeleted, pct, SERIES, takeState, type Take, fadeable } from "@/lib/data";
+import { authorName, closedReason, dayLabel, isDeleted, pct, SERIES, takeState, type Take, fadeable, xSource } from "@/lib/data";
 import Avatar from "./Avatar";
 
 export type FeedTake = Take & { tags?: string[]; history?: number[]; topic?: string; money_in?: number; posting?: boolean };
@@ -72,6 +72,9 @@ export default function TakeRow({ take, saved, onSave, mine = false }: { take: F
             <b>{authorName(take.author)}</b>
             <span className="muted">{gone ? "" : `@${take.author.handle} · `}{age(take.created_at)}</span>
           </Link>
+          {xSource(take) ? (
+            <a className="tag tag-x" href={xSource(take)!} target="_blank" rel="noopener noreferrer nofollow" aria-label="Take from X: open the post">Take from X ↗</a>
+          ) : null}
         </div>
         <Link href={href} className="trow-body">
           <div className="trow-claim">{take.claim}</div>

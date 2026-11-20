@@ -8,7 +8,7 @@ import Comments from "@/components/Comments";
 import { ShareIcon } from "@/components/Icons";
 import PnlShare from "@/components/PnlShare";
 import TradeDock from "@/components/TradeDock";
-import { assetKeys, authorName, calledIt, closedReason, getReceipt, getTake, isDeleted, pct, stateLabel, takeReturn, takeState } from "@/lib/data";
+import { assetKeys, authorName, calledIt, closedReason, getReceipt, getTake, isDeleted, pct, stateLabel, takeReturn, takeState, xSource } from "@/lib/data";
 
 export const revalidate = 15;
 
@@ -72,7 +72,7 @@ export default async function TakePage({ params }: Props) {
       <div className="caps">
         {take.risk} risk{state.open ? "" : ` · ${stateLabel(state, ret)}`}
       </div>
-      {take.source && /^https?:\/\//.test(take.source.url) ? (
+      {take.source && /^https?:\/\//.test(take.source.url) && !xSource(take) ? (
         <a className="via" href={take.source.url} target="_blank" rel="noopener noreferrer nofollow">
           via {take.source.label} ↗
         </a>
@@ -81,6 +81,7 @@ export default async function TakePage({ params }: Props) {
       <div className={`big ${ret >= 0 ? "up" : "down"}`}>{pct(ret)}</div>
       {/* Called it (the take's card), and for anyone holding it, their own P&L to share. */}
       <div className="tags">
+        {xSource(take) ? <a className="tag" href={xSource(take)!} target="_blank" rel="noopener noreferrer nofollow" aria-label="Take from X: open the post">Take from X ↗</a> : null}
         {calledIt(ret) ? <Link className="tag tag-up" href={`/c/${take.id}`} aria-label="Called it: share">Called it <ShareIcon className="tag-icon" /></Link> : null}
         <PnlShare takeId={take.id} />
       </div>
