@@ -289,6 +289,28 @@ export async function getReceipt(id: string): Promise<Receipt | null> {
 }
 const RECEIPT_TIMEOUT_MS = 5000;
 
+/** A profile's Solana wallet (profiles are public), or null. */
+export async function getProfileWallet(profileId: string): Promise<string | null> {
+  if (!UUID.test(profileId)) return null;
+  const r = await fetch(`${supabaseUrl()}/rest/v1/profiles?select=solana_address&id=eq.${profileId}`, {
+    headers: { apikey: supabaseKey() },
+    next: { revalidate: 3600 },
+  }).catch(() => null);
+  const rows = r?.ok ? ((await r.json().catch(() => [])) as { solana_address: string | null }[]) : [];
+  return rows[0]?.solana_address ?? null;
+}
+
+/** A wallet's portfolio over all its history (the fork API's chart: deposits don't move it), or null. */
+export async function getPortfolioHistory(wallet: string): Promise<{ value: number; change: number; changePct: number; points: { at: number; value: number }[] } | null> {
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet)) return null;
+  const r = await fetch(`${forkApiUrl()}/wallets/${wallet}/history?range=ALL`, {
+    headers: { "x-thesis-service-key": forkServiceKey() },
+    next: { revalidate: 300 },
+    signal: AbortSignal.timeout(RECEIPT_TIMEOUT_MS),
+  }).catch(() => null);
+  return r?.ok ? await r.json().catch(() => null) : null;
+}
+
 /**
  * Your return on one side of a take, from your open positions on it: what's held now over what it
  * cost (each position's cost scaled to the part still held after partial sales), in percent; null

@@ -44,6 +44,8 @@ const out = await plan(
     vet: vetter({ openaiApiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_AGENT_MODEL || undefined }),
     basket: basketConfigFromEnv(),
     trading: tradeCfg ? agentApi(tradeCfg) : undefined,
+    // "score" is read-only: always on when the bot's env has the agent's settings.
+    lookup: (() => { const c = agentApiConfigFromEnv(); return c ? agentApi(c) : undefined; })(),
   },
 );
 if (out.kind === "skip") console.log(`(stays quiet: ${out.reason})`);

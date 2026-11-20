@@ -3,7 +3,7 @@
 // the asker's own account. No X calls here, so `pnpm try` runs the same path offline.
 import { buildBasket, takeIdFrom, type AgentApi, type BasketConfig, type TradeResult } from "@thesis/agent";
 import {
-  EXPLAIN, NO_EXPOSURE, NOT_HELD, NOT_LINKED, overLimit, plainCommand, safeClaim, SELL_KEEP_10, SELL_WHICH, sellIntent, sellReply,
+  EXPLAIN, NO_EXPOSURE, NOT_HELD, NOT_LINKED, overLimit, plainCommand, safeClaim, scoreIntent, scoreReply, SELL_KEEP_10, SELL_WHICH, sellIntent, sellReply,
   TAKE_TAIL, takeReply, takeTradeReply, TRADE_FAILED, tradeIntent, tradeReply,
 } from "./compose.ts";
 import type { Mention, Vet } from "./vet.ts";
@@ -39,7 +39,7 @@ export type Plan =
     kind: "reply"; text: string; link?: string;
     /** The basket as a picture (the web app's /d/<id>/basket.png), attached to the reply. */
     image?: string;
-    what: "take" | "no_exposure" | "explain" | "opt_out" | "opt_in" | "trade" | "trade_refused" | "trade_failed" | "not_linked" | "sell";
+    what: "take" | "no_exposure" | "explain" | "opt_out" | "opt_in" | "trade" | "trade_refused" | "trade_failed" | "not_linked" | "sell" | "score";
     trade?: { status: string; takeId?: string; error?: string };
     remember?: Remember;
   };
@@ -73,7 +73,7 @@ function refusal(r: Extract<TradeResult, { ok: false }>): Plan {
 const failed = (r: { status: string; takeId?: string; error?: string }): Plan =>
   ({ kind: "reply", text: TRADE_FAILED, what: "trade_failed", trade: { status: r.status, takeId: r.takeId, error: r.error } });
 
-export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConfig; trading?: AgentApi; memory?: Memory }): Promise<Plan> {
+export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConfig; trading?: AgentApi; memory?: Memory; lookup?: AgentApi }): Promise<Plan> {
   const trading = deps.trading && m.authorId ? deps.trading : undefined;
   const mem = deps.memory;
   const who = { x: m.authorId ?? "" };
@@ -83,6 +83,15 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
   const linkTake = (m.links ?? []).map((u) => (/\/t\//.test(u) ? takeIdFrom(u) : null)).find(Boolean) ?? null;
   // A reply to one of the bot's own posts: what that post carried.
   const parentPost = m.toBot && m.parentId ? mem?.botPost(m.parentId) : undefined;
+
+  // "score": the Thesis record of the post's author (under someone's post), "score @jake", or "score me".
+  const sc = deps.lookup ? scoreIntent(m.text) : null;
+  if (sc) {
+    const parentAuthor = m.parent && !m.toBot ? m.parent.username.toLowerCase() : null;
+    const target = sc.handle === "me" ? me : sc.handle ?? parentAuthor ?? me;
+    const s = await deps.lookup!.score(target);
+    return { kind: "reply", text: scoreReply(target, target === me, s), what: "score", ...(s.found ? { image: `${web}/u/${encodeURIComponent(s.handle)}/score.png` } : {}) };
+  }
 
   // "sell", "sell half", "sell 25%", "sell $20": the take under this reply, or the one traded in this thread.
   const sell = trading ? sellIntent(m.text) : null;
