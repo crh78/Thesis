@@ -9,8 +9,11 @@ const rects = (logo as { rects: { x: number; y: number; w: number; fill: string 
  * The Pixel reactions mark. With `assemble`, its 82 squares fly in from a scattered cloud and snap
  * onto the grid, then the two reaction avatars pop in. `size` is the mark's box in px (viewBox 100).
  */
-/** `from`: px offset (from the mark's top-left) the squares burst out of, starting red, like taillights breaking apart. */
-export const Mark: React.FC<{ size: number; assemble?: boolean; start?: number; from?: [number, number] }> = ({ size, assemble = false, start = 0, from }) => {
+/**
+ * `from`: px offsets (from the mark's top-left) the squares burst out of, starting red, like taillights
+ * breaking apart; the squares split evenly between the points. `burst`: the frame they leave (default 2).
+ */
+export const Mark: React.FC<{ size: number; assemble?: boolean; start?: number; from?: [number, number][]; burst?: number }> = ({ size, assemble = false, start = 0, from, burst = 2 }) => {
   const frame = useCurrentFrame() - start;
   const { fps } = useVideoConfig();
   const k = size / 100;
@@ -20,20 +23,23 @@ export const Mark: React.FC<{ size: number; assemble?: boolean; start?: number; 
     <div style={{ position: "relative", width: size, height: size }}>
       {rects.map((r, i) => {
         const dist = Math.hypot(r.x - cx, r.y - cy);
-        const delay = assemble ? (from ? 2 + rand(i) * 16 : 4 + dist * 0.55 + rand(i) * 10) : 0;
+        const delay = assemble ? (from ? burst + rand(i) * 14 : 4 + dist * 0.55 + rand(i) * 10) : 0;
         const s = assemble ? sp(frame, fps, delay, 16, 0.9) : 1;
         const ang = rand(i + 1) * Math.PI * 2;
         const far = 260 + rand(i + 2) * 520;
-        const x0 = from ? from[0] - r.x * k + (rand(i + 4) - 0.5) * 40 : Math.cos(ang) * far;
-        const y0 = from ? from[1] - r.y * k + (rand(i + 5) - 0.5) * 24 : Math.sin(ang) * far;
+        const src = from ? from[i % from.length] : [0, 0];
+        const x0 = from ? src[0] - r.x * k + (rand(i + 4) - 0.5) * 14 : Math.cos(ang) * far;
+        // squares from a point arc up on their way to the grid instead of flying in a straight line
+        const y0 = from ? src[1] - r.y * k + (rand(i + 5) - 0.5) * 8 : Math.sin(ang) * far;
+        const arc = from ? -Math.sin(Math.PI * Math.min(1, s)) * (60 + rand(i + 6) * 90) : 0;
         const rot = (rand(i + 3) - 0.5) * 360;
-        const o = assemble ? (from ? interpolate(frame, [0, 3], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) : interpolate(frame, [delay - 6, delay + 4], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })) : 1;
+        const o = assemble ? (from ? interpolate(frame, [delay - 1, delay + 2], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) : interpolate(frame, [delay - 6, delay + 4], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })) : 1;
         const red = from && assemble ? Math.max(0, 1 - s * 1.6) : 0;
         const glow = assemble ? Math.max(0, 1 - Math.abs(frame - delay - 12) / 10) : 0;
         return (
           <div key={i} style={{
             position: "absolute", left: r.x * k, top: r.y * k, width: r.w * k, height: r.w * k, borderRadius: 0.5 * k, background: red > 0.5 ? "#FF3B30" : r.fill,
-            opacity: o, transform: `translate(${x0 * (1 - s)}px, ${y0 * (1 - s)}px) rotate(${rot * (1 - s)}deg) scale(${0.4 + 0.6 * s})`,
+            opacity: o, transform: `translate(${x0 * (1 - s)}px, ${y0 * (1 - s) + arc}px) rotate(${rot * (1 - s)}deg) scale(${0.4 + 0.6 * s})`,
             boxShadow: red > 0 ? `0 0 ${18 * red}px #FF3B30` : glow > 0 ? `0 0 ${14 * glow}px ${r.fill}` : undefined,
           }} />
         );

@@ -15,20 +15,48 @@ const BET_BASKET = [
 ];
 
 /* 1 ─ The logo assembles from pixels. */
+// The story's last shot (s8) hands over its taillights: frame 0 here is s8 at 3.30 s, where the join
+// (build-film.sh) starts a 0.5 s crossfade. Measured from s8 at 1920x1080: [frame, left x, right x], y 556.
+const TAIL: [number, number, number][] = [[0, 1469, 1541], [3, 1484, 1545], [6, 1496, 1547], [9, 1506, 1550], [12, 1515, 1554], [15, 1522, 1557]];
+const TAIL_Y = 556;
+const BURST = 13;
+const MARK_AT: [number, number] = [795, 300]; // the 330px mark's top-left on the 1920x1080 frame (before the lift)
+const tailX = (f: number, side: 1 | 2) => interpolate(f, TAIL.map((t) => t[0]), TAIL.map((t) => t[side]), { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+
+/** The car's two taillights, still glowing as the street dissolves, until they break into the mark's squares. */
+const Taillights: React.FC = () => {
+  const f = useCurrentFrame();
+  const o = interpolate(f, [BURST, BURST + 10], [1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const w = interpolate(f, [0, 15], [40, 22], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const flare = 1 + 0.6 * Math.max(0, 1 - Math.abs(f - BURST) / 4);
+  return (
+    <AbsoluteFill style={{ opacity: o }}>
+      {([1, 2] as const).map((side) => (
+        <div key={side} style={{ position: "absolute", left: tailX(f, side) - w / 2, top: TAIL_Y - w * 0.18, width: w, height: w * 0.36, borderRadius: w,
+          background: "#FF4A3D", boxShadow: `0 0 ${10 * flare}px #FF3B30, 0 0 ${26 * flare}px rgba(255,59,48,0.7)`, transform: `scale(${flare})` }} />
+      ))}
+    </AbsoluteFill>
+  );
+};
+
 export const LogoScene: React.FC<{ dur: number }> = ({ dur }) => {
   const f = useCurrentFrame();
   const lift = interpolate(f, [58, 78], [0, -40], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: easeInOut });
+  const from: [number, number][] = ([1, 2] as const).map((side) => [tailX(BURST, side) - MARK_AT[0], TAIL_Y - MARK_AT[1]]);
   return (
+    <>
+    <Taillights />
     <Scene dur={dur} edge={8}>
       <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
         <div style={{ transform: `translateY(${lift}px)`, display: "flex", flexDirection: "column", alignItems: "center" }}>
-          <Mark size={330} assemble from={[1511 - 795, 619 - 300]} />
+          <Mark size={330} assemble from={from} burst={BURST} />
           <div style={{ marginTop: -18 }}>
             <Wordmark size={120} start={60} tagline="social trading for ideas" />
           </div>
         </div>
       </AbsoluteFill>
     </Scene>
+    </>
   );
 };
 

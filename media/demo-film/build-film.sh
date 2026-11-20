@@ -9,9 +9,11 @@
 #   ./build-film.sh --story-only    # just the story → film/out/story.mp4
 #
 # Story: the Seedance shots in film/public/shots, straight cuts, a light grade, grain, vignette and
-# letterbox, the "Six months later." card, fade in at the top and out on the taillights.
+# letterbox, the "Six months later." card and the dialogue captions (story-text.py, captions.json), fade in at the top.
 # Walkthrough: Remotion's "Guide" composition, re-rendered only when film/src or film/public (not the
-# story shots) changed since the cached render. Join: the taillights crossfade (0.4s) into the logo.
+# story shots) changed since the cached render. Join: 3.30 s into s8 the street crossfades (0.5 s) into the
+# logo scene, whose two taillights sit where the car's are and then break into the mark (LogoScene, src/scenes.tsx).
+# Needs: ffmpeg, python3 with Pillow (pip install pillow), and node for Remotion.
 set -e
 cd "${0:A:h}"
 COMP=${COMP:-Guide}
@@ -30,16 +32,17 @@ t0=$(date +%s)
 : > $TMP/list.txt
 for s in intro s1 s2 s3 s3b s4a s4x s4b s4c CARD s5 s6 s7 s8; do
   if [ $s = CARD ]; then
-    ffmpeg -v error -y -f lavfi -t 2.2 -i "color=c=black:s=${W}x${H}:r=30" -f lavfi -t 2.2 -i "anullsrc=r=48000:cl=stereo" \
-      -vf "drawtext=fontfile=$FONTS/GeistSerif-Regular.ttf:text='Six months later.':x=(w-tw)/2:y=(h-th)/2:fontsize=$(( H * 7 / 100 )):fontcolor=white:alpha='if(lt(t,0.3),0,if(lt(t,0.75),(t-0.3)/0.45,if(gt(t,1.7),max(0,(2.15-t)/0.45),1)))'" \
-      $enc -shortest $TMP/card.mp4
+    python3 story-text.py card $TMP/card.png $W $H
+    ffmpeg -v error -y -f lavfi -t 2.2 -i "color=c=black:s=${W}x${H}:r=30" -loop 1 -t 2.2 -i $TMP/card.png -f lavfi -t 2.2 -i "anullsrc=r=48000:cl=stereo" \
+      -filter_complex "[1:v]format=rgba,fade=t=in:st=0.3:d=0.45:alpha=1,fade=t=out:st=1.7:d=0.45:alpha=1[c];[0:v][c]overlay=format=auto,format=yuv420p[v]" \
+      -map "[v]" -map 2:a $enc -t 2.2 $TMP/card.mp4
     echo "file '$TMP/card.mp4'" >> $TMP/list.txt; continue
   fi
   f=film/public/shots/$s.mp4
   D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 $f)
   vf=$look; af="aresample=48000"
   [ $s = intro ] && vf="$vf,fade=t=in:d=0.6"
-  [ $s = s8 ] && vf="$vf,fade=t=out:st=$(( D - 0.7 )):d=0.7" && af="$af,afade=t=out:st=$(( D - 0.7 )):d=0.7"
+  [ $s = s8 ] && S8D=$D   # no fade here: the join hands the taillights over to the logo
   if [ $s = s6 ]; then
     # the punchline cut away a second early: its last second (their faces dropping) plays at half speed,
     # with the sound playing out and fading, so the reaction lands (+1s)
@@ -56,7 +59,8 @@ for s in intro s1 s2 s3 s3b s4a s4x s4b s4c CARD s5 s6 s7 s8; do
   echo "file '$TMP/$s.mp4'" >> $TMP/list.txt
 done
 ffmpeg -v error -y -f concat -safe 0 -i $TMP/list.txt -c copy $TMP/story-joined.mp4
-ffmpeg -v error -y -i $TMP/story-joined.mp4 -map 0:v -map 0:a -c:v copy -af "loudnorm=I=-16:TP=-1.5:LRA=11" -ar 48000 -c:a aac -b:a 192k $OUTD/story$SUF.mp4
+ffmpeg -v error -y -i $TMP/story-joined.mp4 -map 0:v -map 0:a -c:v copy -af "loudnorm=I=-16:TP=-1.5:LRA=11" -ar 48000 -c:a aac -b:a 192k $TMP/story-loud.mp4
+python3 story-text.py captions $TMP/story-loud.mp4 $OUTD/story$SUF.mp4
 SD=$(ffprobe -v error -show_entries format=duration -of csv=p=0 $OUTD/story$SUF.mp4)
 echo "story: ${SD}s in $(( $(date +%s) - t0 ))s → $OUTD/story$SUF.mp4"
 if (( STORY_ONLY )); then rm -rf $TMP; exit 0; fi
@@ -101,11 +105,13 @@ else
 fi
 cd ..
 
-# ── join: the taillights fade into the logo's pixel burst ───────────────────────────
+# ── join: the street dissolves around the taillights, which break into the logo's pixels ──
 OUT=$OUTD/thesis-film-full.mp4; (( PREVIEW )) && OUT=$OUTD/thesis-film-preview.mp4
 TD=$(ffprobe -v error -show_entries format=duration -of csv=p=0 film/$TECH)
+S8D=${S8D:-$(ffprobe -v error -show_entries format=duration -of csv=p=0 film/public/shots/s8.mp4)}
+HAND=$(( SD - S8D + 3.30 ))   # s8 at 3.30 s = frame 0 of the logo scene (TAIL in src/scenes.tsx is measured from there)
 ffmpeg -v error -y -i $OUTD/story$SUF.mp4 -i film/$TECH -filter_complex \
-  "[0:v]fps=30,settb=AVTB[s];[1:v]fps=30,scale=${W}:${H},settb=AVTB[t];[s][t]xfade=transition=fade:duration=0.4:offset=$(( SD - 0.4 ))[v];[0:a]apad=whole_dur=$(( SD + TD - 0.4 ))[a]" \
+  "[0:v]trim=0:$(( HAND + 0.5 )),setpts=PTS-STARTPTS,fps=30,settb=AVTB[s];[1:v]fps=30,scale=${W}:${H},settb=AVTB[t];[s][t]xfade=transition=fade:duration=0.5:offset=${HAND}[v];[0:a]atrim=0:$(( HAND + 0.5 )),afade=t=out:st=$(( HAND - 0.28 )):d=0.78,apad=whole_dur=$(( HAND + TD ))[a]" \
   -map "[v]" -map "[a]" -c:v libx264 -crf 21 -preset medium -pix_fmt yuv420p -c:a aac -b:a 192k $OUT
 rm -rf $TMP
 echo "film: $(ffprobe -v error -show_entries format=duration -of csv=p=0 $OUT)s → $OUT"

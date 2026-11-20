@@ -4,14 +4,17 @@ The Thesis promo: a stylized 3D story made with Seedance, then a walkthrough of 
 
 | Cut | File | Length | What it is |
 |---|---|---|---|
-| **Current (16:9)** | [`film/out/thesis-film-walkthrough.mp4`](film/out/thesis-film-walkthrough.mp4) | 3:19 | The cinematic story (0:00–1:22), then an 8-step walkthrough of the app (1:22–3:19). |
+| **Current (16:9)** | `film/out/thesis-film-full.mp4` (built, not committed) | 3:19 | The cinematic story with captions (0:00–1:21), then an 8-step walkthrough of the app (1:21–3:19). Build it with `./build-film.sh`. |
+| Earlier 16:9 story | [`film/out/thesis-film-walkthrough.mp4`](film/out/thesis-film-walkthrough.mp4) | 1:03 | An early cut of the 16:9 story on its own, without the walkthrough. It isn't the current film. |
 | Original (vertical story) | [`film/out/thesis-film-final.mp4`](film/out/thesis-film-final.mp4) | 2:06 | The vertical "I own the place" reel, then the first Remotion technical section with a lo-fi bed. Kept as it was; see [The original cut](#the-original-cut). |
 
-Both are 1920×1080 at 30 fps.
+All are 1920×1080 at 30 fps. The current cut has no music in the repo (see **Sound** under Part 2).
 
 **Git LFS:** every video, image and audio file lives in Git LFS. Run `brew install git-lfs && git lfs install && git lfs pull` once, or you'll get pointer files.
 
 ## Quick start
+
+Needs ffmpeg, node, and python3 with Pillow (`pip install pillow`) for the captions and the "Six months later." card.
 
 ```
 cd media/demo-film/film && npm ci && cd ..
@@ -22,17 +25,20 @@ cd media/demo-film/film && npm ci && cd ..
 - **To change the walkthrough,** edit `film/src/Guide.tsx` and run `./build-film.sh` again. Only the walkthrough re-renders; the story is rebuilt with ffmpeg in about a minute.
 - **To change one step,** run `SCENE=Buy ./build-film.sh`. It re-renders only that step's frames and splices them into the cached render. This only works if the step's length is unchanged.
 - **To change the story,** swap or re-cut a shot in `film/public/shots/` and run `./build-film.sh --story-only`, or the full build. The cached walkthrough is reused.
+- **To change a caption,** edit `captions.json` (`[start, end, text]`, seconds into the story; `\n` makes two lines) and rebuild. If a shot's length changes, the captions after it move with it, so shift their times too.
 - **To preview live,** run `cd film && npm run studio`:
   - `Guide` is the walkthrough on its own.
   - `Story` is the story in Remotion (slower than the ffmpeg build, same look).
   - `FullFilm` is both together.
-- **When you're happy with a build,** copy `film/out/thesis-film-full.mp4` over `film/out/thesis-film-walkthrough.mp4` and commit. That's the only file in `film/out/` that git tracks besides the original cut.
+- **When you're happy with a build,** copy `film/out/thesis-film-full.mp4` over `film/out/thesis-film-walkthrough.mp4` and commit it (with git-lfs installed). That's the only file in `film/out/` that git tracks besides the original cut.
 
 ## Layout
 
 ```
 media/demo-film/
 ├── build-film.sh              the whole 16:9 film: story (ffmpeg) + walkthrough (Remotion, cached) + join
+├── story-text.py              draws the "Six months later." card and burns in the captions (Pillow)
+├── captions.json              the story's dialogue captions: [start, end, text]
 ├── composite-s4x.sh / .py     tracks the phone in shot s4x and composites the lock screen onto it
 ├── reel/                      Seedance: prompts, references, every generated take
 │   ├── shots-16x9.json        prompts for the 16:9 story (style, reference images, one entry per shot)
@@ -46,7 +52,7 @@ media/demo-film/
 │   ├── title.sh               burns "thesis / social trading for ideas" + "a short film" onto an intro clip
 │   ├── out/, build-reel.sh    the original vertical reel's takes and cutter
 │   ├── music.py, music/       music beds (Lyria 2 on Replicate)
-│   └── app/                   raw simulator recordings of the take flow
+│   └── app/                   the original cut's raw simulator recording
 ├── film/                      Remotion
 │   ├── remotion.config.ts     render settings (8 tabs, GPU, system Chrome)
 │   ├── src/Guide.tsx          the walkthrough: CHAPTERS (steps, notes, spotlights, taps) + the drawn phone screens
@@ -72,7 +78,9 @@ About 82 s of stylized 3D, every shot generated with Seedance 2.5 from `reel/sho
 - **The idea:** "Who's actually winning? The house." So he builds the take "everyone is betting on everything" in Thesis.
 - **The take pays off:** +$20K, then his phone blows up with people backing and copying him, then +$100K, then +$1.25M.
 - **Six months later:** she comes back, and he owns the place.
-- **Ending:** "I made my first million. Lemme show you how you can do it too." He drives off, and the taillights fade into the logo.
+- **Ending:** "I made my first million. Lemme show you how you can do it too." He drives off. As the street dissolves, his two taillights stay lit, then break apart into the squares of the logo.
+
+The dialogue is captioned (`captions.json`, from Whisper word timings on the built story, checked against the prompts). The TV anchor in s4a and the shouting in s4c aren't captioned, because they aren't clear enough to transcribe.
 
 | Shot | In `film/public/shots/` | Source take (`reel/out-16x9/…`) |
 |---|---|---|
@@ -85,7 +93,7 @@ About 82 s of stylized 3D, every shot generated with Seedance 2.5 from `reel/sho
 | s4x phone blows up | `s4x.mp4` | take 4 (`s4x-raw.mp4`) with a lock screen composited onto the phone (see below) |
 | s4b +$100K | `s4b.mp4` | take 1 |
 | s4c +$1.25M | `s4c.mp4` | take 1 |
-| "Six months later." | (drawn by build-film.sh) | |
+| "Six months later." | (drawn by `story-text.py`) | |
 | s5 she's back | `s5.mp4` | take 3 |
 | s6 punchline | `s6.mp4` | take 1 (its last second plays at half speed in the build) |
 | s7 first million | `s7.mp4` | take 1 |
@@ -96,8 +104,8 @@ About 82 s of stylized 3D, every shot generated with Seedance 2.5 from `reel/sho
 **Generating new takes (costs money):**
 
 ```
-python3 reel/gen.py --config shots-16x9.json cost --res 480p --takes 1   # price check first
-python3 reel/gen.py --config shots-16x9.json shots --only s5 --takes 2   # Seedance 2.5 ≈ $0.10/s at 480p
+python3 gen.py --config shots-16x9.json cost --res 480p --takes 1   # price check first
+python3 gen.py --config shots-16x9.json shots --only s5 --takes 2   # Seedance 2.5 ≈ $0.10/s at 480p
 ```
 
 Run these from `reel/`. Prices and token setup are under [Generating new shots](#generating-new-shots-costs-money).
@@ -124,21 +132,22 @@ About 1:57 after the story. It follows one take, "Betting apps are taking over",
 - **One phone stays on screen.** The left column has a step number, a headline, numbered notes and a mono line of technical detail.
 - **A spotlight shows what each note is about.** It dims the rest of the phone screen, with a thin outline just outside the area, so nothing covers it. Tap ripples show the taps.
 - **What's real:**
-  - **Steps 1–3** play the real simulator recording (`public/app/take-flow.mp4`, from `reel/app/take-flow-raw.mp4`), labelled "Real app · screen recording" on screen.
+  - **Steps 1–3** play the real simulator recording (`public/app/take-flow.mp4`), labelled "Real app · screen recording" on screen. Its raw recording isn't in the repo; `reel/app/` only has the original cut's `take-everyone-betting-raw.mp4`.
   - **The share cards** in the Cards scene were rendered by the app (`ios-demo/render-cards.patch`).
   - **Steps 4–8** (buy sheet, take page, group chat, X, copy) are drawn in `Guide.tsx` to match the app; they aren't recordings.
-- **Order:**
-  - 1 Say it
-  - 2 Build
-  - 3 Tweak
-  - *Any asset class* (full-frame; the phone steps aside)
-  - 4 Buy
-  - 5 Trade / fade
-  - 6 Group chat
-  - 7 X
-  - 8 Copy
-  - *Cards* (on-chain receipt + card looks)
-  - *Badges*
+- **Order** (each step's `label`, which is also what `SCENE=` takes):
+  - The logo: the story's taillights break apart into the pixel mark (`LogoScene`, 110 frames)
+  - 1 `Say it`
+  - 2 `Build`
+  - 3 `Tweak`
+  - `Any asset` (full-frame; the phone steps aside)
+  - 4 `Buy`
+  - 5 `Trade` (back or fade)
+  - 6 `Chats` (group chat)
+  - 7 `X`
+  - 8 `Copy`
+  - `Cards` (on-chain receipt + card looks)
+  - `Badges`
   - End card
 - **Editing `CHAPTERS`:**
   - `dur` is in frames at 30 fps.
@@ -149,7 +158,7 @@ About 1:57 after the story. It follows one take, "Betting apps are taking over",
   - `full(label, dur, Scene)` drops in a full-frame scene from `scenes.tsx`.
 - **The recording's timing:** steps 1–3 play it continuously, starting 2.5 s in (`V0`). A frame `f` into step 1 is `2.5 + f / 30` s of footage. Step 2 starts at 13.0 s and step 3 at 21.5 s.
 - **Numbers:** all handles, chats, posts, returns and fees in the drawn screens are illustrative.
-- **Sound:** the walkthrough has no sound yet. `mix.sh` was written for the original cut's timing and needs adjusting before it can lay a bed under this one.
+- **Sound:** the walkthrough itself is silent. The music on the current cut is a third-party track laid on after the build, outside the repo, so `build-film.sh` gives you the film with only the story's own sound. `mix.sh` was written for the original cut's timing and doesn't fit this one.
 
 ## How the build got fast
 
@@ -159,9 +168,9 @@ About 1:57 after the story. It follows one take, "Betting apps are taking over",
    - scale to 1080p
    - grade (`eq=contrast=1.06:saturation=1.08`), vignette, grain
    - letterbox with `drawbox`
-   - the serif "Six months later." card with `drawtext`
+   - the serif "Six months later." card, drawn by `story-text.py` (Homebrew's ffmpeg has no `drawtext`)
    - the s6 slow-motion tail
-   - then the concat demuxer and `loudnorm`
+   - then the concat demuxer, `loudnorm`, and the captions (`story-text.py captions`, about 2 min at 1080p)
 
    It used to take about 4–5 min to render the story's ~2,400 frames in Chrome; now it takes 40 s to 2 min.
 2. **The Remotion render is cached.** `film/out/guide.mp4` is re-rendered only when something in `film/src`, `film/public/img`, `film/public/fonts` or `film/public/app` is newer than it. Shots, music and story edits don't count.
@@ -173,6 +182,7 @@ About 1:57 after the story. It follows one take, "Betting apps are taking over",
    - `setChromiumOpenGlRenderer("angle")`: Metal on the GPU for the blurs, glows and blend modes.
    - Uses system Chrome, because Remotion's bundled headless shell crashed with "Target closed".
 5. **`--preview`** renders at 720p (`--scale=0.6667`) and builds the story at 1280×720 to match. It should be roughly 2× faster, but that hasn't been timed.
+6. **The join** starts the walkthrough 3.30 s into s8 with a 0.5 s crossfade, and fades the story's sound out over the same moment. The logo scene's first frames draw two taillights where the car's are at that point (`TAIL` in `src/scenes.tsx`, measured from s8), so the lights carry on through the dissolve and burst into the mark at frame 13. If s8 is swapped, re-measure `TAIL` or the lights will jump.
 
 | Build (measured on an M-series Mac) | Time |
 |---|---|
@@ -190,7 +200,7 @@ About 1:57 after the story. It follows one take, "Betting apps are taking over",
 The first version, kept as it was: the vertical Seedance reel (`reel/out/`, `reel/SCRIPT.md`) cut by `reel/build-reel.sh` into `film/public/reel.mp4`, then the `Film` composition (reel → fade → `Tech`), mixed with `mix.sh` into `film/out/thesis-film-final.mp4`.
 
 - `npm run render` renders `Film` → `out/film-nomusic.mp4`, then `mix.sh` → `out/thesis-film-final.mp4`, in about 7 min.
-- `src/Film.tsx` now points `Film` at the landscape reel (`public/reel16.mp4`, from `reel/build-reel-16x9.sh`) with a longer asset scene. That doesn't match `thesis-film-final.mp4` any more.
+- `src/Film.tsx` now plays the 16:9 story (`Story.tsx`) before `Tech`, with a longer asset scene. That doesn't match `thesis-film-final.mp4` any more.
 
 ### Editing the technical section (`Tech`)
 
@@ -201,12 +211,12 @@ npm run studio        # live preview: the "Film" composition is everything, "Tec
 npm run render        # renders out/film-nomusic.mp4, then mix.sh → out/thesis-film-final.mp4 (~7 min on an M-series Mac)
 ```
 
-- **Reorder, cut or retime scenes:** edit `SECTIONS` in `src/Film.tsx`. Lengths are in frames at 30 fps, and the total updates itself. Each scene fades in and out through `<Scene>`, and there's a 36-frame fade from the reel to black.
+- **Reorder, cut or retime scenes:** edit `SECTIONS` in `src/Film.tsx`. Lengths are in frames at 30 fps, and the total updates itself. Each scene fades in and out through `<Scene>`, and `Tech` fades in over the story's last 12 frames (`HANDOFF`).
 - **Change copy:** headlines are `<Headline a="…" b="…">` (the second line is green). The mono line along the bottom is `<Tech items={[…]}>`. Both are in `src/scenes.tsx`, one component per scene:
 
 | Scene | Component | What's on screen |
 |---|---|---|
-| logo | `LogoScene` | 82 pixel squares fly in and snap into the mark, then avatars pop in and "thesis" types out |
+| logo | `LogoScene` | the car's two taillights break into 82 pixel squares that arc into the mark, then avatars pop in and "thesis" types out |
 | tradable | `TradableScene` | "Your ideas, made tradable": a take → a 5-pick basket, plus the app's money screen |
 | risk | `RiskScene` | "Any idea. Any risk level.": one take ("AI is on the rise") at low/medium/high; changed rows highlight |
 | assets | `AssetScene` | "Any asset class": stocks, pre-IPO, prediction markets, perps, yield, collectibles; each gets its own visual, then they collapse into a donut |
@@ -244,7 +254,7 @@ PICK="s1=1 s6=1" ./build-reel.sh   # mix takes per shot
 ```
 
 - **What the script does:** it re-encodes each shot to one format, joins them with the concat demuxer, adds the muted blender intro and the "6 months later" card, and copies the result to `film/public/reel.mp4`.
-- **If the length changes,** update `REEL` in `film/src/Film.tsx` (seconds × 30) and `RAMP_AT` in `mix.sh`.
+- **If the length changes,** update `RAMP_AT` in `mix.sh`. (`REEL` in `film/src/Film.tsx` now follows the 16:9 story's length, so rebuilding the vertical cut means pointing it back at `public/reel.mp4`.)
 - **Don't join with one big ffmpeg filter:** that scrambled the audio, and every shot played s1's sound.
 
 #### Generating new shots (costs money)
