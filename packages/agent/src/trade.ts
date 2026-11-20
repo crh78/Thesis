@@ -72,9 +72,18 @@ export function agentApi(cfg: AgentApiConfig, f: typeof fetch = fetch) {
       return r.body.url;
     },
 
-    async trade(who: Who, surface: "x" | "imessage" | "copy" | "mcp", ref: string | null, ask: TradeAsk): Promise<TradeResult> {
+    /** A take's claim and its author's handle (null when there's no such take). */
+    async takeInfo(takeId: string): Promise<{ claim: string; author: string | null } | null> {
+      const r = await post<{ claim?: string; author?: string | null; error?: string }>("takes", { take_id: takeId });
+      if (r.status === 404) return null;
+      if (r.status !== 200 || !r.body.claim) throw new Error(`agent takes ${r.status}: ${r.body.error ?? ""}`);
+      return { claim: r.body.claim, author: r.body.author ?? null };
+    },
+
+    /** `wait: false` answers once the fork accepted the trade (status pending), not once it landed. */
+    async trade(who: Who, surface: "x" | "imessage" | "copy" | "mcp", ref: string | null, ask: TradeAsk, opts: { wait?: boolean } = {}): Promise<TradeResult> {
       const body = {
-        who, surface, ref, action: ask.action,
+        who, surface, ref, action: ask.action, ...(opts.wait === false ? { wait: false } : {}),
         ...(ask.action === "post" ? { draft_id: ask.draftId, usd: ask.usd } : { take_id: ask.takeId }),
         ...(ask.action === "back" || ask.action === "fade" ? { usd: ask.usd } : {}),
         ...(ask.action === "sell" ? { side: ask.side ?? "back", ...(ask.bps ? { bps: ask.bps } : ask.usd ? { usd: ask.usd } : {}) } : {}),
