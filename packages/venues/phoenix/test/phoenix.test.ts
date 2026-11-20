@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import {
+  BelowOneLot,
   decodeMarketOrder,
   decodeTrader,
   forkOnboardingPermission,
@@ -94,6 +95,9 @@ test("order size: collateral × leverage at the price, down to a lot", () => {
   assert.equal(orderSize(20_000_000n, 3, 161.69, 3), "0.371");
   assert.equal(orderSize(20_000_000n, 2, 76.66, 2), "0.52");
   assert.throws(() => orderSize(100n, 1, 76, 2), /less than one lot/);
+  // $5 of Bitcoin at $61,900 with 4 lot decimals: one lot is $6.19, and the error says so.
+  assert.throws(() => orderSize(5_000_000n, 1, 61_900, 4), (e: unknown) =>
+    e instanceof BelowOneLot && e.notionalUsd === 5 && Math.abs(e.lotUsd - 6.19) < 1e-9 && e.price === 61_900);
   assert.throws(() => orderSize(1_000_000n, 0, 76, 2), /leverage/);
 });
 

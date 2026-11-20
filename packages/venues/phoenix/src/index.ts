@@ -122,12 +122,31 @@ export function decodeMarketOrder(programId: PublicKey, keys: PublicKey[], data:
   }
 }
 
+/**
+ * A leg's position is smaller than the market's smallest order (one base lot). The fork API turns
+ * it into a 422 naming the stake the take needs (scripts/fork/api/routing.ts), not a 500.
+ */
+export class BelowOneLot extends Error {
+  /** The take leg's name, set by whoever knows it. */
+  leg?: string;
+  notionalUsd: number;
+  /** One base lot's value at `price`. */
+  lotUsd: number;
+  price: number;
+  constructor(notionalUsd: number, lotUsd: number, price: number) {
+    super(`$${notionalUsd.toFixed(2)} is less than one lot at $${price}`);
+    this.notionalUsd = notionalUsd;
+    this.lotUsd = lotUsd;
+    this.price = price;
+  }
+}
+
 /** Base units for `collateral` (USDC base units) × `leverage` at `price`, rounded down to a lot. */
 export function orderSize(collateral: bigint, leverage: number, price: number, baseLotsDecimals: number): string {
   if (!(price > 0) || !(leverage >= 1)) throw new Error("order size needs a price and a leverage of at least 1");
   const notional = (Number(collateral) / 1e6) * leverage;
   const lots = Math.floor((notional / price) * 10 ** baseLotsDecimals);
-  if (lots < 1) throw new Error(`$${notional.toFixed(2)} is less than one lot at $${price}`);
+  if (lots < 1) throw new BelowOneLot(notional, price / 10 ** baseLotsDecimals, price);
   return (lots / 10 ** baseLotsDecimals).toFixed(baseLotsDecimals);
 }
 

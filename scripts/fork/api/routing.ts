@@ -100,6 +100,7 @@ import { ApiError, MIN_STAKE_USD, USD, type ServiceOpts } from "./common.ts";
 import { LANE, jupiterBudget, newUse, type JupiterBudget, type JupiterUse, type Lane } from "./guard.ts";
 import { isPaper, type MappedLeg } from "./legs.ts";
 import { cardIdHex } from "@thesis/venues/collector-crypt";
+import { BelowOneLot } from "@thesis/venues/phoenix";
 import type { PhoenixDesk, PhoenixLeg } from "./phoenix.ts";
 
 const MAX_ACCOUNTS = 30;
@@ -228,6 +229,19 @@ const CARD_APP_ONLY = "Card legs are in the Thesis app only";
  * included legs' weight, rounded down. Must match the program's `escrow_share`: the receipt
  * escrows exactly this, and proof of trade wants the rest traded.
  */
+/**
+ * 422 `stake_too_small`: a Phoenix leg's share of `usd` is under one lot of its market (a $20
+ * back of "crypto sucks" puts $5 on Bitcoin, whose smallest order is about $6). Says the stake
+ * that clears it, with 3% for the price moving, and sends it as `minUsd`.
+ */
+export function stakeBelowLot(e: BelowOneLot, usd: number): ApiError {
+  const minUsd = Math.max(MIN_STAKE_USD, Math.ceil((usd * e.lotUsd * 1.03) / e.notionalUsd));
+  const what = e.leg ? `${e.leg}'s` : "one pick's";
+  const err = new ApiError(422, "stake_too_small", `This take needs at least $${minUsd}: ${what} share is under the smallest order Phoenix takes (about $${e.lotUsd.toFixed(2)}).`);
+  err.body = { minUsd, leg: e.leg ?? null, lotUsd: Number(e.lotUsd.toFixed(2)) };
+  return err;
+}
+
 export function escrowShare(legs: { spec: { weightBps: number }; how: MappedLeg["how"] }[], stake: bigint): bigint {
   const total = legs.reduce((n, l) => n + BigInt(l.spec.weightBps), 0n);
   const paper = legs.filter((l) => isPaper(l.how)).reduce((n, l) => n + BigInt(l.spec.weightBps), 0n);
@@ -561,6 +575,7 @@ export class Router {
     const venue = (await Promise.all(
       swapLegs.map((l, j) => this.#legFor(l, parts[j], shared.plan.ways.get(l.index)!, user, payer, side, subOf.get(l.index), lane, use, shared)),
     ).catch((e: unknown) => {
+      if (e instanceof BelowOneLot) throw stakeBelowLot(e, usd);
       throw use.refused ?? e;
     })).flat();
     return done(venue);
@@ -1202,6 +1217,9 @@ export class Router {
         leverage: l.spec.leverage,
         price,
         label: `${l.name} (Phoenix ${market.symbol}${l.spec.leverage > 1 ? ` ${l.spec.leverage}x` : ""})`,
+      }).catch((e: unknown) => {
+        if (e instanceof BelowOneLot) e.leg = l.name;
+        throw e;
       });
       return legs.map((v) => ({ ...v, output: { leg: l.index, account: v.outputAccount! }, how: "phoenix" as const, phoenix: { leg: l.index, sub: sub!, symbol: market.symbol } }));
     }
