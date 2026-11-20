@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LEG_KIND, SIDE } from "../src/types.ts";
-import { positionReturnBps } from "../src/math.ts";
+import { agreeSide, chainSide, positionReturnBps } from "../src/math.ts";
 
 const usd = (n: number) => BigInt(Math.round(n * 1e8));
 const leg = (kind: keyof typeof LEG_KIND, weightBps: number, leverage = 1) => ({ kind: LEG_KIND[kind], weightBps, leverage });
@@ -34,4 +34,14 @@ test("predictions both ways", () => {
 
 test("missing entry is null", () => {
   assert.equal(positionReturnBps([leg("spot", 10_000)], { side: SIDE.back, legsMask: 1, prices: [{ entry: 0n, exit: usd(1) }] }), null);
+});
+
+test("an inverted take agrees on the fade: agreeSide and chainSide flip both ways", () => {
+  assert.equal(agreeSide({ inverted: true }), "fade");
+  assert.equal(agreeSide({ inverted: false }), "back");
+  assert.equal(agreeSide({}), "back");
+  assert.equal(chainSide("back", { inverted: true }), "fade");
+  assert.equal(chainSide("fade", { inverted: true }), "back");
+  assert.equal(chainSide("back", { inverted: false }), "back");
+  assert.equal(chainSide(chainSide("fade", { inverted: true }), { inverted: true }), "fade");
 });

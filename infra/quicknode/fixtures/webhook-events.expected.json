@@ -45,7 +45,8 @@
       "risk": "medium",
       "horizonEnd": "1800000000",
       "legs": 2,
-      "stake": "10000000"
+      "stake": "10000000",
+      "inverted": false
     }
   },
   {

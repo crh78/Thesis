@@ -151,6 +151,7 @@ test("events convert to plain JSON rows", () => {
       horizonEnd: "1800000000",
       legs: 2,
       stake: "10000000",
+      inverted: false,
     },
   );
   assert.equal((created.data as { claimHash: number[] }).claimHash.length, 32);

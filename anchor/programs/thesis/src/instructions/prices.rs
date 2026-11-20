@@ -309,6 +309,7 @@ mod props {
             result_bps: 0,
             bump: 0,
             closed_at: 0,
+            inverted: false,
         }
     }
 

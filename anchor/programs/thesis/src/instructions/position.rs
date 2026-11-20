@@ -120,13 +120,13 @@ fn open_position<'info>(
     );
     let legs = take.legs.len();
     validate_legs_mask(args.legs_mask, legs)?;
+    // An author can't bet against their own call: no back of their own inverted take, no fade of
+    // any other.
+    require!(
+        ctx.accounts.owner.key() != take.author || side == take.agree_side(),
+        ThesisError::AuthorCannotFade
+    );
     if side == Side::Fade {
-        // An author can't bet against their own call.
-        require_keys_neq!(
-            ctx.accounts.owner.key(),
-            take.author,
-            ThesisError::AuthorCannotFade
-        );
         require!(
             included_legs(args.legs_mask, &take.legs).all(|leg| leg.fade_via != FadeVia::None),
             ThesisError::LegNotFadeable
@@ -209,10 +209,6 @@ fn open_position<'info>(
                 .total_backed
                 .checked_add(args.stake)
                 .ok_or(ThesisError::MathOverflow)?;
-            take.platform_fees_from_backs = take
-                .platform_fees_from_backs
-                .checked_add(platform_fee)
-                .ok_or(ThesisError::MathOverflow)?;
         }
         Side::Fade => {
             take.faders += 1;
@@ -221,6 +217,14 @@ fn open_position<'info>(
                 .checked_add(args.stake)
                 .ok_or(ThesisError::MathOverflow)?;
         }
+    }
+    // The creator boost counts the side that agrees with the take: backs, or fades of an
+    // inverted one.
+    if side == take.agree_side() {
+        take.platform_fees_from_backs = take
+            .platform_fees_from_backs
+            .checked_add(platform_fee)
+            .ok_or(ThesisError::MathOverflow)?;
     }
     take.open_positions += 1;
     take.creator_fees_unclaimed = take

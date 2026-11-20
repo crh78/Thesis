@@ -24,11 +24,14 @@ pub struct CreateTakeArgs {
     /// venue yet (or no route right now) is left out, so it never needs a price and the take's
     /// result is the author's real basket.
     pub legs_mask: u16,
+    /// The take bets against its basket: the author's buy-in is a fade, so every leg must be
+    /// fadeable (`Take::inverted`). Appended last, after `legs_mask`.
+    pub inverted: bool,
 }
 
 /// Creates the take and the author's buy-in position in one step: buying in is required to post.
-/// Goes last in the author's trade, with the same proof-of-trade checks as `back` (the ticket is
-/// for the author's buy-in position). Remaining accounts: the output accounts the trade's last
+/// Goes last in the author's trade, with the same proof-of-trade checks as `back` (or `fade`, for
+/// an inverted take; the ticket is for the author's buy-in position). Remaining accounts: the output accounts the trade's last
 /// bracket opened with, in leg order.
 #[event_cpi]
 #[derive(Accounts)]
@@ -117,6 +120,22 @@ pub fn handle_create_take<'info>(
         ThesisError::StakeBelowMinimum
     );
 
+    // An inverted take's author holds the fade, and so does everyone who agrees: every leg has to
+    // be one a fade can hold (a Phoenix short, or the No side of a prediction), not only the legs
+    // the author's buy-in bought, or agreeing would leave a leg out.
+    let side = agree_side(args.inverted);
+    if args.inverted {
+        require!(
+            args.legs.iter().all(|leg| leg.fade_via != FadeVia::None),
+            ThesisError::LegNotFadeable
+        );
+        require!(
+            args.legs.iter()
+                .all(|leg| leg.kind == LegKind::Prediction || leg.fade_via == FadeVia::PhoenixShort),
+            ThesisError::FadeNeedsPredictionLegs
+        );
+    }
+
     // The prediction share is held in escrow, not traded (paper fills at Gemini's prices).
     let escrowed = escrow_share(&args.legs, args.legs_mask, args.stake)?;
 
@@ -133,7 +152,7 @@ pub fn handle_create_take<'info>(
     let proved = finish_trade(
         &ctx.accounts.ticket,
         args.stake - escrowed,
-        required_outputs(&args.legs, args.legs_mask, Side::Back),
+        required_outputs(&args.legs, args.legs_mask, side),
     )?;
     emit_cpi!(proved);
 
@@ -178,10 +197,10 @@ pub fn handle_create_take<'info>(
         created_at: now,
         horizon_end: args.horizon_end,
         legs: args.legs.clone(),
-        backers: 1,
-        faders: 0,
-        total_backed: args.stake,
-        total_faded: 0,
+        backers: (side == Side::Back) as u32,
+        faders: (side == Side::Fade) as u32,
+        total_backed: if side == Side::Back { args.stake } else { 0 },
+        total_faded: if side == Side::Fade { args.stake } else { 0 },
         open_positions: 1,
         creator_fees_unclaimed: 0,
         platform_fees_from_backs: 0,
@@ -189,6 +208,7 @@ pub fn handle_create_take<'info>(
         result_bps: 0,
         bump: ctx.bumps.take,
         closed_at: 0,
+        inverted: args.inverted,
     });
 
     ctx.accounts.author_position.set_inner(Position {
@@ -196,7 +216,7 @@ pub fn handle_create_take<'info>(
         take: take_key,
         id: AUTHOR_POSITION_ID,
         rent_payer: ctx.accounts.payer.key(),
-        side: Side::Back,
+        side,
         stake: args.stake,
         opened_at: now,
         legs_mask,
@@ -221,12 +241,13 @@ pub fn handle_create_take<'info>(
         horizon_end: args.horizon_end,
         legs: args.legs.len() as u8,
         stake: args.stake,
+        inverted: args.inverted,
     });
     emit_cpi!(PositionOpened {
         take: take_key,
         position: ctx.accounts.author_position.key(),
         owner: author,
-        side: Side::Back,
+        side,
         stake: args.stake,
         legs_mask,
         fee,
