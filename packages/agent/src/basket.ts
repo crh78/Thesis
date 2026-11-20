@@ -31,6 +31,8 @@ export type DraftMeta = {
   source?: { text: string; url: string; label: string };
   /** The X bot's asker: the draft waits for them in the web app once they sign in with this X account. */
   forX?: string;
+  /** Another draft whose basket this one reuses (no second build): several people under one post. */
+  copyOf?: string;
 };
 
 type Leg = { id: string; name: string; kind: string; weight: number; side?: string | null; why: string };
@@ -77,7 +79,7 @@ export async function buildBasket(cfg: BasketConfig, args: BasketArgs, meta: Dra
     headers: { "content-type": "application/json", "x-bot-secret": cfg.botSecret },
     body: JSON.stringify({
       claim, risk: args.risk,
-      origin: meta.origin, context: meta.context, origin_ref: meta.originRef, for_x: meta.forX,
+      origin: meta.origin, context: meta.context, origin_ref: meta.originRef, for_x: meta.forX, copy_of: meta.copyOf,
       ...(meta.source ? { source: { text: meta.source.text.slice(0, 2000), url: meta.source.url, label: meta.source.label, kind: "x" } } : {}),
     }),
     signal: AbortSignal.timeout(35_000),

@@ -4,7 +4,7 @@
 import { agentApi, agentApiConfigFromEnv, basketConfigFromEnv } from "@thesis/agent";
 import { plan, type Plan } from "./bot.ts";
 import { OPTED_IN, OPTED_OUT, optCommand } from "./compose.ts";
-import { loadState, rollDay, saveState } from "./state.ts";
+import { loadState, memoryOf, rollDay, saveState } from "./state.ts";
 import { vetter } from "./vet.ts";
 import { fullText, linksIn, xClient, XError, type Mentions, type XPost } from "./x.ts";
 
@@ -43,8 +43,10 @@ const x = xClient({
   accessSecret: need("X_ACCESS_SECRET"),
 });
 const vet = vetter({ openaiApiKey: need("OPENAI_API_KEY"), model: process.env.OPENAI_AGENT_MODEL || undefined });
-const tradeCfg = TRADING ? agentApiConfigFromEnv() : null;
-const trading = tradeCfg ? agentApi(tradeCfg) : undefined;
+const agentCfg = agentApiConfigFromEnv();
+const trading = TRADING && agentCfg ? agentApi(agentCfg) : undefined;
+// Who has a Thesis account (people who haven't signed up get one reply); read-only, so also in dry runs.
+const lookup = agentCfg ? agentApi(agentCfg) : undefined;
 let basket: ReturnType<typeof basketConfigFromEnv>;
 try {
   basket = basketConfigFromEnv();
@@ -66,6 +68,7 @@ const me = await x.me().catch((e) => {
   process.exit(1);
 });
 const state = loadState(STATE_FILE);
+const memory = memoryOf(state);
 saveState(STATE_FILE, state);
 log("starting", { as: `@${me.username}`, dryRun: DRY_RUN, trading: !!trading, pollSec: POLL_MS / 1000, maxPerDay: MAX_PER_DAY, unlimited: [...UNLIMITED], sinceId: state.sinceId });
 
@@ -102,6 +105,17 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
 
   if (!text && !parentPost) { log("skip", { ...base, reason: "empty" }); return true; }
 
+  // Someone without a Thesis account gets one reply (it points to the bio), then no more until they sign up.
+  let firstReply = false;
+  if (capped && lookup && cmd !== "stop" && !(cmd === "start" && wasOut) && !state.known[p.author_id]) {
+    const w = await lookup.whois({ x: p.author_id }).catch(() => null);
+    if (w && (w.linked || w.signed_up === true)) state.known[p.author_id] = true;
+    else if (w?.signed_up === false) {
+      if (state.onceReplied[p.author_id]) { log("skip", { ...base, reason: "not signed up, had their one reply" }); return true; }
+      firstReply = true;
+    }
+  }
+
   let out: Plan;
   if (cmd === "stop") {
     out = { kind: "reply", text: OPTED_OUT, what: "opt_out" };
@@ -115,14 +129,26 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
       parent: parentPost && parentAuthor ? { text: fullText(parentPost), username: parentAuthor.username } : null,
       parentUrl: parentPost && parentAuthor ? `https://x.com/${parentAuthor.username}/status/${parentPost.id}` : null,
       toBot: parentPost?.author_id === me.id,
+      parentId: parentPost?.id ?? null,
+      conversationId: thread,
       authorId: p.author_id,
       links: [...linksIn(p), ...(parentPost ? linksIn(parentPost) : [])],
-    }, { vet, basket, trading });
+    }, { vet, basket, trading, memory });
   } catch (e) {
     log("plan failed, retrying next poll", { ...base, error: (e as Error).message });
     return false;
   }
   if (out.kind === "skip") { log("skip", { ...base, reason: out.reason }); return true; }
+  const reply = out;
+  // What a trade or basket leaves behind is kept whether or not the reply goes out; the bot's own
+  // post (for "back $20" or "sell" under it) only once it has an id.
+  const keep = (replyId?: string) => {
+    const r = reply.remember;
+    if (!r) return;
+    if (r.held) memory.rememberHeld(p.author_id, thread, r.held);
+    if (r.shared) memory.rememberShared(r.shared.parentId, r.shared.side, r.shared.value);
+    if (r.post && replyId) memory.rememberPost(replyId, r.post);
+  };
 
   if (DRY_RUN) {
     log("would reply", { ...base, what: out.what, text: out.text, ...(out.image && IMAGES ? { image: out.image } : {}), ...(out.trade ? { trade: out.trade } : {}) });
@@ -131,10 +157,13 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
       // The picture is a bonus: any failure posts the reply without it.
       const media = out.image && IMAGES ? await basketImage(out.image).catch((e) => { log("image failed", { ...base, error: (e as Error).message.slice(0, 160) }); return null; }) : null;
       const replyId = await x.reply(p.id, out.text, media ? [media] : []);
-      log("replied", { ...base, what: out.what, replyId, link: out.link, ...(out.trade ? { trade: out.trade } : {}) });
+      log("replied", { ...base, what: out.what, replyId, link: out.link, image: !!media, ...(out.trade ? { trade: out.trade } : {}) });
+      keep(replyId);
+      if (firstReply) state.onceReplied[p.author_id] = true;
     } catch (e) {
       if (e instanceof XError && e.status < 500 && e.status !== 429) {
         log("reply refused", { ...base, status: e.status, error: e.body.slice(0, 200) });
+        keep();
         return true;
       }
       log("reply failed, retrying next poll", { ...base, error: (e as Error).message });

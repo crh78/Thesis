@@ -91,6 +91,16 @@ export function privyClient(cfg: PrivyConfig, f: typeof fetch = fetch) {
 
   return {
     user: (did: string) => call<PrivyUser>("GET", `/v1/users/${encodeURIComponent(did)}`),
+    /** Whether a Thesis (Privy) user has this X account linked: true, false, or null when Privy didn't answer. */
+    async hasXAccount(subject: string): Promise<boolean | null> {
+      try {
+        await call<PrivyUser>("POST", "/v1/users/twitter/subject", { subject });
+        return true;
+      } catch (e) {
+        if (e instanceof PrivyError && (e.status === 404 || e.status === 400)) return false;
+        return null;
+      }
+    },
     wallet: (walletId: string) => call<PrivyWallet>("GET", `/v1/wallets/${encodeURIComponent(walletId)}`),
     /** The wallet id for an address, when the user's linked account doesn't carry one. */
     async walletIdFor(did: string, address: string): Promise<string | null> {
