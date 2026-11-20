@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { FIXED_HORIZON, plan, type MentionInput } from "../src/bot.ts";
+import { plan, type MentionInput } from "../src/bot.ts";
 import { readVerdict, type Verdict } from "../src/vet.ts";
 
 const mention: MentionInput = {
@@ -40,7 +40,7 @@ test("readVerdict defaults risk to medium and ignores what it can't read", () =>
   assert.equal(readVerdict(JSON.stringify({ action: "explain", reason: "what is this" }), mention).action, "explain");
 });
 
-test("plan never asks for a timeline: the draft gets the fixed horizon whatever the post says", async () => {
+test("plan never asks for a timeline: the draft is sent no horizon whatever the post says", async () => {
   let sent: Record<string, unknown> | null = null;
   globalThis.fetch = (async (_url: string, init: RequestInit) => {
     sent = JSON.parse(String(init.body));
@@ -60,7 +60,7 @@ test("plan never asks for a timeline: the draft gets the fixed horizon whatever 
   assert.equal(out.kind, "reply");
   assert.ok(out.kind === "reply" && out.what === "take");
   assert.ok(sent);
-  assert.equal(sent!.horizon, FIXED_HORIZON);
+  assert.equal("horizon" in sent!, false);
   assert.equal(sent!.risk, "medium");
   assert.equal(sent!.origin_ref, mention.id);
 });
