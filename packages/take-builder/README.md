@@ -22,4 +22,4 @@ This package builds the index:
 
 Gemini contracts aren't in `catalog.json`: `index-gemini` indexes them on their own (`docs/gemini-plan.md`).
 
-`catalog.json` is a snapshot, but the asset-bank poller re-syncs the stored `tradeable` / `thin` flags every 15 minutes (`src/liquidity-sync.ts`: a $50k pool and a $100 buy under 1%, or the Phoenix market's own flag). Trades check live liquidity too, so a pick can still be left out of a trade if its pools thinned between syncs.
+`catalog.json` is a snapshot, but the asset-bank poller re-syncs the stored `tradeable` / `thin` flags every 15 minutes (`src/liquidity-sync.ts`: a $25k pool and a $100 buy under 1%, or the Phoenix market's own flag). Trades check live liquidity too, so a pick can still be left out of a trade if its pools thinned between syncs.
