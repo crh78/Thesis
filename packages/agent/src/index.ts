@@ -13,7 +13,7 @@ export { basketConfigFromEnv, buildBasket, plainName, warmBasket } from "./baske
 export { cleanReply } from "./style.ts";
 export { botEvents, type Recorder } from "./telemetry.ts";
 export { yesNo } from "./confirm.ts";
-export { agentApi, agentApiConfigFromEnv, draftIdFrom, takeIdFrom, type AgentApi, type TradeAsk, type TradeResult, type Who, type WhoIs } from "./trade.ts";
+export { agentApi, agentApiConfigFromEnv, draftIdFrom, takeIdFrom, type AgentApi, type Score, type TradeAsk, type TradeResult, type Who, type WhoIs } from "./trade.ts";
 
 export type Turn = {
   chatId: string;
