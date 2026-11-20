@@ -682,7 +682,7 @@ export class ForkService {
      */
     const live = (p: (typeof positions)[number]): number | null => {
       const m = marks.get(p.publicKey.toBase58()) ?? [];
-      for (const [i, leg] of take.legs.entries()) {
+      for (let i = 0; i < take.legs.length; i++) {
         if (!(p.account.legsMask & (1 << i))) continue;
         if (!(p.account.entrySet & (1 << i)) || m[i] == null) return null;
       }

@@ -101,7 +101,6 @@ All have `verify_jwt = false` in `config.toml` and check their own caller.
 | `web-push` | Saves and removes a browser's push subscription (with the user's Privy token), and sends a notification to that person's browsers when the trigger calls it |
 | `cards` | Uploads a called-it card picture (`privy-token`), so a shared link previews as the card |
 | `agent` | Trading by text within the limits a user approved once on the web app's `/limits` screen, through a Privy session signer: the user's routes (`/agent/grant`, `/agent/copies`, `/agent/links/:token`, Privy token) and the bots' routes (`x-bot-secret`: `/agent/trades`, `/agent/whois`, `/agent/positions`, `/agent/score`, `/agent/copy`, `/agent/links`, and `/agent/copy-run` for pg_cron). Trades go to the fork API with its `agent` service key |
-| `open` | `GET /open?…` → a 302 into the app's URL scheme, so chat links (iMessage only taps `https`) open a take on its basket |
 
 Shared code is in `functions/_shared/` (`privy.ts` token checks, `catalog.ts` the catalog as the apps show it, `source.ts` and `x.ts`, and `thesis-idl.json`, a copy of the program's IDL that a `packages/chain` test keeps equal).
 
@@ -134,7 +133,7 @@ Changes to the hosted project are applied from this repo. Additive, backward-com
 
 - **CLI:** Supabase CLI 3.x, run from a folder without the repo's `supabase/config.toml` (its `[inbucket]` key is rejected by 3.x).
 - **Migrations:** the hosted history uses MCP-assigned versions, so **never `supabase db push`** (it would re-run old ones). Apply each new migration on its own with `supabase db query --remote=<project-ref> --yes -f <absolute path to supabase/migrations/<file>.sql>`, then record its version in `supabase_migrations.schema_migrations`.
-- **Functions:** `supabase functions deploy <name>`: `session social assets take-builder source quicknode-stream marks price-audit notify gemini securities-index web-push cards open agent`. Deploy `quicknode-stream` from the same commit as the program, so its IDL matches. Preserve live changes from other branches when redeploying one.
+- **Functions:** `supabase functions deploy <name>`: `session social assets take-builder source quicknode-stream marks price-audit notify gemini securities-index web-push cards agent`. Deploy `quicknode-stream` from the same commit as the program, so its IDL matches. Preserve live changes from other branches when redeploying one.
 - **Seed:** `psql "$DATABASE_URL" -f supabase/seed/demo.sql`, then `seed/demo_trades.sql`.
 - **Vault** (in SQL, `select vault.create_secret('<value>', '<name>');`): `project_url` (`https://<project-ref>.supabase.co`; the pg_cron jobs and the web push trigger call functions at this URL, with no default), `bot_secret` and `x_poll_secret` (migrations create random ones; the bots and `functions/source` must use the same values), and `apify_token` (set by hand). `web_push_secret` is made by its migration.
 - **Secrets** (dashboard or `supabase secrets set`): every name, with what it's for, is in `functions/.env.example` (Privy, OpenAI, the shared tokens, VAPID, the X and Apify keys, the agent's session signer and fork API service key).

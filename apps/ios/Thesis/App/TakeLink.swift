@@ -2,9 +2,8 @@ import Foundation
 
 /// A take to start, from outside the composer:
 ///
-/// - From chat: `yourthesis(-dev)://take/new?claim=…&risk=medium`. The iMessage
-///   agent links to `functions/v1/open`, which 302s here. Opening one skips the composer and goes
-///   straight to building the basket.
+/// - A claim: `yourthesis(-dev)://take/new?claim=…&risk=medium`. Opening one skips the composer and
+///   goes straight to building the basket.
 /// - Copying an X call: the same, plus `source_url` and `source_label`, so the take is credited
 ///   ("via @KobeissiLetter on X").
 /// - From the share sheet: `…://take/new?read=<url>&title=…&text=…`. No claim yet: Thesis reads the

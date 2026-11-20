@@ -146,8 +146,6 @@ export function xClient(creds: XCreds) {
   };
 }
 
-export type XClient = ReturnType<typeof xClient>;
-
 /** The expanded links in a post. */
 export const linksIn = (p: XPost) => (p.entities?.urls ?? []).map((u) => u.expanded_url).filter((u): u is string => !!u);
 

@@ -43,8 +43,6 @@ extension SocialAPI {
 struct SourceDraft: Decodable {
     let claim: String
     let risk: String
-    /// The source itself makes a market call (false for plain news).
-    let isCall: Bool
     let source: Info
 
     struct Info: Decodable {

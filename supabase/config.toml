@@ -426,10 +426,6 @@ verify_jwt = false
 [functions.assets]
 verify_jwt = false
 
-# Public 302 from chat links into the app's URL scheme (no auth, no data).
-[functions.open]
-verify_jwt = false
-
 # Admin-only (x-index-secret); called by packages/take-builder/src/index-catalog.ts.
 [functions.securities-index]
 verify_jwt = false

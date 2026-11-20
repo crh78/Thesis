@@ -470,7 +470,6 @@ export class Router {
     const stake = BigInt(Math.round(usd * USD));
     // Prediction and card legs aren't traded: the receipt escrows their share. The rest is split by weight.
     const traded = () => usable.filter((l) => !isPaper(l.how));
-    const tradedStake = () => stake - escrowShare(usable, stake);
     const includedIdx = () => usable.map((l) => l.index).sort((a, b) => a - b);
     const done = (venue: TradeLeg[]) => ({ venue, included: includedIdx(), excluded: sorted(), jupiter: use });
     if (!traded().length) return done([]);

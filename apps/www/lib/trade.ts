@@ -20,8 +20,6 @@ export type Submission = {
   incomplete?: Incomplete;
 };
 /** `unknown`: the watch gave up (the API never said, or doesn't know the build). */
-export type Outcome = Submission["status"] | "unknown";
-
 /**
  * A trade sent with `until: "accepted"` and not yet confirmed: kept across reloads (sessionStorage).
  * A sale's `side` is the holding it sold from (missing from one saved before partial sales).
