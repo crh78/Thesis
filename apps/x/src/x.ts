@@ -17,6 +17,8 @@ export type XPost = {
   created_at?: string;
   referenced_tweets?: { type: "replied_to" | "quoted" | "retweeted"; id: string }[];
   note_tweet?: { text: string };
+  /** Links in the post, expanded (a shared Thesis take's /t/<id> link). */
+  entities?: { urls?: { expanded_url?: string }[] };
 };
 export type Mentions = { posts: XPost[]; users: Map<string, XUser>; refs: Map<string, XPost>; newestId: string | null };
 
@@ -97,7 +99,7 @@ export function xClient(creds: XCreds) {
       for (let page = 0; page < 3; page++) {
         const q: Record<string, string> = {
           max_results: "100",
-          "tweet.fields": "author_id,conversation_id,created_at,referenced_tweets,note_tweet",
+          "tweet.fields": "author_id,conversation_id,created_at,referenced_tweets,note_tweet,entities",
           expansions: "author_id,referenced_tweets.id,referenced_tweets.id.author_id",
           "user.fields": "username,name,public_metrics",
         };
@@ -128,6 +130,9 @@ export function xClient(creds: XCreds) {
 }
 
 export type XClient = ReturnType<typeof xClient>;
+
+/** The expanded links in a post. */
+export const linksIn = (p: XPost) => (p.entities?.urls ?? []).map((u) => u.expanded_url).filter((u): u is string => !!u);
 
 /** A post's full text (long posts carry it in note_tweet). */
 export const fullText = (p: XPost) => p.note_tweet?.text ?? p.text;
