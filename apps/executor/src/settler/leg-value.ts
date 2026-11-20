@@ -6,7 +6,7 @@
 // What a set of inputs is worth is decided here, so the three can't drift apart.
 //
 //   spot        Token first: the issuer token's own price when its pool holds the tradeable floor
-//               ($50k pooled), at any hour, with no band against the stock. Otherwise the US
+//               ($25k pooled), at any hour, with no band against the stock. Otherwise the US
 //               stock's price (Alpaca). A leg keeps the source its entry was priced on: a
 //               token-priced entry exits on the token, or on the stock times the token's premium
 //               at entry (no premium: no price, rather than turn the premium into a gain or loss);

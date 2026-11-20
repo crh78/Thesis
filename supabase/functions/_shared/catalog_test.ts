@@ -31,11 +31,11 @@ Deno.test("XLEx as Jupiter returned it: a $113 pool shows the stock's price, fla
   assertEquals(p?.change24hPct, null);
 });
 
-Deno.test("no band: a token with $50k+ pooled keeps its own price, however far from its stock", () => {
+Deno.test("no band: a token with $25k+ pooled keeps its own price, however far from its stock", () => {
   const p = displayPrice({ usdPrice: 56.2, priceChange24h: -9, liquidity: 895_407, stockData: { price: 62.2 } });
   assertEquals(p, { usd: 56.2, change24hPct: -9, source: "token", note: null });
-  assertEquals(displayPrice({ usdPrice: 90, liquidity: 50_000, stockData: { price: 100 } })?.source, "token");
-  assertEquals(displayPrice({ usdPrice: 90, liquidity: 49_999, stockData: { price: 100 } })?.source, "stock");
+  assertEquals(displayPrice({ usdPrice: 90, liquidity: 25_000, stockData: { price: 100 } })?.source, "token");
+  assertEquals(displayPrice({ usdPrice: 90, liquidity: 24_999, stockData: { price: 100 } })?.source, "stock");
 });
 
 Deno.test("a thin non-stock token keeps its price, with a note; no price stays no price", () => {

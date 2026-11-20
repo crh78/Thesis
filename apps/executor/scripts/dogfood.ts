@@ -49,7 +49,7 @@ const SUPABASE_URL = envVar("SUPABASE_URL")!;
 const SUPABASE_KEY = envVar("SUPABASE_PUBLISHABLE_KEY")!;
 const JUP_H = { "x-api-key": envVar("JUPITER_API_KEY") ?? "" }; // api.jup.ag: the keyless lite-api is being retired
 const ALPACA_H = { "APCA-API-KEY-ID": envVar("ALPACA_API_KEY_ID") ?? "", "APCA-API-SECRET-KEY": envVar("ALPACA_API_SECRET_KEY") ?? "" };
-const MIN_LIQ = 50_000; // PRICEABLE_MIN_POOLED_USD
+const MIN_LIQ = 25_000; // PRICEABLE_MIN_POOLED_USD
 const fnSecret = (() => {
   const p = join(REPO, "supabase/functions/.env");
   if (!existsSync(p)) return null;

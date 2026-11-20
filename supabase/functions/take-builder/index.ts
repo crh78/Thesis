@@ -25,8 +25,10 @@
 //   2. Every spot name, perp and the deepest cash vaults (~200, names, tickers and a few words on
 //      what each is) are listed at the end of the system prompt, the same text every call
 //      (prompt-cached), so stocks never need a search. Prediction markets (thousands) are
-//      BM25-searched on the take's words up front; the model (reasoning low, priority tier) calls
-//      `search` only for a market the take is about that wasn't found (a team by its city), and a
+//      BM25-searched on the take's words up front, and the ~50 events that aren't sports or weather
+//      are listed by title. The model (reasoning medium, priority tier) calls `search` only for a
+//      market the take is about that wasn't found (a team by its city, the Fed decision's outcomes for
+//      a rates take), and a
 //      search that finds nothing new costs no extra round (the tools-off answer runs alongside).
 //      Most builds are one model call.
 //   3. It answers with picks by number and name, from what search showed it. The harness checks
@@ -63,6 +65,11 @@ const cardRule = (cardTake: boolean) => cardTake
   ? "This take is about cards: the basket can be all cards (up to 5), or cards with stocks that move with them."
   : "At most three cards, each at most 20% of the basket, never only cards.";
 import { applyHouseRules, MAX_LEVERAGE, MAX_PERP_WEIGHT, RULES_LEVERAGE } from "./rules.ts";
+import { eventLinkOf, INDUSTRIES, LEAGUES, leagueOf, PREDICTION_CATEGORIES, SECTORS, TAGS } from "../_shared/taxonomy.ts";
+// One industry (and its sector) plus fixed tags per security, from the ontology in taxonomy.ts.
+// Bundled with the function: regenerate it when new securities are indexed (untagged rows still
+// search by words, and a new issuer's token takes its underlying's tags).
+import TAGGED from "./security-tags.json" with { type: "json" };
 
 /** Every yield pick is traded as a Jupiter Lend jlUSDC deposit (scripts/fork/api/legs.ts), so it's the one yield row offered: another vault's APY would be a rate the pick never earns. */
 const TRADED_YIELD_VENUE = "Jupiter Lend Earn";
@@ -72,8 +79,12 @@ const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
 });
 
 const INDEX_SECRET = Deno.env.get("SECURITIES_INDEX_SECRET") ?? "";
-/** The whole model exchange, searches included. Past it, the rules basket goes out. */
-const AGENT_TIMEOUT_MS = Number(Deno.env.get("TAKE_AGENT_TIMEOUT_MS") ?? 8000);
+/**
+ * The whole model exchange, searches included. Past it, the rules basket goes out. 30 s since it
+ * always searches first (2-3 rounds at reasoning medium); the app and web wait 60 s. To be tuned
+ * down once recall is where we want it.
+ */
+const AGENT_TIMEOUT_MS = Number(Deno.env.get("TAKE_AGENT_TIMEOUT_MS") ?? 30_000);
 
 const SPOT = new Set(["stock", "etf", "commodity", "pre-ipo", "leveraged", "other"]);
 /** A take runs until its author sells, or this long at most (it then settles at that day's prices). */
@@ -140,11 +151,22 @@ type Row = {
   maxLeverage: number | null; apy: number | null; depth: number; category: string | null;
   /** What it is, for the listed rows (spot, perps, cash), from their catalog description; markets have none. */
   about?: string;
+  /**
+   * The ontology (taxonomy.ts). Securities: one industry, its sector, fixed tags. Markets: their
+   * sports league, or their event family's industries, tags and the assets it moves (`assets`,
+   * underlying tickers). Empty when untagged.
+   */
+  industries: string[]; tags: string[]; league: string | null; assets: string[];
 };
 /** `listed`: per US-or-not, the spot names, perps and cash every prompt lists (see `listedFor`). */
 type Index = { rows: Row[]; bm25: BM25; listed: Map<boolean, Listed> };
-/** What every prompt lists by number, 1..n: few enough (~200) to show whole, so only markets need searching. */
-type Listed = { rows: Row[]; text: string };
+/**
+ * What every prompt lists by number, 1..n: few enough (~200) to show whole, so only markets need
+ * searching. `events`: the prediction market events that aren't sports or weather (~50: the Fed,
+ * recession, the S&P, crypto and commodity prices, elections), by title only, so a take on rates
+ * or a slump knows its market exists even when it shares no words with it.
+ */
+type Listed = { rows: Row[]; text: string; events: string };
 
 const INDEX_TTL_MS = 10 * 60_000;
 let cached: { at: number; index: Promise<Index> } | null = null;
@@ -173,13 +195,46 @@ async function buildIndex(): Promise<Index> {
     expires: r[8] as string | null, us: r[9] as string, maxLeverage: r[10] as number | null, apy: r[11] as number | null,
     depth: Number(r[12] ?? 0), category: r[13] as string | null,
     about: r[1] === "prediction" ? undefined : short(aboutOf.get(r[0] as string), 70),
+    industries: [], tags: [], league: null, assets: [],
   }));
+  annotate(rows);
   // Names and tickers count most; a prediction's question and outcome are its name.
   const docs = rows.map((r): [string, number][] => r.kind === "prediction"
     ? [[r.question ?? r.name, 2], [r.outcome ?? "", 2], [r.category ?? "", 1]]
     : [[displayName(r.name), 3], [`${r.symbol} ${r.underlying ?? ""}`, 3], [r.themes.join(" "), 1],
       [r.kind === "perp" ? "perp leverage" : r.kind === "yield" ? "cash yield interest savings" : r.kind, 1]]);
   return { rows, bm25: new BM25(docs), listed: new Map() };
+}
+
+type Tagged = { id: string; industry: string; tags: string[] };
+const TAGGED_BY_ID = new Map((TAGGED as Tagged[]).map((t) => [t.id, t]));
+const sectorOf = (industry: string) => INDUSTRIES[industry]?.sector ?? null;
+const sectorsOf = (r: Row) => r.industries.map(sectorOf).filter((s): s is NonNullable<typeof s> => !!s);
+
+/**
+ * Puts the ontology on each row: a security's tags by id, or else by its underlying (a new
+ * issuer's NVDA token is still semiconductors); a market's league from its ticker
+ * (gemini:GEMI-NFL-…) and its event family's links (EVENT_LINKS, by title).
+ */
+function annotate(rows: Row[]) {
+  const byUnderlying = new Map<string, Tagged>();
+  for (const r of rows) {
+    const t = TAGGED_BY_ID.get(r.id);
+    if (t && r.underlying) byUnderlying.set(r.underlying, t);
+  }
+  const links = new Map<string, ReturnType<typeof eventLinkOf>>();
+  for (const r of rows) {
+    if (r.kind === "prediction") {
+      r.league = leagueOf(r.id.replace(/^gemini:GEMI-/, ""));
+      const q = r.question ?? "";
+      if (!links.has(q)) links.set(q, q ? eventLinkOf(q) : null);
+      const link = links.get(q);
+      if (link) (r.industries = link.industries, r.tags = link.tags, r.assets = link.assets);
+      continue;
+    }
+    const t = TAGGED_BY_ID.get(r.id) ?? (r.underlying ? byUnderlying.get(r.underlying) : undefined);
+    if (t) (r.industries = [t.industry], r.tags = t.tags);
+  }
 }
 
 const LISTED_ORDER = ["stock", "etf", "commodity", "pre-ipo", "leveraged", "other", "perp", "yield"];
@@ -209,9 +264,25 @@ function listedFor(index: Index, usPerson: boolean): Listed {
     ...ok.filter((r) => r.kind === "perp").sort(byName),
     ...ok.filter((r) => r.kind === "yield").sort((a, b) => b.depth - a.depth).slice(0, CASH_SLOTS),
   ];
-  const listed = { rows, text: rows.map((r, i) => line(r, i + 1)).join("\n") };
+  const listed = { rows, text: rows.map((r, i) => line(r, i + 1)).join("\n"), events: eventsFor(index, usPerson) };
   index.listed.set(usPerson, listed);
   return listed;
+}
+
+/** Event categories too many or too local to list (thousands of games, a city's high temperature); search finds them. */
+const UNLISTED_EVENTS = new Set(["Sports", "Weather"]);
+
+/** One line per non-sports event: `Fed decision in December? (resolves 2026-12-10)`. Outcomes come from search. */
+function eventsFor(index: Index, usPerson: boolean): string {
+  const soonest = Date.now() + 6 * 60 * 60_000;
+  const seen = new Map<string, string>();
+  for (const r of index.rows) {
+    if (r.kind !== "prediction" || UNLISTED_EVENTS.has(r.category ?? "") || !r.question || !r.expires) continue;
+    if (Date.parse(r.expires) <= soonest || !available({ us_persons: r.us }, usPerson)) continue;
+    const prev = seen.get(r.question);
+    if (!prev || day(r.expires) < prev) seen.set(r.question, day(r.expires));
+  }
+  return [...seen].sort((a, b) => a[0].localeCompare(b[0])).map(([q, d]) => `- ${q} (resolves ${d})`).join("\n");
 }
 
 /** A request's numbering: the listed rows first, at their fixed numbers. */
@@ -246,6 +317,7 @@ function rowOf(s: Security): Row {
     expires: s.expires_at, us: s.us_persons, maxLeverage: (s.data?.maxLeverage as number | undefined) ?? null,
     apy: (s.data?.apyPct as number | undefined) ?? null, depth: 0, category: null,
     ...(s.kind === "card" ? { about: cardAbout(s) } : {}),
+    industries: TAGGED_BY_ID.has(s.id) ? [TAGGED_BY_ID.get(s.id)!.industry] : [], tags: TAGGED_BY_ID.get(s.id)?.tags ?? [], league: null, assets: [],
   };
 }
 
@@ -286,15 +358,18 @@ class Shown {
   }
 }
 
+/** ` [semiconductors]`: the row's industry, so the model can group what's listed without a search. */
+const ind = (r: Row) => (r.industries.length ? ` [${r.industries.join(", ")}]` : "");
+
 /** One line per result: `12 stock NVIDIA (NVDA)`, `40 prediction Fed decision in December? → Cut 25bps (resolves 2026-12-11)`. */
 function line(r: Row, n: number): string {
   const name = displayName(r.name) || r.symbol;
   const ticker = r.underlying && r.underlying !== "USDC" ? ` (${r.underlying})` : "";
   switch (r.kind) {
     case "prediction": return `${n} prediction ${r.question ?? r.name} → ${r.outcome ?? r.name} (resolves ${day(r.expires)})`;
-    case "perp": return `${n} perp ${name}${ticker}, up to ${capFor(r.maxLeverage)}x`;
+    case "perp": return `${n} perp ${name}${ticker}${ind(r)}, up to ${capFor(r.maxLeverage)}x`;
     case "yield": return `${n} cash ${name}${r.apy ? `, ${r.apy.toFixed(1)}% a year` : ""}`;
-    default: return `${n} ${r.kind} ${name}${ticker}${r.about ? `: ${r.about}` : ""}`;
+    default: return `${n} ${r.kind} ${name}${ticker}${ind(r)}${r.about ? `: ${r.about}` : ""}`;
   }
 }
 
@@ -309,22 +384,57 @@ const KINDS: Record<string, (k: string) => boolean> = {
 };
 
 /**
- * BM25 over the catalog, as numbered lines. Spot names once per company (the most traded issuer),
- * at most four outcomes per prediction question, ties to the deeper market.
+ * What the model asks search for. Filters are hard (a row must pass every one given); `query`'s
+ * words only rank what passes, by BM25. No query: the deepest markets first. Same filters, same
+ * rows, every time.
  */
-function search(index: Index, shown: Shown, query: string, kind: string, usPerson: boolean, limit = 12): string {
-  const ok = KINDS[kind] ?? KINDS.any;
+type Filter = {
+  query: string; kind: string; sector: string | null; industries: string[]; tags: string[];
+  category: string | null; league: string | null; related_to: string | null;
+};
+
+function passes(r: Row, f: Filter): boolean {
+  if (!(KINDS[f.kind] ?? KINDS.any)(r.kind)) return false;
+  if (f.sector && !sectorsOf(r).includes(f.sector as never)) return false;
+  if (f.industries.length && !f.industries.some((i) => r.industries.includes(i))) return false;
+  if (f.tags.length && !f.tags.some((t) => r.tags.includes(t))) return false;
+  if (f.category && r.category !== f.category) return false;
+  if (f.league && r.league !== f.league) return false;
+  if (f.related_to) {
+    // Only xStocks' lowercase suffix comes off ("NVDAx" → NVDA): SPCX is SpaceX's own ticker.
+    const t = f.related_to.replace(/^\$/, "").replace(/x$/, "").toUpperCase();
+    if (!(r.assets.includes(t) || (r.underlying ?? "").toUpperCase() === t || r.symbol.replace(/x$/, "").toUpperCase() === t)) return false;
+  }
+  return true;
+}
+
+/**
+ * The catalog, filtered and ranked, as numbered lines. Spot names once per company (the most
+ * traded issuer), at most four outcomes per prediction question, ties to the deeper market.
+ */
+function search(index: Index, shown: Shown, f: Filter, usPerson: boolean, limit = 12): string {
   const soonest = Date.now() + 60 * 60_000;
-  const hits = index.bm25.search(query, 300, (d) => {
+  const ok = (d: number) => {
     const r = index.rows[d];
     // A prediction market needs an expiry (one with none is a stale row); other kinds have none.
-    return ok(r.kind) && available({ us_persons: r.us }, usPerson) &&
+    return passes(r, f) && available({ us_persons: r.us }, usPerson) &&
       (r.expires ? Date.parse(r.expires) > soonest : r.kind !== "prediction");
-  }).sort((a, b) => (b.score - a.score) || (index.rows[b.doc].depth - index.rows[a.doc].depth));
+  };
+  // Words alone search (a row must match one); with a filter they only rank: everything that passes
+  // is listed, word matches first, then the deepest markets.
+  const filtered = !!(f.sector || f.industries.length || f.tags.length || f.category || f.league || f.related_to);
+  const byDepth = (a: number, b: number) => index.rows[b].depth - index.rows[a].depth;
+  const hits = f.query.trim()
+    ? index.bm25.search(f.query, 300, ok).sort((a, b) => (b.score - a.score) || byDepth(a.doc, b.doc)).map((h) => h.doc)
+    : [];
+  const hit = new Set(hits);
+  const docs = !f.query.trim() || filtered
+    ? [...hits, ...index.rows.map((_, d) => d).filter((d) => !hit.has(d) && ok(d)).sort(byDepth)]
+    : hits;
   const lines: string[] = [];
   const companies = new Set<string>();
   const questions = new Map<string, number>();
-  for (const { doc } of hits) {
+  for (const doc of docs) {
     const r = index.rows[doc];
     if (SPOT.has(r.kind)) {
       const company = r.underlying ?? r.symbol;
@@ -338,7 +448,49 @@ function search(index: Index, shown: Shown, query: string, kind: string, usPerso
     lines.push(line(r, shown.add(r)));
     if (lines.length >= limit) break;
   }
-  return lines.length ? lines.join("\n") : `Nothing matches "${query}". Try a company, ticker, team's city, person or event name.`;
+  if (lines.length) return lines.join("\n");
+  const asked = Object.entries(f).filter(([, v]) => v && (!Array.isArray(v) || v.length)).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ");
+  return `Nothing matches ${asked || "that"}. Loosen a filter, or try a company, ticker, team's city, person or event name.`;
+}
+
+/** Strict-mode JSON schema helpers: every property required, "not given" is null or []. */
+const oneOf = (values: readonly string[], description: string) => ({ type: ["string", "null"], enum: [...values, null], description });
+const anyOf = (values: readonly string[], description: string) => ({ type: "array", items: { type: "string", enum: [...values] }, description });
+
+function filterOf(args: Record<string, unknown>): Filter {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  return {
+    query: str(args.query) ?? "", kind: str(args.kind) ?? "any", sector: str(args.sector), industries: list(args.industries),
+    tags: list(args.tags), category: str(args.category), league: str(args.league), related_to: str(args.related_to),
+  };
+}
+
+function searchTool(index: Index, shown: Shown, usPerson: boolean): Tool {
+  return {
+    name: "search",
+    description: "Look things up in everything a basket can hold, with hard filters (every filter given must match; null or [] = " +
+      "no filter; a list matches any of its values) and optional words that rank what passes. Slice by kind, sector, industry, tags; prediction markets also by " +
+      "category, league, and related_to (markets about one asset: \"TSLA\", \"BTC\", \"TLT\"). Examples: all semiconductors " +
+      "{kind:\"any\", industries:[\"semiconductors\"]}; markets on Tesla {kind:\"prediction\", related_to:\"TSLA\"}; macro " +
+      "markets {kind:\"prediction\", category:\"Economics\"}; a game {kind:\"prediction\", league:\"nfl\", query:\"Green Bay Minnesota\"} " +
+      "(teams go by city). Several searches at once are fine; each returns numbered lines you can pick.",
+    parameters: {
+      type: "object", additionalProperties: false,
+      required: ["query", "kind", "sector", "industries", "tags", "category", "league", "related_to"],
+      properties: {
+        query: { type: "string", description: "Words to rank by (a name, ticker, team's city, event words), or \"\" to list everything that passes the filters." },
+        kind: { type: "string", enum: Object.keys(KINDS) },
+        sector: oneOf(SECTORS, "One sector, or null."),
+        industries: anyOf(Object.keys(INDUSTRIES), "Any of these industries ([] = any)."),
+        tags: anyOf(Object.keys(TAGS), "Any of these tags ([] = any)."),
+        category: oneOf(PREDICTION_CATEGORIES, "Prediction markets only: Gemini's category, or null."),
+        league: oneOf(LEAGUES, "Sports markets only: the league, or null."),
+        related_to: { type: ["string", "null"], description: "A ticker: markets whose outcome moves that asset (and the asset itself), or null." },
+      },
+    },
+    run: (args) => search(index, shown, filterOf(args), usPerson),
+  };
 }
 
 /**
@@ -358,32 +510,31 @@ function marketsFor(index: Index, shown: Shown, text: string, usPerson: boolean,
     .sort((a, b) => (b.score - a.score) || (index.rows[b.doc].depth - index.rows[a.doc].depth));
   const lines: string[] = [];
   const questions = new Map<string, number>();
-  for (const { doc } of good) {
-    const r = index.rows[doc];
+  const add = (r: Row) => {
     const q = `${r.question}|${day(r.expires)}`;
-    if ((questions.get(q) ?? 0) >= 4) continue;
+    if ((questions.get(q) ?? 0) >= 4) return;
     questions.set(q, (questions.get(q) ?? 0) + 1);
     lines.push(line(r, shown.add(r)));
+  };
+  for (const { doc } of good) {
+    add(index.rows[doc]);
     if (lines.length >= limit) break;
   }
+  // Markets linked to a company or coin the take names (EVENT_LINKS): "Tesla robotaxi" shows the
+  // Optimus market, which shares none of its words. Up to 4 more, nearest resolution first.
+  const tickers = new Set(namedRows(index, text, usPerson).map((r) => (r.underlying ?? r.symbol.replace(/x$/, "")).toUpperCase()));
+  if (tickers.size) {
+    const linked = index.rows.filter((r) => r.kind === "prediction" && r.assets.some((a) => tickers.has(a)) &&
+      available({ us_persons: r.us }, usPerson) && !!r.expires && Date.parse(r.expires) > soonest)
+      .sort((a, b) => Date.parse(a.expires!) - Date.parse(b.expires!) || b.depth - a.depth);
+    let extra = 0;
+    for (const r of linked) {
+      const before = lines.length;
+      add(r);
+      if (lines.length > before && ++extra >= 4) break;
+    }
+  }
   return lines.join("\n") || "none on this take's words";
-}
-
-function searchTool(index: Index, shown: Shown, usPerson: boolean): Tool {
-  return {
-    name: "search",
-    description: "Search prediction markets (and anything else not in the list) by the words of a market's question: " +
-      "the event, person, team (teams go by city, e.g. Green Bay for the Packers), asset or date. One idea per query; " +
-      "call it several times at once.",
-    parameters: {
-      type: "object", additionalProperties: false, required: ["query", "kind"],
-      properties: {
-        query: { type: "string", description: "e.g. \"Fed decision December\", \"BTC price November 30\", \"Green Bay Minnesota\", \"Stripe IPO\"" },
-        kind: { type: "string", enum: Object.keys(KINDS) },
-      },
-    },
-    run: (args) => search(index, shown, String(args.query ?? ""), String(args.kind ?? "any"), usPerson),
-  };
 }
 
 /**
@@ -463,8 +614,8 @@ const RISK_KINDS: Record<string, (kind: string) => boolean> = {
 };
 
 const RISK_RULES: Record<string, string> = {
-  low: "Low risk: up to 4 picks (a perp at leverage 1 only for a name with no stock listed). Spread out, prefer big well-known companies and broad ETFs. Include exactly one cash pick at 20-30%.",
-  medium: "Medium risk: up to 5 picks of stocks/ETFs/commodities (a perp at leverage 1 only for a name with no stock listed), fewer when fewer fit directly. Add one prediction market (10-20%) only if one asks about this take.",
+  low: "Low risk: up to 4 picks (a perp at leverage 1 only for a name or coin with no stock listed: BTC, ETH and SOL are held this way). Spread out, prefer big well-known companies and broad ETFs. Include exactly one cash pick at 20-30%.",
+  medium: "Medium risk: up to 5 picks of stocks/ETFs/commodities (a perp at leverage 1 only for a name or coin with no stock listed: BTC, ETH and SOL are held this way), fewer when fewer fit directly. Add one prediction market (10-20%) when the take directly implies one's outcome (a rates take: the Fed decision; a slump: recession).",
   high: "High risk: up to 4 picks, concentrated in the purest names. You may use one perp (max 30%, or the whole basket when it's the only pick) on a name the take is about, in place of that name's stock: never both. " +
     "Choose its leverage, from 2 up to its max (at most 5x): more for a name that IS the take, less for a looser fit. " +
     "The take may be held up to a year, and a leveraged bet held longer is likelier to be liquidated on the way.",
@@ -510,15 +661,23 @@ const BUILD_SYSTEM = [
   "You build an investment basket for a take (an opinion) on Thesis, a social trading app.",
   "Everything listed at the end (stocks, ETFs, commodities, pre-IPO, perps, cash) can go in a basket. Prediction",
   "markets aren't listed: markets is a search of them on the take's own words. Pick by number, with the name as shown.",
-  "Call search only when the take is about one specific event, person, team or date (a game, a season title, an",
-  "election, an award, an IPO, a price on a day) and markets doesn't show that event's market: search its question",
-  "words (a team by its city), all at once. A company, sector, theme, country or broad market take never needs a",
-  "search, and nothing listed is ever searched for: answer right away.",
-  "Pick what pays off most directly if the take is right: the names the take is about first, then second-order winners",
-  "(suppliers, picks and shovels). Two direct picks beat five loose ones: never add a pick whose why has to stretch,",
-  "and never one that moves against the take. Skip anything only loosely related, and never stand in a lookalike for a company",
+  "Each listed line shows its industry in brackets: group what's listed by them (\"semis\": the [semiconductors]",
+  "lines) without searching. search has hard filters (kind, sector, industries, tags; for markets category, league,",
+  "related_to an asset). Always search first to see what's out there for this take: its industries and tags, and",
+  "markets about it (related_to its main names, its category). Search especially when the take is about one specific event, person, team or date (a game, a season",
+  "title, an election, an award, an IPO, a price on a day) and markets doesn't show that event's market, or when a",
+  "market pays off directly if the take is right and markets doesn't show its outcomes: one of the events listed at",
+  "the end (rates fall: the Fed decision; a slump: recession; a price call: that asset's price market), or one about",
+  "an asset the take is about (related_to its ticker). Several searches at once; then answer. Never search for one",
+  "listed name by itself.",
+  "Pick what pays off most directly if the take is right: the names the take is about first, then the companies that",
+  "win most directly when they do (the foundry that makes their chips, the memory that goes in them, the supplier",
+  "whose biggest customer they are). Use the risk's pick count when that many fit: a basket of one is only for a take",
+  "about one asset with nothing listed that clearly rides with it. Never add a pick whose why has to stretch, and",
+  "never one that moves against the take (a rival a take says is losing). Never stand in a lookalike for a company",
   "that isn't listed (no generic AI name for a take about one AI company).",
-  "Every pick must be IN what the take is about: that company, that sector's own companies, that commodity, that country.",
+  "Every pick must be IN what the take is about, or a direct supplier to it: that company, that sector's own",
+  "companies, that commodity, that country.",
   "A side project, a customer or a different sector doesn't count (Lockheed isn't nuclear power, SpaceX isn't robotaxis,",
   "a cinema chain isn't doughnuts, oil isn't copper or natural gas), and neither does a broad index for a narrower take",
   "(the S&P 500 isn't a utilities, airline, bank or Brazil bet). The S&P 500 and Nasdaq are for takes on the US market or",
@@ -529,8 +688,12 @@ const BUILD_SYSTEM = [
   "stand-in: use no on a market about it or an inverse fund on it (an inverse Nasdaq fund for a tech or market crash).",
   "With neither, no_clean_exposure. A company whose own product causes the slump can go in (a GLP-1 drug maker when",
   "food sales fall).",
-  "A perp is how you hold a company the take is about when it has no stock listed (Eli Lilly, Netflix): at low and",
-  "medium risk too, at leverage 1.",
+  "A perp is how you hold a company or a coin that has no stock listed (TSMC, Netflix, Oracle, Marvell, ASML; BTC,",
+  "ETH, SOL and every other coin): at low and medium risk too, at leverage 1, for the take's own names and its direct",
+  "winners alike. A crypto take always has these to hold.",
+  "Read slang and vibes as a view on price: \"tuff\", \"fire\", \"goated\", \"sending\", \"based\", \"we're so back\" =",
+  "it goes up; \"cooked\", \"mid\", \"ngmi\", \"rekt\", \"sucks\", \"it's over\" = it goes down. \"crypto is tuff\" is a",
+  "bullish crypto take, not a sentiment without a direction.",
   "If there's a source (an X post, an article, a fund's or trader's holdings or trades), it's what the take copies:",
   "hold what the source names, at the weights it gives or implies. When the source lists picks, don't pad with names",
   "it doesn't hold (fewer picks is fine, risk_rules' counts don't apply); add others only when the source states a",
@@ -539,7 +702,9 @@ const BUILD_SYSTEM = [
   "one asset is the take (e.g. gold). keep: numbers the user already chose; include them and build around them.",
   "A perp only on a name the take is about, that's already in the basket, or that has no stock listed (the perp is",
   "the only way to hold it); never as filler.",
-  "Prediction markets: only one whose question is about this take, never a different event. Pick the outcome that",
+  "Prediction markets: only one whose outcome the take directly implies (\"rates are coming down\": the Fed cuts;",
+  "\"the economy is cooked\": recession, yes; \"bitcoin keeps running\": BTC above a price on its ladder), never a",
+  "different event. Pick the outcome that",
   "matches the take exactly (\"the Fed holds\": the hold outcome, yes, not a hike); on a price ladder, the outcome at",
   "the take's own number (\"above 5\": the one at 5); if no outcome sits at that number, leave the market out rather than",
   "take a harder bet.",
@@ -560,10 +725,11 @@ const BUILD_SYSTEM = [
   "about collectibles, or a card tied to it (a Pok\u00e9mon card on a Nintendo take, a player's rookie card on their",
   "season). Search cards for it; how many cards and how much of the basket follows `cards` in the input.",
   "no_clean_exposure when the take states no market view at all (a greeting, a feeling) or nothing listed or",
-  "found is in it and moves with it. A broad view still gets a basket when something listed is in it: \"buy the dip\" the",
+  "found is in it and moves with it. A prediction market the take implies is enough on its own: when it's the one",
+  "thing that fits (\"the consumer is cooked\": recession, yes), the basket is that market alone. A broad view still gets a basket when something listed is in it: \"buy the dip\" the",
   "S&P 500 fund, a country's boom that country's companies or fund, a commodity theme its miners or the commodity. Then",
   "reason = one short sentence why, empty picks; otherwise reason = \"\".",
-  "A prediction market goes in only when its question is this take's own question: a take on a company's sales never",
+  "A prediction market goes in only when the take directly implies its outcome: a take on a company's sales never",
   "gets a market on a deal, a stake or a lawsuit about that company.",
   "summary: max 18 words, what has to be true for the take to pay off. why: max 12 words, how the pick ties to THIS",
   "take, and true of that pick (never call an asset something it isn't: gold isn't copper, Roblox isn't robotics).",
@@ -572,7 +738,7 @@ const BUILD_SYSTEM = [
 
 /** For variants with nothing listed: the model finds everything by searching, as much as it likes. */
 const AGENT_SYSTEM = BUILD_SYSTEM.replace(
-  /Everything listed at the end[\s\S]*?answer right away\./,
+  /Everything listed at the end[\s\S]*?search for one\s+listed name by itself\./,
   "Nothing is listed: find everything by calling search, as many times and rounds as you need (companies and funds " +
     "by name or ticker, the commodity, a perp at high risk, cash at low risk, the prediction market on the event by its " +
     "question words, a team by its city), several searches at once per round. markets, when present, is a search of " +
@@ -580,7 +746,9 @@ const AGENT_SYSTEM = BUILD_SYSTEM.replace(
 ).replace("that isn't listed", "that search can't find");
 
 /** The system prompt: the rules, then everything listed (the same text every call, so it's cached). */
-const withListed = (system: string, listed: Listed) => `${system}\n\nListed (number kind name):\n${listed.text}`;
+const withListed = (system: string, listed: Listed) =>
+  `${system}\n\nListed (number kind name):\n${listed.text}` +
+  (listed.events ? `\n\nPrediction market events besides sports (not numbered: search one by its title words to see its outcomes):\n${listed.events}` : "");
 
 /**
  * What a take copies. kind: "holdings" (a fund's or trader's positions: the basket is what they
@@ -599,10 +767,15 @@ type Agent = { out: Picked; calls: string[]; rounds: number; model: string; spec
 type Variant = {
   listed: boolean; markets: boolean; rounds: number; speculate: boolean;
   search: "bm25" | "db"; reasoning: "none" | "low" | "medium"; timeoutMs: number;
+  /** The first turn must search (see what's out there before answering). */
+  lookFirst: boolean;
 };
-// Reasoning low (from the 100-case eval): same quality as none, and the model
-// is sure enough to skip searches, so p90 fell from 5.8 s to 4.0 s.
-const SHIPPED: Variant = { listed: true, markets: true, rounds: 2, speculate: true, search: "bm25", reasoning: "low", timeoutMs: AGENT_TIMEOUT_MS };
+// Reasoning medium (2026-11-20): low bought what a bearish take is against ("GLP-1s eat the food
+// industry": McDonald's and Costco) and Moderna for weight-loss drugs; medium didn't, for ~1 s more
+// (120-case eval: 7.44 vs 6.93; p50 2.8 s, p90 5.1 s). The bots already ran on it.
+// Look first (2026-11-20): every build and edit searches before answering, with a third round to
+// refine; recall over speed for now.
+const SHIPPED: Variant = { listed: true, markets: true, rounds: 3, speculate: true, search: "bm25", reasoning: "medium", timeoutMs: AGENT_TIMEOUT_MS, lookFirst: true };
 
 function variantOf(raw: unknown): Variant {
   const v = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -615,6 +788,7 @@ function variantOf(raw: unknown): Variant {
     search: pick("search", (x) => x === "bm25" || x === "db", SHIPPED.search),
     reasoning: pick("reasoning", (x) => x === "none" || x === "low" || x === "medium", SHIPPED.reasoning),
     timeoutMs: Math.max(2000, Math.min(45_000, pick("timeoutMs", (x) => Number.isFinite(x), SHIPPED.timeoutMs))),
+    lookFirst: pick("lookFirst", (x) => typeof x === "boolean", SHIPPED.lookFirst),
   };
 }
 
@@ -626,7 +800,7 @@ async function runAgent(system: string, input: unknown, index: Index, shown: Sho
   try {
     const r = await toolCall<Picked>(system, input, [tool, ...extra], "basket", PICK_SCHEMA, {
       timeoutMs: v.timeoutMs, maxTokens: maxTokens + (v.reasoning === "none" ? 0 : 2500), priority: true, rounds: v.rounds,
-      fresh: v.speculate ? () => shown.size > before : undefined, reasoning: v.reasoning,
+      fresh: v.speculate ? () => shown.size > before : undefined, reasoning: v.reasoning, lookFirst: v.lookFirst,
     });
     return { ...r, model: FAST_MODEL };
   } catch (e) {
@@ -724,6 +898,11 @@ function namesFor(index: Index, usPerson: boolean): Names {
  * capitals (BE is Bloom Energy; "be" is a verb).
  */
 async function named(index: Index, text: string, usPerson: boolean, max = 12, cashtagsOnly = false): Promise<Security[]> {
+  return await securitiesById(namedRows(index, text, usPerson, max, cashtagsOnly).map((r) => r.id));
+}
+
+/** `named`'s matching, in memory only (no catalog rows fetched). */
+function namedRows(index: Index, text: string, usPerson: boolean, max = 12, cashtagsOnly = false): Row[] {
   const tokens = (text.match(/\$?[A-Za-z0-9][A-Za-z0-9&.\-]*/g) ?? []).filter((t) => !cashtagsOnly || /^\$[A-Za-z]/.test(t));
   const words = [...new Set(tokens.filter((t) => {
     const w = t.replace(/^\$/, "").toLowerCase();
@@ -738,7 +917,7 @@ async function named(index: Index, text: string, usPerson: boolean, max = 12, ca
     const company = r ? (r.underlying ?? r.symbol) : "";
     if (r && !seen.has(company)) (seen.add(company), found.push(r));
   }
-  return await securitiesById(found.map((r) => r.id));
+  return found;
 }
 
 const equalWeights = (rows: Security[]): Pick[] =>
@@ -836,8 +1015,10 @@ const EDIT_SYSTEM = [
   "You edit an investment basket for a take (an opinion) on Thesis, a social trading app. current is the basket",
   "now, by number, with its weights. Apply the user's change and return the WHOLE new basket.",
   "Everything listed at the end can go in a basket; markets is a search of prediction markets on the change's words.",
-  "Pick by number, with the name as shown. Call search only for a prediction market the change asks for that markets",
-  "doesn't show, all at once; never search for anything listed. Otherwise answer right away.",
+  "Pick by number, with the name as shown. Each listed line shows its industry in brackets. Call search (hard",
+  "filters: kind, sector, industries, tags; for markets category, league, related_to an asset) for what the change",
+  "asks for that markets and the list don't settle: a prediction market, or a group by industry or tag (\"add",
+  "China\", \"more crypto\"). All searches at once; never search for one listed name. Otherwise answer right away.",
   "Keep every current pick and its weight unless the change is about it; rebalance only as much as needed.",
   "\"add X\" means include X (about an equal share, the others shrink in proportion). \"less X\" / \"more X\" changes",
   "its weight. \"remove X\" / \"no X\" drops it (and anything of that type, e.g. \"no crypto\"). \"swap A for B\" replaces A.",
@@ -853,9 +1034,14 @@ const EDIT_SYSTEM = [
   "If the change asks for something in not_available_here, never add a lookalike instead: leave the basket unchanged.",
   "A trading card or collectible is found with the cards tool when you have it (how many and how much follows `cards`); without",
   "the tool, cards can't be added at this risk: return the basket unchanged and say so in reason.",
-  "\"add a prediction market\" (or predictions, odds, a bet on it) means the market on THIS take's own question, from",
-  "markets or a search for the take's event: a company with \"market\" in its name is never one. If no market's",
-  "question is about this take, return the basket unchanged and reason = \"There's no prediction market on this yet.\"",
+  "\"add a prediction market\" (or predictions, odds, a bet on it): the user is asking for one, so add the closest",
+  "market on the take's own assets or topic, on the side the take favors, even if it resolves sooner than the take",
+  "runs (a crypto bull take: BTC above a price near today's on its ladder, yes; an AI take: the best-AI market on the",
+  "lab the basket backs). Search kind prediction with related_to each main pick's ticker and with the take's category",
+  "(Crypto, Economics, Commodities, Tech, Business) first. \"markets\" (plural) means up to two. Make room by shrinking",
+  "the others; at 5 picks, the smallest goes. A company with \"market\" in its name is never one. Only when no market",
+  "is about the take's assets or topic at all, return the basket unchanged and reason = \"There's no prediction",
+  "market on this yet.\"",
   "Plain words for a non-investor; never mention tokens, chains, USDC or wallets.",
 ].join(" ");
 
@@ -910,7 +1096,11 @@ async function edit(claim: string, risk: string, current: Pick[], ask: string, u
     const held = new Set(current.map((p) => p.s.id));
     const wantsMarkets = /\bpredictions?\b|\bprediction markets?\b|\bodds\b|\bpolymarket\b|\bkalshi\b/i.test(ask);
     const allowed = (s: Security) => !wantsMarkets || held.has(s.id) || s.kind === "prediction";
-    const picks = normalize(capCards(fromModel(agent.out, shown, rows, MAX_LEGS, whys, (s) => held.has(s.id) || (allowed(s) && (risk !== "low" || s.kind !== "card"))), cardTake));
+    // Over the leg cap, what the change added stays and the smallest current picks go (the first
+    // five in the model's order were the old basket, so "add markets" added nothing).
+    const all = fromModel(agent.out, shown, rows, Infinity, whys, (s) => held.has(s.id) || (allowed(s) && (risk !== "low" || s.kind !== "card")));
+    const cut = new Set(all.filter((p) => held.has(p.s.id)).sort((a, b) => a.weight - b.weight).slice(0, Math.max(0, all.length - MAX_LEGS)).map((p) => p.s.id));
+    const picks = normalize(capCards(all.filter((p) => !cut.has(p.s.id)).slice(0, MAX_LEGS), cardTake));
     if (picks.length) {
       const unchanged = picks.length === current.length && picks.every((p, i) => p.s.id === current[i].s.id && Math.abs(p.weight - current[i].weight) < 1);
       return { picks, summary: agent.out.summary, note: blockedNote ?? (unchanged ? (agent.out.reason || "Nothing to change there.") : (agent.out.reason || null)), picker: agent.model, agent };

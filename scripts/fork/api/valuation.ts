@@ -1,7 +1,7 @@
 // What positions are worth on the fork: token prices (the asset bank's, else Jupiter), stock
 // prices (Alpaca), the tokens each position bought, and live marks on each leg's entry basis.
 // Marks follow the same rules as the settler and the marker (valueLeg, settler/leg-value.ts): the
-// token only with the $50k liquidity floor, else the stock times the entry's premium; no
+// token only with the $25k liquidity floor, else the stock times the entry's premium; no
 // prediction mark from a book that doesn't add up. Only the reads and their freshness are this
 // file's own: display values may use a price a little older than one the settler signs.
 import { PublicKey } from "@solana/web3.js";
@@ -149,7 +149,7 @@ export class Valuation {
 
   /**
    * Live marks (8 decimals) per position and leg, on the leg's entry basis, by the shared rules
-   * (valueLeg): a token-priced leg on its token while the token holds the $50k floor, else on the
+   * (valueLeg): a token-priced leg on its token while the token holds the $25k floor, else on the
    * stock times the token's premium at entry; a stock-priced leg on the stock (Alpaca). Legs with
    * no entry basis yet fall back to the stock. Prediction legs mark at their exit price now (never
    * from a book that doesn't add up), card legs at the card's insured value from the asset bank's

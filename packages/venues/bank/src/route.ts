@@ -64,9 +64,10 @@ export type BestIssuerOpts = {
 
 /**
  * Pooled liquidity a token needs to be tradeable and for its own price to be trusted (the
- * settler's default floor too): $50k.
+ * settler's default floor too): $25k. Was $50k until 2026-11-20; lowered so mid-size names (Eli Lilly, IBM,
+ * Shopify, UPS, Pfizer, Boeing) can go in baskets.
  */
-export const PRICEABLE_MIN_POOLED_USD = 50_000;
+export const PRICEABLE_MIN_POOLED_USD = 25_000;
 
 export type Candidate = {
   mint: string;
