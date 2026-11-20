@@ -2,7 +2,7 @@
 // The X reply agent, iMessage trading, and later auto-copy and the MCP server all trade here.
 //
 // The user's own routes (Privy token, from the web app's limits screen /limits):
-//   GET    /agent/grant              → { grant, signer_id, policy_ids } the caller's limits
+//   GET    /agent/grant              → { grant, signer_id, policy_ids, max_usd } the caller's limits
 //                                      (grant null when never approved): { per_trade_usd, daily_usd,
 //                                      left_usd, x_username, imessage, active }
 //   PUT    /agent/grant              { per_trade_usd, daily_usd, link? } after the web app added our
@@ -43,14 +43,15 @@
 // Secrets: PRIVY_APP_ID, PRIVY_APP_SECRET, PRIVY_VERIFICATION_KEY (as the other functions),
 // PRIVY_AUTHORIZATION_KEY (the session signer's private key) and PRIVY_SIGNER_ID (its id),
 // PRIVY_SIGNER_POLICY_IDS (optional, comma-separated), FORK_API_URL and FORK_API_SERVICE_KEY (the
-// fork API's "agent" service key), WEB_URL (default https://yourthesis.xyz). BOT_SECRET from the
+// fork API's "agent" service key), WEB_URL (default https://yourthesis.xyz), AGENT_LIMIT_OVERRIDES
+// (optional: "<wallet>=10000" lets a wallet with more play money allow more than $1,000). BOT_SECRET from the
 // function's secrets or the Vault's bot_secret.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { privyDid } from "../_shared/privy.ts";
 import { embeddedSolana, hasSigner, linkedX, PrivyError, privyClient } from "./privy.ts";
 import {
-  ACTIONS, type Action, isRequote, LINK_TTL_MS, linkToken, MIN_USD, normalizeHandle, readLimits, readWho, sha256Hex,
+  ACTIONS, type Action, HARD_MAX_USD, isRequote, LINK_TTL_MS, linkToken, MAX_USD, MIN_USD, normalizeHandle, parseLimitOverrides, readLimits, readWho, sha256Hex,
   SURFACES, type Surface, takeLegs, topicGuess, type Who,
 } from "./rules.ts";
 
@@ -61,6 +62,9 @@ const env = (k: string) => Deno.env.get(k) ?? "";
 const WEB_URL = (env("WEB_URL") || "https://yourthesis.xyz").replace(/\/$/, "");
 const SIGNER_ID = env("PRIVY_SIGNER_ID") || null;
 const POLICY_IDS = env("PRIVY_SIGNER_POLICY_IDS").split(",").map((s) => s.trim()).filter(Boolean);
+const LIMIT_OVERRIDES = parseLimitOverrides(env("AGENT_LIMIT_OVERRIDES"));
+/** The most this wallet may allow per trade and per day. */
+const maxFor = (wallet: string | null | undefined) => (wallet && LIMIT_OVERRIDES.get(wallet)) || MAX_USD;
 const privy = privyClient({
   appId: env("PRIVY_APP_ID"),
   appSecret: env("PRIVY_APP_SECRET"),
@@ -144,17 +148,18 @@ async function grantView(g: Grant) {
 async function getGrant(profile: string) {
   const { data, error } = await db.from("agent_grants").select("*").eq("profile_id", profile).maybeSingle();
   dbCheck(error);
-  return json(200, { grant: data ? await grantView(data as Grant) : null, signer_id: SIGNER_ID, policy_ids: POLICY_IDS });
+  // Before a first grant there's no wallet on file: read it from the profile for max_usd.
+  const wallet = (data as Grant | null)?.wallet ?? (await db.from("profiles").select("solana_address").eq("id", profile).maybeSingle()).data?.solana_address;
+  return json(200, { grant: data ? await grantView(data as Grant) : null, signer_id: SIGNER_ID, policy_ids: POLICY_IDS, max_usd: maxFor(wallet) });
 }
 
 async function putGrant(did: string, profile: string, b: Record<string, unknown>) {
   if (!SIGNER_ID) throw new HttpError(503, "signer_not_configured");
-  const limits = readLimits(b);
-  check(limits, "invalid_limits");
-
   const user = await privy.user(did);
   const sol = embeddedSolana(user);
   if (!sol) throw new HttpError(409, "no_wallet");
+  const limits = readLimits(b, maxFor(sol.address));
+  check(limits, "invalid_limits");
   const walletId = sol.walletId ?? await privy.walletIdFor(did, sol.address);
   if (!walletId) throw new HttpError(409, "no_wallet");
   const wallet = await privy.wallet(walletId);
@@ -282,7 +287,7 @@ function readTrade(b: Record<string, unknown>): TradeReq {
   const draftId = typeof b.draft_id === "string" && DRAFT_ID_RE.test(b.draft_id) ? b.draft_id : null;
   const usd = b.usd == null ? null : Math.round(Number(b.usd) * 100) / 100;
   const bps = b.bps == null ? null : Math.round(Number(b.bps));
-  if (usd !== null) check(Number.isFinite(usd) && usd > 0 && usd <= 1000, "invalid_usd");
+  if (usd !== null) check(Number.isFinite(usd) && usd > 0 && usd <= HARD_MAX_USD, "invalid_usd");
   if (bps !== null) check(Number.isInteger(bps) && bps >= 1 && bps <= 10_000, "invalid_bps");
   if (action === "post") check(draftId && usd !== null && usd >= MIN_USD, draftId ? "invalid_usd" : "invalid_draft_id");
   if (action === "back" || action === "fade") check(takeId && usd !== null && usd >= MIN_USD, takeId ? "invalid_usd" : "invalid_take_id");

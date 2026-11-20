@@ -14,10 +14,13 @@ import { useForkWallet } from "@/lib/fork";
 import { useSession } from "@/lib/session";
 
 type Grant = { per_trade_usd: number; daily_usd: number; left_usd: number; x_username: string | null; imessage: string | null; active: boolean };
-type GrantReply = { grant: Grant | null; signer_id: string | null; policy_ids: string[] };
+type GrantReply = { grant: Grant | null; signer_id: string | null; policy_ids: string[]; max_usd?: number };
 
 const PER_TRADE = [25, 50, 100, 250];
 const DAILY = [100, 250, 500, 1000];
+/** For accounts with more play money (max_usd above $1,000). */
+const PER_TRADE_BIG = [500, 1000, 2500, 5000];
+const DAILY_BIG = [2500, 5000, 10000];
 const usd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 
 const ERRORS: Record<string, string> = {
@@ -121,17 +124,20 @@ function Limits() {
     }
   }
 
+  const max = state?.max_usd ?? 1000;
+  const perTradeOptions = [...PER_TRADE, ...PER_TRADE_BIG].filter((n) => n <= max);
+  const dailyOptions = [...DAILY, ...DAILY_BIG].filter((n) => n <= max);
   const picker = (
     <>
       <div className="caps">Most per trade</div>
       <div className="chips">
-        {PER_TRADE.map((n) => (
-          <button key={n} className={`chip${perTrade === n ? " on" : ""}`} onClick={() => { setPerTrade(n); if (daily < n) setDaily(DAILY.find((d) => d >= n) ?? n); }}>{usd(n)}</button>
+        {perTradeOptions.map((n) => (
+          <button key={n} className={`chip${perTrade === n ? " on" : ""}`} onClick={() => { setPerTrade(n); if (daily < n) setDaily(dailyOptions.find((d) => d >= n) ?? n); }}>{usd(n)}</button>
         ))}
       </div>
       <div className="caps">Most per day</div>
       <div className="chips">
-        {DAILY.map((n) => (
+        {dailyOptions.map((n) => (
           <button key={n} className={`chip${daily === n ? " on" : ""}`} disabled={n < perTrade} onClick={() => setDaily(n)}>{usd(n)}</button>
         ))}
       </div>

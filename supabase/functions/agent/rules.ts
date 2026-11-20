@@ -3,16 +3,32 @@
 /** Play money is $1,000 an account; the program's minimum stake is $10. */
 export const MIN_USD = 10;
 export const MAX_USD = 1000;
+/** The most any account may allow (the database's check), for wallets with a bigger play-money cap. */
+export const HARD_MAX_USD = 10_000;
+
+/**
+ * Wallets whose limits may go past $1,000 (the team's accounts, whose play money is capped higher:
+ * the fork API's FORK_DEPOSIT_CAP_OVERRIDES): AGENT_LIMIT_OVERRIDES="<wallet>=10000".
+ */
+export function parseLimitOverrides(raw: string | undefined): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const part of (raw ?? "").split(",")) {
+    const [wallet, usd] = part.split("=").map((x) => x?.trim());
+    const n = Number(usd);
+    if (wallet && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet) && Number.isFinite(n) && n >= MIN_USD) out.set(wallet, Math.min(n, HARD_MAX_USD));
+  }
+  return out;
+}
 export const LINK_TTL_MS = 30 * 60_000;
 
 export type Limits = { perTradeUsd: number; dailyUsd: number };
 
 /** The limits screen's choice, or null when it's out of range. */
-export function readLimits(b: Record<string, unknown>): Limits | null {
+export function readLimits(b: Record<string, unknown>, max = MAX_USD): Limits | null {
   const perTradeUsd = Number(b.per_trade_usd);
   const dailyUsd = Number(b.daily_usd);
   if (!Number.isFinite(perTradeUsd) || !Number.isFinite(dailyUsd)) return null;
-  if (perTradeUsd < MIN_USD || perTradeUsd > MAX_USD || dailyUsd < perTradeUsd || dailyUsd > MAX_USD) return null;
+  if (perTradeUsd < MIN_USD || perTradeUsd > max || dailyUsd < perTradeUsd || dailyUsd > max) return null;
   return { perTradeUsd: Math.round(perTradeUsd * 100) / 100, dailyUsd: Math.round(dailyUsd * 100) / 100 };
 }
 

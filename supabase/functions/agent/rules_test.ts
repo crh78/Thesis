@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { isRequote, normalizedWeights, normalizeHandle, readLimits, readWho, takeLegs, topicGuess } from "./rules.ts";
+import { isRequote, normalizedWeights, normalizeHandle, parseLimitOverrides, readLimits, readWho, takeLegs, topicGuess } from "./rules.ts";
 
 Deno.test("limits: at least $10 a trade, the day at least a trade, both at most $1,000", () => {
   assertEquals(readLimits({ per_trade_usd: 50, daily_usd: 200 }), { perTradeUsd: 50, dailyUsd: 200 });
@@ -53,4 +53,13 @@ Deno.test("topic guess and requote", () => {
   assert(isRequote("send_failed", { requote: true }));
   assert(isRequote("quote_stale", {}));
   assert(!isRequote("take_closed", {}));
+});
+
+Deno.test("limit overrides: a bigger max for listed wallets only, capped at $10,000", () => {
+  const w = "4Nd1mYw9Hn3sJkF5nX3z5Qk1yJ7mJ9dLqA3r7vN2hTxz";
+  const o = parseLimitOverrides(`${w}=10000, junk=5, ${w.slice(0, 20)}=99999`);
+  assertEquals([...o.entries()], [[w, 10000]]);
+  assertEquals(parseLimitOverrides(`${w}=50000`).get(w), 10000);
+  assertEquals(readLimits({ per_trade_usd: 2500, daily_usd: 10000 }, 10000), { perTradeUsd: 2500, dailyUsd: 10000 });
+  assertEquals(readLimits({ per_trade_usd: 2500, daily_usd: 10000 }), null);
 });
