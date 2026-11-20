@@ -51,10 +51,15 @@ export type Draft = {
   source: Source | null;
   /** Made by a chat bot (/d/<id>): posting it points the draft at the new take. */
   draftId: string | null;
+  /**
+   * The take bets against its picks ("crypto sucks" over BTC/ETH/SOL): the take builder says so
+   * for a bearish take, and posting it shorts every pick. Only picks that can be shorted fit.
+   */
+  inverted: boolean;
 };
 
 export const newDraft = (init: Partial<Draft> = {}): Draft => ({
-  claim: "", risk: "medium", buyIn: 25, legs: null, summary: null, noExposure: null, seed: null, edited: false, source: null, draftId: null, ...init,
+  claim: "", risk: "medium", buyIn: 25, legs: null, summary: null, noExposure: null, seed: null, edited: false, source: null, draftId: null, inverted: false, ...init,
 });
 
 export const predictionSide = (l: Leg) => (l.kind.startsWith("Prediction") ? (l.kind.endsWith("No") ? "no" : "yes") : undefined);
@@ -74,7 +79,9 @@ export function displayName(raw: string): string {
 type BuiltLeg = { id: string; key?: string | null; name: string; kind: string; role: string; weight: number; why: string; /** Whether a fade can short it (the take builder's `canShort`). */ canShort?: boolean; can_short?: boolean; side?: string | null; leverage?: number | null;
   /** Card legs: sent in camelCase, unlike the other fields; either spelling is read. */
   insuredValueUsd?: number | null; imageUrl?: string | null };
-export type Built = { verdict: string; summary?: string | null; reason?: string | null; legs: BuiltLeg[]; note?: string | null };
+export type Built = { verdict: string; summary?: string | null; reason?: string | null; legs: BuiltLeg[]; note?: string | null;
+  /** The basket bets against its picks (a bearish take): every leg can be shorted. Missing on older builders. */
+  inverted?: boolean };
 
 /** The take builder's leg as the app shows it. */
 export function fromBuilt(b: BuiltLeg, slot: number): Leg {
@@ -99,8 +106,10 @@ export function fromBuilt(b: BuiltLeg, slot: number): Leg {
   };
 }
 
-export function basketFrom(b: Built): { legs: Leg[]; summary: string | null; noExposure: string | null; note: string | null } {
+/** `inverted` stays undefined when the builder didn't say (an older one), so an edit keeps the draft's. */
+export function basketFrom(b: Built): { legs: Leg[]; summary: string | null; noExposure: string | null; note: string | null; inverted?: boolean } {
   return {
+    inverted: b.inverted,
     legs: b.legs.map((l, i) => fromBuilt(l, i)),
     summary: b.summary ?? null,
     noExposure: b.verdict === "no_clean_exposure" ? (b.reason ?? "Nothing you can buy tracks this closely enough yet.") : null,
@@ -108,7 +117,7 @@ export function basketFrom(b: Built): { legs: Leg[]; summary: string | null; noE
   };
 }
 
-/** The legs as the take builder takes them back (edit and risk modes). */
+/** The legs as the take builder takes them back (edit and risk modes; the body also sends the draft's `inverted`). */
 export const builderLegs = (legs: Leg[]) =>
   legs.filter((l) => l.assetId).map((l) => ({ id: l.assetId, weight: l.weight, why: l.why, side: predictionSide(l), leverage: leverageOf(l) }));
 
@@ -142,10 +151,13 @@ export const nextSlot = (legs: Leg[]) => {
 
 export type PickAsset = { id: string; key: string; name: string; kind: string; kindLabel: string; about?: string | null; canShort: boolean };
 
+/** Whether a pick fits the basket: a take that bets against its picks takes only ones that can be shorted. */
+export const fits = (a: Pick<PickAsset, "canShort">, inverted: boolean) => !inverted || a.canShort;
+
 export const holds = (a: PickAsset, legs: Leg[]) => legs.some((l) => l.assetKey === a.key || l.assetId === a.id || l.name === a.name);
 
-export function adding(a: PickAsset, legs: Leg[]): Leg[] {
-  if (holds(a, legs) || legs.length >= MAX_PICKS) return legs;
+export function adding(a: PickAsset, legs: Leg[], inverted = false): Leg[] {
+  if (holds(a, legs) || legs.length >= MAX_PICKS || !fits(a, inverted)) return legs;
   const share = 100 / (legs.length + 1);
   const scaled = legs.map((l) => ({ ...l, weight: l.weight * (1 - share / 100) }));
   const leg: Leg = {
@@ -201,9 +213,9 @@ export function topicGuess(claim: string, legs: Leg[]): { topic: string; tags: s
 
 /** A chat bot's draft (/d/<id>) → the composer, open on the basket the bot built. */
 export function fromBotDraft(d: TakeDraft): Partial<Draft> {
-  const b = basketFrom({ verdict: "basket", summary: d.summary, legs: d.legs });
+  const b = basketFrom({ verdict: "basket", summary: d.summary, legs: d.legs, inverted: d.inverted });
   return {
-    claim: d.claim.slice(0, 140), risk: d.risk,
+    claim: d.claim.slice(0, 140), risk: d.risk, inverted: !!b.inverted,
     legs: normalized(b.legs), summary: b.summary,
     source: d.source && /^https?:\/\//.test(d.source.url) ? { url: d.source.url, label: d.source.label, kind: d.source.kind } : null,
     draftId: d.id,

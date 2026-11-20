@@ -71,7 +71,7 @@ export async function runTradeTool(api: AgentApi, who: Who, ref: string | null, 
   if (name === "my_positions") {
     try {
       const ps = await api.positions(who);
-      return { output: { positions: ps.slice(0, 15).map((p) => ({ take_id: p.take_id, claim: p.claim, side: p.side, stake_usd: p.stake_usd, value_usd: p.value_usd, return_pct: p.return_bps == null ? null : p.return_bps / 100, closes_take_if_sold_all: p.closes_take_if_sold_all })) } };
+      return { output: { positions: ps.slice(0, 15).map((p) => ({ take_id: p.take_id, claim: p.claim, side: p.side, stake_usd: p.stake_usd, value_usd: p.value_usd, return_pct: p.return_bps == null ? null : p.return_bps / 100, closes_take_if_sold_all: p.closes_take_if_sold_all, ...(p.inverted ? { inverted: true } : {}) })) } };
     } catch (e) {
       if (String((e as Error).message).includes("not_linked")) return notLinked(api, who);
       throw e;

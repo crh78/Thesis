@@ -85,15 +85,20 @@ export function blinkServer(
             : { onChain: false });
         }
         const take = await service.blinkTake(id);
+        // A take that bets against its basket: the Blink only buys the basket, which would disagree
+        // with it, so it offers nothing (blinkTake's canBack is false for one) and says to open Thesis.
+        let inverted = (take as { inverted?: boolean }).inverted === true;
+        const unavailable = () => inverted ? "This take bets against its picks. Open Thesis to trade it." : "This take isn't available to back on the fork.";
         if (page) {
           const receipt = await service.receipt(id, undefined, { routes: false });
+          inverted ||= (receipt as { inverted?: boolean }).inverted === true;
           const claim = escape(take.claim);
           const author = take.handle ? ` by @${escape(take.handle)}` : "";
           const legs = take.legs.map((leg) => `<li>${escape(leg.name)}</li>`).join("");
           const summary = receipt.onChain
             ? `Backs: ${receipt.backers} · Backed: ${receipt.totalBackedUsd.toFixed(2)} USDC`
             : "This take has no fork receipt yet.";
-          const checkout = take.canBack && existsSync(checkoutBundle)
+          const checkout = take.canBack && !inverted && existsSync(checkoutBundle)
             ? `<section id="checkout" data-action="${actionPath}" data-chain="${escape(chainId)}" data-receipt="/api/blink/receipt/${id}">
                 <h2>Back this take</h2>
                 <p class="muted">Back up to three eligible spot or yield legs with fake USDC. Use a funded fork wallet.</p>
@@ -102,7 +107,7 @@ export function blinkServer(
                 <p id="review"></p><p id="checkout-status" role="status" aria-live="polite"></p>
                 <code id="confirmed-signature"></code>
               </section><script type="module" src="/blink/checkout.js"></script>`
-            : `<p>${take.canBack ? "Browser checkout is unavailable. Open Thesis to back this take." : "This take isn't available to back on the fork."}</p>`;
+            : `<p>${take.canBack && !inverted ? "Browser checkout is unavailable. Open Thesis to back this take." : unavailable()}</p>`;
           res.writeHead(200, { ...headers, "content-type": "text/html; charset=utf-8",
             "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" });
           res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -111,7 +116,7 @@ export function blinkServer(
             <meta property="og:description" content="Back this take on the Thesis fork with fake USDC.">
             <meta property="og:image" content="${escape(icon)}"></head><body><main>
             <p class="eyebrow">Thesis · Fork preview</p><h1>${claim}</h1><p class="muted">Take${author}</p>
-            <p id="receipt-summary">${summary}</p>${checkout}<h2>Basket</h2><ul>${legs}</ul>
+            <p id="receipt-summary">${summary}</p>${checkout}<h2>${inverted ? "Betting against" : "Basket"}</h2><ul>${legs}</ul>
             <p><a href="yourthesis-dev://take/${id}">Open the full take in Thesis</a></p>
             </main></body></html>`);
           return;
@@ -120,12 +125,12 @@ export function blinkServer(
         return send(200, {
           type: "action", icon, title: take.claim, label: "Back this take",
           description: `Fork preview${author}. Back up to three spot or yield legs with fake USDC. Open Thesis for the full basket.`,
-          ...(take.canBack ? { links: { actions: [
+          ...(take.canBack && !inverted ? { links: { actions: [
             { type: "transaction", label: "Back 10 USDC", href: `${actionPath}?amount=10` },
             { type: "transaction", label: "Back this take", href: `${actionPath}?amount={amount}`, parameters: [
               { name: "amount", label: `Amount in USDC (minimum ${MIN_STAKE_USD})`, type: "number", required: true, min: MIN_STAKE_USD },
             ] },
-          ] } } : { disabled: true, error: { message: "This take isn't available to back on the fork." } }),
+          ] } } : { disabled: true, error: { message: unavailable() } }),
         });
       }
 

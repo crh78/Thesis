@@ -2,14 +2,14 @@
 // inbound message (Luna, low reasoning effort), with tools for the actions a
 // chat can take: build_basket, and trades (post, back, fade, sell) that wait for a yes (./confirm.ts).
 import OpenAI from "openai";
-import { basketTool, buildBasket, warmBasket, RISKS, type BasketArgs, type BasketConfig } from "./basket.ts";
+import { basketTool, buildBasket, picksLines, warmBasket, RISKS, type BasketArgs, type BasketConfig } from "./basket.ts";
 import { cleanReply } from "./style.ts";
 import { askText, prepareTrade, runConfirmed, yesNo, type Pending } from "./confirm.ts";
 import { TRADE_TOOL_NAMES, tradeTools } from "./tools.ts";
 import { takeIdFrom, type AgentApi } from "./trade.ts";
 
 export type { BasketConfig, BasketResult, DraftMeta } from "./basket.ts";
-export { basketConfigFromEnv, buildBasket, plainName, warmBasket } from "./basket.ts";
+export { basketConfigFromEnv, buildBasket, legSide, picksLines, plainName, warmBasket } from "./basket.ts";
 export { cleanReply } from "./style.ts";
 export { yesNo } from "./confirm.ts";
 export { agentApi, agentApiConfigFromEnv, draftIdFrom, takeIdFrom, type AgentApi, type Score, type TradeAsk, type TradeResult, type Who, type WhoIs } from "./trade.ts";
@@ -53,6 +53,7 @@ const INSTRUCTIONS = [
   "Only call it for an opinion about the world, a company or a market. Plans, logistics, jokes, greetings and small talk are not takes: don't call it.",
   "Use the take in their own words. Risk: what they said, else medium. Don't ask first. A take has no timeline: it runs until its author sells, so never ask for or mention one.",
   "After build_basket: one line (max 12 words) on what has to be true, then each pick on its own line as `Name 40%: why` with the why in 6 words or fewer, then the link on its own line, exactly as given.",
+  "If build_basket says inverted: true, the take bets against its picks (\"crypto sucks\" over bitcoin, ether, solana): agreeing wins if they fall. Put `betting against:` on its own line before the picks, and never call them buys.",
   "If there's no clean exposure, say so in one line with the reason. Never invent picks, prices or returns.",
   "Be brief. Most replies are one or two short sentences. Answer only what was asked, no preamble, no recap, no follow-up offers.",
   "Explain simply, like to a smart friend who doesn't invest: plain words, no jargon. If asked who you are or what you do, one sentence.",
@@ -68,6 +69,7 @@ const TRADING = [
   "Trade only when the sender clearly asks to and, for buys, says a dollar amount (at least $10). If the amount or the take is unclear, ask in one line. Never trade for anyone but the sender.",
   "\"Make this a take for $20\" or \"I'm in for $20\" on a basket that isn't posted: build_basket if needed, then post_take with its draft_id. That posts it as their take with their buy-in.",
   "\"I'm in for $50 on Jake's take\": back_take. \"Fading Jake for $25\": fade_take. Find the take in [Recent in this chat] or a link; if more than one fits, ask which.",
+  "A take marked inverted bets against its picks. back_take still means agreeing with the take and fade_take disagreeing: never swap them.",
   "Selling: sell_position. If it's all of a position marked closes_take_if_sold_all, first say that selling all of their buy-in closes their take to new backers, and ask them to confirm.",
   "Trade tools don't trade right away: they set the trade up (status awaiting_confirmation) and the person confirms by liking the message or replying yes. The confirmation message is written for you; don't write one.",
   "error not_linked: say they need to connect once, then trades by text just work, and give the connect link. over_trade_limit or over_daily_limit: say their limit in one line and give the link to do it themselves. Any other error: one plain line, never the raw code.",
@@ -147,7 +149,7 @@ export function createAgent(cfg: AgentConfig) {
     log("tool build_basket", { verdict: out.verdict, legs: out.verdict === "basket" ? out.legs.length : 0, ms: Date.now() - t0 });
     if (out.verdict === "basket") {
       links.push(out.link);
-      st.picks = out.legs.map((l) => `${l.name} ${Math.round(l.weight)}%`);
+      st.picks = picksLines(out);
       remember(turn.chatId, { kind: "draft", id: out.draftId, claim: args.claim, by: turn.sender ?? undefined });
       return JSON.stringify({ ...out, draft_id: out.draftId });
     }

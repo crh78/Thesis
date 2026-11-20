@@ -25,7 +25,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const d = await getDraft(id);
   if (!d) return { title: "Thesis" };
-  const description = `${d.context ? `${d.context}. ` : ""}A take on Thesis, basket built. Post it and trade it.`;
+  const description = `${d.context ? `${d.context}. ` : ""}A take on Thesis, basket built${d.inverted ? " to bet against" : ""}. Post it and trade it.`;
   return {
     title: `${d.claim} · Thesis`,
     description,
@@ -55,8 +55,10 @@ export default async function DraftPage({ params }: Props) {
       {d.summary ? <p className="muted" style={{ marginTop: 16 }}>{d.summary}</p> : null}
 
       <div className="section">
-        <h2>Basket <span className="caps">weight</span></h2>
-        <Basket legs={legs} />
+        <h2>{d.inverted ? "Betting against" : "Basket"} <span className="caps">weight</span></h2>
+        {/* A bearish take over its picks: posting it shorts every one. */}
+        {d.inverted ? <p className="muted small" style={{ margin: "0 0 8px" }}>Posting this take is short every pick: you win if they fall.</p> : null}
+        <Basket legs={legs} inverted={!!d.inverted} />
       </div>
 
       <p className="small muted" style={{ marginTop: 20, marginBottom: 96 }}>

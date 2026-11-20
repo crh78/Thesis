@@ -31,6 +31,14 @@ test("takeReply fits 280 and carries no link", () => {
   assert.ok(!/[—–]/.test(r));
 });
 
+test("takeReply on a basket it bets against says so, and still fits", () => {
+  const picks = [{ name: "Bitcoin", weight: 40 }, { name: "Ether", weight: 35 }, { name: "Solana", weight: 25 }];
+  const r = takeReply("Crypto keeps falling", picks, true)!;
+  assert.ok(r.includes("Betting against: Bitcoin 40%, Ether 35%, Solana 25%"), r);
+  assert.ok(xLength(r) <= 280);
+  assert.ok(!takeReply("Crypto keeps rising", picks)!.includes("against"));
+});
+
 test("takeReply refuses a blocked pick name", () => {
   assert.equal(takeReply("Gold goes up", [{ name: "Hitler Fund", weight: 100 }]), null);
 });

@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { cardValue, isCardKind, money, SERIES } from "@/lib/data";
 import {
-  adding, basketFrom, builderLegs, type Built, type Draft, type Leg, MAX_PICKS, newDraft, type PickAsset, POST_HORIZON,
+  adding, basketFrom, builderLegs, type Built, fits, type Draft, type Leg, MAX_PICKS, newDraft, type PickAsset, POST_HORIZON,
   removing, type Risk, RISKS, RUNS_COPY, setting, topicGuess,
 } from "@/lib/compose";
 import { centsInput, fork, ForkError, stoppedTrade, useForkWallet, type Incomplete, type WalletSummary } from "@/lib/fork";
@@ -106,7 +106,7 @@ function Write({ draft, setDraft, onClose, onNext }: { draft: Draft; setDraft: (
   const edit = (patch: Partial<Draft>) =>
     setDraft((d) => {
       const changed = (Object.keys(patch) as (keyof Draft)[]).some((k) => JSON.stringify(d[k]) !== JSON.stringify(patch[k]));
-      return changed ? { ...d, ...patch, legs: null, summary: null, noExposure: null, edited: false } : d;
+      return changed ? { ...d, ...patch, legs: null, summary: null, noExposure: null, edited: false, inverted: false } : d;
     });
   return (
     <div className="cmp">
@@ -160,6 +160,8 @@ async function callBuilder(token: string, body: Record<string, unknown>): Promis
 
 // No horizon: the take builder picks leverage and prediction contracts for a take that may run a year.
 const builderBody = (d: Draft) => ({ claim: d.claim.trim(), risk: d.risk });
+/** Changing a built basket (edit and risk modes) sends back whether it bets against its picks, so it still does. */
+const changeBody = (d: Draft) => ({ ...builderBody(d), inverted: d.inverted, legs: builderLegs(d.legs ?? []) });
 
 function Building({ draft, setDraft, onClose, onBack, onNext, auto }: { draft: Draft; setDraft: (f: (d: Draft) => Draft) => void; onClose: () => void; onBack: () => void; onNext: () => void; auto: boolean }) {
   const { token } = useSession();
@@ -180,7 +182,7 @@ function Building({ draft, setDraft, onClose, onBack, onNext, auto }: { draft: D
         const body = { ...builderBody(draft), ...(draft.seed ? { include: [draft.seed.id] } : {}) };
         const b = basketFrom(await callBuilder(await token(), body));
         if (!live) return;
-        setDraft((d) => ({ ...d, legs: b.legs, summary: b.summary, noExposure: b.noExposure, edited: false }));
+        setDraft((d) => ({ ...d, legs: b.legs, summary: b.summary, noExposure: b.noExposure, edited: false, inverted: !!b.inverted }));
         setBuilt(true);
         setPhase(PHASES.length);
         if (auto && !b.noExposure) window.setTimeout(() => live && onNext(), 600);
@@ -207,7 +209,7 @@ function Building({ draft, setDraft, onClose, onBack, onNext, auto }: { draft: D
         <div className="build-status">
           <span className={`orb big${done || error ? " still" : ""}`} aria-hidden />
           <h2>{error ? "Couldn't build your basket" : done ? (draft.noExposure ? "No clean way to trade this" : "Your basket is ready") : current.title}</h2>
-          <p className="muted">{error ?? (done ? (draft.noExposure ?? `${draft.legs?.length ?? 0} ${draft.legs?.length === 1 ? "pick" : "picks"} · ${RISKS.find((r) => r.key === draft.risk)!.label} risk`) : current.sub)}</p>
+          <p className="muted">{error ?? (done ? (draft.noExposure ?? `${draft.inverted ? "Betting against " : ""}${draft.legs?.length ?? 0} ${draft.legs?.length === 1 ? "pick" : "picks"} · ${RISKS.find((r) => r.key === draft.risk)!.label} risk`) : current.sub)}</p>
         </div>
         <div className="build-steps">
           {LABELS.map((l, i) => (
@@ -281,8 +283,8 @@ function Basket({ draft, setDraft, onClose, onBack, onPosted }: { draft: Draft; 
     setRebuilding(true);
     setNote(null);
     try {
-      const b = basketFrom(await callBuilder(await token(), { ...builderBody(draft), mode: "edit", ask: text, legs: builderLegs(legs) }));
-      if (JSON.stringify(b.legs) !== JSON.stringify(legs)) { setDraft((d) => ({ ...d, legs: b.legs, edited: true, summary: b.summary ?? d.summary })); setSelected(null); }
+      const b = basketFrom(await callBuilder(await token(), { ...changeBody(draft), mode: "edit", ask: text }));
+      if (JSON.stringify(b.legs) !== JSON.stringify(legs)) { setDraft((d) => ({ ...d, legs: b.legs, edited: true, summary: b.summary ?? d.summary, inverted: b.inverted ?? d.inverted })); setSelected(null); }
       setNote(b.note);
       if (!b.note) setAsk("");
     } catch {
@@ -300,10 +302,11 @@ function Basket({ draft, setDraft, onClose, onBack, onPosted }: { draft: Draft; 
     setRebuilding(true);
     setNote(null);
     try {
-      const body = draft.edited ? { ...builderBody(next), mode: "risk", legs: builderLegs(legs) } : { ...builderBody(next), ...(draft.seed ? { include: [draft.seed.id] } : {}) };
+      const body = draft.edited ? { ...changeBody(next), mode: "risk" } : { ...builderBody(next), ...(draft.seed ? { include: [draft.seed.id] } : {}) };
       const b = basketFrom(await callBuilder(await token(), body));
       if (b.noExposure) setNote(b.noExposure);
-      else if (b.legs.length) setDraft((d) => ({ ...d, legs: b.legs, summary: b.summary ?? d.summary }));
+      // Kept picks keep the draft's direction unless the builder says otherwise; a fresh build decides it.
+      else if (b.legs.length) setDraft((d) => ({ ...d, legs: b.legs, summary: b.summary ?? d.summary, inverted: draft.edited ? (b.inverted ?? d.inverted) : !!b.inverted }));
     } catch {
       setNote(`Couldn't rebuild for ${risk} risk. Try again.`);
     } finally {
@@ -340,11 +343,13 @@ function Basket({ draft, setDraft, onClose, onBack, onPosted }: { draft: Draft; 
           <div className="muted small">{RUNS_COPY}</div>
           <SourceMark draft={draft} />
         </div>
+        {/* A bearish take ("crypto sucks") bets against its picks: posting it shorts every one. */}
+        {draft.inverted ? <p className="small basket-note" style={{ marginTop: 0 }}><b className="down">Betting against these.</b> <span className="muted">You win if they fall: you&apos;re short every pick.</span></p> : null}
         <div className="donut-wrap" style={{ opacity: rebuilding ? 0.4 : 1 }}>
           <Donut legs={legs} selected={selected} />
           <div className="donut-center">
             <b>{picked ? `${Math.round(picked.weight)}%` : legs.length}</b>
-            <span className="muted small">{picked ? picked.name : `${legs.length === 1 ? "pick" : "picks"} · tap one to see it`}</span>
+            <span className="muted small">{picked ? picked.name : `${legs.length === 1 ? "pick" : "picks"}${draft.inverted ? " against" : ""} · tap one to see it`}</span>
           </div>
         </div>
         <div className="segmented" role="radiogroup" aria-label="Risk">
@@ -371,7 +376,7 @@ function Basket({ draft, setDraft, onClose, onBack, onPosted }: { draft: Draft; 
                   ) : <AssetLogo assetKey={l.assetKey} name={l.name} kind={l.kind} size={34} />}
                 </span>
                 <span className="leg-text">
-                  <span className="leg-top"><b className="mono">{Math.round(l.weight)}%</b> <b>{l.name}</b><span className="muted small" style={{ marginLeft: "auto" }}>{isCardKind(l.kind) ? cardValue(l.insuredValueUsd) : l.kind}</span></span>
+                  <span className="leg-top"><b className="mono">{Math.round(l.weight)}%</b> <b>{l.name}</b><span className="muted small" style={{ marginLeft: "auto" }}>{draft.inverted ? "Short · " : ""}{isCardKind(l.kind) ? cardValue(l.insuredValueUsd) : l.kind}</span></span>
                   {l.why ? <span className="muted small">{l.why}</span> : null}
                 </span>
               </button>
@@ -405,7 +410,7 @@ function Basket({ draft, setDraft, onClose, onBack, onPosted }: { draft: Draft; 
         </div>
       ) : null}
       {weighing ? <WeightSheet leg={weighing} picks={legs.length} onClose={() => setWeighing(null)} onDone={(w) => { change(setting(weighing, w, legs)); setWeighing(null); }} /> : null}
-      {picking ? <AssetPicker legs={legs} onClose={() => setPicking(false)} onPick={(a) => { change(adding(a, legs)); setPicking(false); }} /> : null}
+      {picking ? <AssetPicker legs={legs} inverted={draft.inverted} onClose={() => setPicking(false)} onPick={(a) => { change(adding(a, legs, draft.inverted)); setPicking(false); }} /> : null}
       {short && address ? <AddCash address={address} summary={wallet} onClose={() => setShort(false)} onDone={(s) => { setWallet(s); setError(null); setShort(false); }} /> : null}
     </div>
   );
@@ -426,7 +431,8 @@ function WeightSheet({ leg, picks, onClose, onDone }: { leg: Leg; picks: number;
   );
 }
 
-function AssetPicker({ legs, onClose, onPick }: { legs: Leg[]; onClose: () => void; onPick: (a: PickAsset) => void }) {
+// `inverted`: the basket bets against its picks, so only picks that can be shorted fit.
+function AssetPicker({ legs, inverted, onClose, onPick }: { legs: Leg[]; inverted: boolean; onClose: () => void; onPick: (a: PickAsset) => void }) {
   const { assets } = useSession();
   const [q, setQ] = useState("");
   const [found, setFound] = useState<Asset[] | null>(null);
@@ -442,6 +448,7 @@ function AssetPicker({ legs, onClose, onPick }: { legs: Leg[]; onClose: () => vo
       <div className="sheet" role="dialog" aria-label="Add a pick">
         <button className="x" aria-label="Close" onClick={onClose}>×</button>
         <h3>Add a pick</h3>
+        {inverted ? <p className="muted small" style={{ marginTop: 0 }}>You&apos;re betting against these, so only picks that can be shorted fit.</p> : null}
         <div className="search-box">
           <input autoFocus placeholder="Ticker, company or idea" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" />
         </div>
@@ -449,11 +456,12 @@ function AssetPicker({ legs, onClose, onPick }: { legs: Leg[]; onClose: () => vo
         {found?.length === 0 ? <p className="muted search-empty">No results.</p> : null}
         {found?.map((a) => {
           const inBasket = legs.some((l) => l.assetKey === a.key || l.assetId === a.id || l.name === a.name);
+          const fit = fits(a, inverted);
           return (
-            <button key={a.id} className={`arow${a.available ? "" : " unavailable"}`} style={{ width: "100%", textAlign: "left" }} disabled={inBasket || !a.available} onClick={() => onPick(a)}>
+            <button key={a.id} className={`arow${a.available && fit ? "" : " unavailable"}`} style={{ width: "100%", textAlign: "left" }} disabled={inBasket || !a.available || !fit} onClick={() => onPick(a)}>
               <AssetLogo assetKey={a.key} name={a.name} kind={a.kind} />
               <span className="arow-main"><b>{a.name}</b><span className="muted small">{a.symbol} · {a.kindLabel}</span></span>
-              <span className="muted small">{inBasket ? "In your basket" : "+"}</span>
+              <span className="muted small">{inBasket ? "In your basket" : !fit ? "Can't be shorted" : "+"}</span>
             </button>
           );
         })}
@@ -493,6 +501,8 @@ function Posting({ draft, onClose }: { draft: Draft; onClose: () => void }) {
     const { topic, tags } = topicGuess(draft.claim, legs);
     const r = await social<{ take: { id: string } }>("POST", "takes", {
       claim: draft.claim.trim(), topic, tags, risk: draft.risk, horizon: POST_HORIZON, await_chain: true,
+      // Bets against its picks: the buy-in (and every trade that agrees) shorts each one.
+      ...(draft.inverted ? { inverted: true } : {}),
       legs: legs.map((l) => ({ name: l.name, kind: l.kind, weight: l.weight, why: l.why, slot: l.slot, fade_how: l.fadeHow, asset_id: l.assetId })),
     });
     // Retry on Me (after closing this, or a reload) sends the same buy-in.

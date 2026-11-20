@@ -49,7 +49,7 @@ export async function prepareTrade(
     const w = await api.whois(who);
     if (!w.linked || !w.active) return notLinked(api, who);
     const ps = await api.positions(who);
-    return { kind: "done", output: { positions: ps.slice(0, 15).map((p) => ({ take_id: p.take_id, claim: p.claim, side: p.side, stake_usd: p.stake_usd, value_usd: p.value_usd, return_pct: p.return_bps == null ? null : p.return_bps / 100, closes_take_if_sold_all: p.closes_take_if_sold_all })) } };
+    return { kind: "done", output: { positions: ps.slice(0, 15).map((p) => ({ take_id: p.take_id, claim: p.claim, side: p.side, stake_usd: p.stake_usd, value_usd: p.value_usd, return_pct: p.return_bps == null ? null : p.return_bps / 100, closes_take_if_sold_all: p.closes_take_if_sold_all, ...(p.inverted ? { inverted: true } : {}) })) } };
   }
 
   let ask: TradeAsk;

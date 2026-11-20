@@ -37,7 +37,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
           <div style={{ display: "flex", alignItems: "baseline", gap: 24 }}>
             <span style={{ fontSize: 64, color: ret >= 0 ? "#A6E3B8" : "#F2A9C2" }}>{pct(ret)}</span>
             <span style={{ fontSize: 28, color: "#9AA0AA" }}>
-              {take ? `${take.risk} risk · ${status} · ${take.backs} traded · ${take.fades} faded` : ""}
+              {take ? `${take.risk} risk · ${take.inverted ? "betting against · " : ""}${status} · ${take.backs} traded · ${take.fades} faded` : ""}
             </span>
           </div>
           <div style={{ display: "flex", gap: 6, height: 14 }}>

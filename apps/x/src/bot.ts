@@ -12,12 +12,16 @@ import type { Mention, Vet } from "./vet.ts";
 export const X_RISK = "high" as const;
 
 type Pick = { name: string; weight: number };
-/** What one of the bot's replies carries: the draft it showed, or the take it traded. */
-export type BotPost = { draftId?: string; takeId?: string; side?: "back" | "fade"; forX?: string; claim?: string; legs?: Pick[] };
+/**
+ * What one of the bot's replies carries: the draft it showed, or the take it traded. `side` is the
+ * take's (back = agree), never the legs': on a take that bets against its picks (`inverted`) the
+ * fork API holds a back short. Only the reply's wording changes.
+ */
+export type BotPost = { draftId?: string; takeId?: string; side?: "back" | "fade"; forX?: string; claim?: string; legs?: Pick[]; inverted?: boolean };
 /** A take an X user traded in a conversation, for "sell" anywhere in that thread. */
 export type Held = { takeId: string; side: "back" | "fade"; claim?: string };
 /** A basket built for a post, reused for everyone else replying under it (no second build). */
-export type Shared = { draftId: string; claim: string; legs: Pick[]; at: number };
+export type Shared = { draftId: string; claim: string; legs: Pick[]; at: number; inverted?: boolean };
 
 /** What the bot remembers across mentions (apps/x/src/state.ts keeps it). */
 export type Memory = {
@@ -127,7 +131,7 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
     const r = await trading!.trade(who, "x", m.id, { action: "post", draftId: parentPost.draftId, usd: intent.usd });
     if (!r.ok) return refusal(r);
     if (r.status === "failed") return failed(r);
-    const text = tradeReply(parentPost.claim, parentPost.legs, intent.usd);
+    const text = tradeReply(parentPost.claim, parentPost.legs, intent.usd, !!parentPost.inverted);
     if (!text) return { kind: "skip", reason: "reply failed the checks" };
     return {
       kind: "reply", text, what: "trade", link: r.url, image: imageOf(parentPost.draftId), trade: { status: r.status, takeId: r.takeId },
@@ -170,7 +174,11 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
   if (out.verdict === "no_clean_exposure") return { kind: "reply", text: NO_EXPOSURE, what: "no_exposure" };
   const image = imageOf(out.draftId);
   const picks = out.legs.map((l) => ({ name: l.name, weight: l.weight }));
-  const shared: Remember["shared"] = !share && fromParent && m.parentId ? { parentId: m.parentId, side, value: { draftId: out.draftId, claim, legs: picks } } : undefined;
+  // A bearish claim ("crypto is done", or a fade's opposite view) can come back as a basket that bets
+  // against its picks: still the asker's take, so a buy-in is a back; the replies say "Betting against".
+  // A copied basket (`share`) keeps the first one's direction if the drafts route didn't say.
+  const inverted = out.inverted || !!share?.inverted;
+  const shared: Remember["shared"] = !share && fromParent && m.parentId ? { parentId: m.parentId, side, value: { draftId: out.draftId, claim, legs: picks, ...(inverted ? { inverted } : {}) } } : undefined;
 
   if (intent) {
     // The basket is the asker's take: posted with their buy-in (a fade's claim is the opposite view).
@@ -179,21 +187,21 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
       const p = refusal(r);
       // Not connected yet: the draft still waits for them in the app.
       if (p.kind === "reply" && p.what === "not_linked") {
-        const draft = takeReply(claim, out.legs);
-        return draft ? { ...p, text: draft.replace(TAKE_TAIL, NOT_LINKED), image, remember: { post: { draftId: out.draftId, forX: me, claim, legs: picks }, shared } } : p;
+        const draft = takeReply(claim, out.legs, inverted);
+        return draft ? { ...p, text: draft.replace(TAKE_TAIL, NOT_LINKED), image, remember: { post: { draftId: out.draftId, forX: me, claim, legs: picks, ...(inverted ? { inverted } : {}) }, shared } } : p;
       }
       return p;
     }
     if (r.status === "failed") return failed(r);
-    const text = tradeReply(claim, out.legs, intent.usd);
+    const text = tradeReply(claim, out.legs, intent.usd, inverted);
     if (!text) return { kind: "skip", reason: "reply failed the checks" };
     return {
       kind: "reply", text, what: "trade", link: r.url, image, trade: { status: r.status, takeId: r.takeId },
-      remember: { post: { takeId: r.takeId, side: "back", claim }, held: { takeId: r.takeId, side: "back", claim }, shared },
+      remember: { post: { takeId: r.takeId, side: "back", claim, ...(inverted ? { inverted } : {}) }, held: { takeId: r.takeId, side: "back", claim }, shared },
     };
   }
 
-  const text = takeReply(claim, out.legs);
+  const text = takeReply(claim, out.legs, inverted);
   if (!text) return { kind: "skip", reason: "reply failed the checks" };
-  return { kind: "reply", text, what: "take", link: out.link, image, remember: { post: { draftId: out.draftId, forX: me, claim, legs: picks }, shared } };
+  return { kind: "reply", text, what: "take", link: out.link, image, remember: { post: { draftId: out.draftId, forX: me, claim, legs: picks, ...(inverted ? { inverted } : {}) }, shared } };
 }

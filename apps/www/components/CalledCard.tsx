@@ -1,5 +1,5 @@
 // One "called it" card per theme, drawn for a phone screen (4:5). Styles in app/c/[id]/called.css.
-import { barcode, type CardData, claimSize, ticket, type ThemeId } from "@/lib/called";
+import { barcode, type CardData, claimSize, flowLine, ticket, type ThemeId } from "@/lib/called";
 
 type Props = { d: CardData; theme: ThemeId; shown: string };
 
@@ -77,7 +77,7 @@ function Terminal({ d, shown }: Omit<Props, "theme">) {
         <div><em>&gt;</em> SUBJ  {d.claim.toUpperCase()}</div>
         <div><em>&gt;</em> AUTH  {at(d).toUpperCase()}</div>
         <div><em>&gt;</em> OPEN  {d.posted.toUpperCase()} · {d.days}D</div>
-        <div><em>&gt;</em> FLOW  {d.backs} LONG / {d.fades} SHORT</div>
+        <div><em>&gt;</em> FLOW  {flowLine(d)}</div>
       </div>
       <div className="cc-spacer" />
       <div className="cc-t-label">{d.called ? "▲ CALLED" : d.ret >= 0 ? "▲ OPEN" : "▼ OPEN"}</div>

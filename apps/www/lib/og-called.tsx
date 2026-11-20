@@ -1,6 +1,6 @@
 // The called-it card's link previews (1200×630), one per theme, drawn with next/og (Satori:
 // flexbox only, every multi-child div is display:flex).
-import { barcode, type CardData, ticket, type ThemeId } from "@/lib/called";
+import { barcode, type CardData, flowLine, ticket, type ThemeId } from "@/lib/called";
 import { Check } from "@/lib/og";
 
 type A = { src: string | null; bg: string };
@@ -109,7 +109,7 @@ function Terminal({ d }: P) {
           {row("SUBJ", clip(d.claim.toUpperCase(), 70))}
           {row("AUTH", at(d).toUpperCase())}
           {row("OPEN", `${d.posted.toUpperCase()} · ${d.days}D`)}
-          {row("FLOW", `${d.backs} LONG / ${d.fades} SHORT`)}
+          {row("FLOW", flowLine(d))}
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "flex-end", width: 470 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 30, letterSpacing: 3, color: g }}>

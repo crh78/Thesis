@@ -84,7 +84,9 @@ const EARLY_SALE_REFUSALS = new Set(["remainder_below_minimum", "part_too_small"
  * knows it's closed; `handle` (the author's, null for a deleted account) words it when the receipt
  * here finds out later (the author sold while the page was open).
  */
-export default function TradeDock({ takeId, author, handle = null, receipt: initial, closed = null }: { takeId: string; author: string; handle?: string | null; receipt: Receipt | null; closed?: string | null }) {
+// `inverted`: the take bets against its basket. Sides here stay the take's (back = agree, fade =
+// disagree; the fork API maps them on-chain): only the words, and which way each leg is held, change.
+export default function TradeDock({ takeId, author, handle = null, receipt: initial, closed = null, inverted: invertedProp = false }: { takeId: string; author: string; handle?: string | null; receipt: Receipt | null; closed?: string | null; inverted?: boolean }) {
   const { ready, authenticated } = usePrivy();
   const { phase, snapshot, logout } = useSession();
   // The user's Privy (embedded) Solana wallet, the one the app also uses.
@@ -559,6 +561,7 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
   const blockedLabel = missing ? "Can't be traded here" : "Can't trade right now";
 
   const ret = receipt?.returnBps != null ? receipt.returnBps / 100 : null;
+  const inverted = invertedProp || !!receipt?.inverted;
 
   return (
     <>
@@ -662,6 +665,7 @@ export default function TradeDock({ takeId, author, handle = null, receipt: init
             {step.kind === "trade" ? (
               <TradeSheet
                 side={step.side}
+                inverted={inverted}
                 author={author}
                 receipt={receipt}
                 amount={amount}
@@ -766,6 +770,8 @@ function Placed(props: { sale: boolean; text: string; confirming: boolean; slow:
 
 function TradeSheet(props: {
   side: Side;
+  /** The take bets against its basket: trading it is short every leg, fading it long. */
+  inverted: boolean;
   author: string;
   receipt: Receipt | null;
   amount: string;
@@ -786,14 +792,19 @@ function TradeSheet(props: {
   const n = Number(amount) || 0;
   const fee = n * feeRate;
   const legs: Leg[] = receipt?.legs ?? [];
+  // Which way this side holds the legs on Phoenix: a trade is long and a fade short, except on a
+  // take that bets against its basket, where it's the other way round. The legs' `tradable` /
+  // `blocked` / `fadeBlocked` and a prediction's `side` are already the take's (back = agree);
+  // only `perp` (the long market) and `short` (the short one) are the chain's.
+  const long = (side === "back") !== props.inverted;
   // Fading leaves out legs that can't be shorted: card legs always (docs/cards-plan.md), shown as excluded.
   const blockedFor = (l: Receipt["legs"][number]) =>
     side === "back" ? (l.tradable ? null : l.blocked ?? "not tradable") : (l.fadeBlocked ?? (l.card ? "Cards can't be faded" : null));
   const included = legs.filter((l) => !blockedFor(l));
   const totalWeight = included.reduce((s, l) => s + l.weightBps, 0) || 1;
   const short = cash != null && cash < n + fee;
-  // Held on Phoenix: a back's perp legs (long, at the take's leverage), a fade's shorts (at the leg's own).
-  const onPhoenix = (l: Leg) => (side === "back" ? !!l.perp : !!l.short);
+  // Held on Phoenix: the long side's perp legs (at the take's leverage), the short side's shorts (at the leg's own).
+  const onPhoenix = (l: Leg) => (long ? !!l.perp : !!l.short);
   const leverageOf = (l: Leg) => l.perp?.leverage ?? 1;
   const anyPhoenix = included.some(onPhoenix);
   // "Add $100 cash", never more than the cap has left (cents, as the API takes them).
@@ -805,7 +816,9 @@ function TradeSheet(props: {
     <>
       <h3>{side === "back" ? `Trade ${props.author}'s take` : `Fade ${props.author}'s take`}</h3>
       <p className="muted small" style={{ margin: 0 }}>
-        {side === "back" ? "You get the same basket at today's prices." : `You win if ${props.author} is wrong. Fades are public.`}
+        {side === "back"
+          ? (props.inverted ? "You bet against the same basket at today's prices: you win if it falls." : "You get the same basket at today's prices.")
+          : props.inverted ? `You win if ${props.author} is wrong: you hold the basket they bet against. Fades are public.` : `You win if ${props.author} is wrong. Fades are public.`}
       </p>
       <div className="amount">
         $<input inputMode="decimal" value={amount} onChange={(e) => props.typeAmount(centsInput(e.target.value))} aria-label="Amount" />
@@ -815,7 +828,7 @@ function TradeSheet(props: {
           <button key={c} className={`chip ${n === c ? "on" : ""} ${side}`} onClick={() => props.setAmount(String(c))}>${c}</button>
         ))}
       </div>
-      <div className="caps" style={{ marginBottom: 6 }}>{side === "back" ? "What you're buying" : "What you're betting"}</div>
+      <div className="caps" style={{ marginBottom: 6 }}>{side === "back" ? (props.inverted ? "What you're shorting" : "What you're buying") : props.inverted ? "What you're buying" : "What you're betting"}</div>
       {legs.map((l) => {
         const blocked = blockedFor(l);
         const pred = l.prediction;
@@ -828,7 +841,7 @@ function TradeSheet(props: {
               {blocked ? <div className="note">{l.card && side === "fade" ? "Cards can't be faded" : blocked}</div>
                 : heldSide ? <div className="note">{heldSide === "yes" ? "Yes" : "No"}{price != null ? ` · ${Math.round(price * 100)}¢` : ""}</div>
                 : l.card ? <div className="note">{cardValue(l.card.insuredValueUsd)}</div>
-                : onPhoenix(l) ? <div className="note">{leverageOf(l)}x {side === "back" ? "long" : "short"} on {side === "back" ? l.perp?.symbol : l.short}</div> : null}
+                : onPhoenix(l) ? <div className="note">{leverageOf(l)}x {long ? "long" : "short"} on {long ? l.perp?.symbol : l.short}</div> : null}
             </div>
             <span className="mono">{blocked ? (side === "fade" ? "Excluded" : "Left out") : usd((n * l.weightBps) / totalWeight)}</span>
           </div>

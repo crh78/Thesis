@@ -55,8 +55,19 @@ export type TakeLeg = {
   asset_id?: string | null;
 };
 
-/** Whether a fade can take any of this take's legs (unknown legs count as maybe: the take page checks). */
-export const fadeable = (t: Pick<Take, "legs">) => !t.legs?.length || t.legs.some((l) => l.fade_how !== null);
+/**
+ * Whether this take can be faded. A fade usually shorts the picks, so it needs a leg it can short
+ * (unknown legs count as maybe: the take page checks). A take that bets against its picks is the
+ * other way round: fading it holds the picks, which always works.
+ */
+export const fadeable = (t: Pick<Take, "legs" | "inverted">) => !!t.inverted || !t.legs?.length || t.legs.some((l) => l.fade_how !== null);
+
+/**
+ * Whether this take can be traded (agreed with) from its legs alone. Trading a take that bets
+ * against its picks shorts every one, so each needs a way to short it. The take page asks the fork
+ * API (the receipt's canBack), which knows more.
+ */
+export const tradeable = (t: Pick<Take, "legs" | "inverted">) => !t.inverted || !t.legs?.length || t.legs.every((l) => l.fade_how !== null);
 
 export type Take = {
   id: string;
@@ -81,6 +92,12 @@ export type Take = {
   author: Person;
   /** Where it came from: an article shared into Thesis, or an X post ("via …"). */
   source?: { url: string; label: string; kind: "link" | "x" } | null;
+  /**
+   * The take bets against its basket ("crypto sucks" over BTC/ETH/SOL): trading it (agreeing) is
+   * short every pick, fading it is long. `backs`, `fades` and `ret` are already from the agreeing
+   * side. Missing on older APIs (false).
+   */
+  inverted?: boolean;
 };
 
 /** The X post a take was made from (the post its author replied to, or copied), or null. */
@@ -154,6 +171,10 @@ export type Receipt = {
   fadeBlocked: string | null;
   /** Set when the fork can't trade this take at all (posted before a fork reset): why, in words. */
   missing?: string | null;
+  /** The take bets against its basket: a back (agree) is short every leg, a fade long. Every side
+   *  here is already the take's (back = agree), the legs' tradable / blocked / fadeBlocked and a
+   *  prediction's side too; only a leg's `perp` (long market) and `short` (short market) are the chain's. */
+  inverted?: boolean;
 };
 
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -197,6 +218,8 @@ export type TakeDraft = {
    * a database before the field) for iMessage drafts, which anyone with the link may post.
    */
   for_x?: string | null;
+  /** The basket bets against its picks: posting it shorts every one. Missing on older databases. */
+  inverted?: boolean;
 };
 
 export async function getDraft(id: string): Promise<TakeDraft | null> {
