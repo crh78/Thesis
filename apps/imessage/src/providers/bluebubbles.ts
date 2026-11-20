@@ -65,6 +65,7 @@ export function bluebubbles(env: BlueBubblesEnv): Provider {
       chatId: chatGuid,
       chatType: chatGuid.includes(";+;") ? "group" : "dm",
       senderId: m.handle?.address ?? undefined,
+      messageId: m.guid,
       text,
     };
     log("inbound", { chat: mask(msg.chatId), type: msg.chatType, from: mask(msg.senderId), chars: text.length });

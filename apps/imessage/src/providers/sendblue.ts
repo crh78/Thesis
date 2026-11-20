@@ -101,6 +101,7 @@ export function sendblue(env: SendblueEnv): Provider {
       chatId: m.group_id || m.number,
       chatType: m.group_id ? "group" : "dm",
       senderId: m.from_number,
+      messageId: m.message_handle,
       text,
     };
     log("inbound", { chat: mask(msg.chatId), type: msg.chatType, from: mask(msg.senderId), chars: text.length });
