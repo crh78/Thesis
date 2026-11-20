@@ -60,7 +60,7 @@ struct AssetLogo: View {
         "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "LINK", "AVAX", "ENA", "SUI", "TON", "HYPE", "JUP",
         "TRX", "DOT", "LTC", "BCH", "NEAR", "APT", "ARB", "OP", "PEPE", "WIF", "BONK", "SHIB", "UNI", "AAVE",
         "XLM", "HBAR", "ATOM", "FIL", "INJ", "TIA", "SEI", "PYTH", "JTO", "RNDR", "RENDER", "TAO", "ONDO", "PENGU",
-        "TRUMP", "FARTCOIN", "POPCAT", "XMR", "ETC", "ICP", "MKR", "LDO", "CRV", "ZEC", "KAITO", "VIRTUAL",
+        "TRUMP", "FARTCOIN", "POPCAT", "XMR", "ETC", "ICP", "MKR", "LDO", "CRV", "ZEC", "KAITO", "VIRTUAL", "RAY",
     ]
 
     /// Private companies (pre-IPO) by their site, for its icon.
