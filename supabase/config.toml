@@ -467,3 +467,8 @@ verify_jwt = false
 # notifications_web_push trigger, x-push-secret).
 [functions.web-push]
 verify_jwt = false
+
+# Trading for people by text (the X and iMessage bots): Privy-token auth for /grant, x-bot-secret
+# for the bots' routes.
+[functions.agent]
+verify_jwt = false
