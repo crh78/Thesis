@@ -1,6 +1,6 @@
 # Security review: the Thesis program
 
-An internal first pass over the Anchor program (`anchor/programs/thesis`) and its keys. It's not an audit: an outside audit should read the program before real users (phase 3). Off-chain services were out of scope except for what their keys can do. The program has changed since (no-timeline takes and the author's sale closing a take; partial sales: `sell_part`, `record_part_prices`, `settle_part`), and this review doesn't cover those changes.
+An internal first pass over the Anchor program (`anchor/programs/thesis`) and its keys. It's not an audit: an outside audit should read the program before real users (phase 3). Off-chain services were out of scope except for what their keys can do. The program has changed since (no-timeline takes and the author's sale closing a take; partial sales: `sell_part`, `record_part_prices`, `settle_part`; inverted takes), and this review doesn't cover those changes.
 
 ## Findings
 

@@ -84,7 +84,7 @@ const noPerps: PerpResolver = perpResolver([]);
 const MAX_PERP_LEVERAGE = 5;
 
 /**
- * A perp pick's leverage, as the take builder chose it ("Stock · 3x"), never above 5x or what
+ * A perp pick's leverage, as the take builder chose it ("Perp · 3x"; older picks "Stock · 3x"), never above 5x or what
  * the market allows. There's no default: a perp pick that doesn't say is
  * null, and the leg is left out.
  */

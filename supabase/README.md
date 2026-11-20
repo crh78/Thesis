@@ -2,7 +2,7 @@
 
 Migrations, edge functions, seed data and config for the `thesis` project (`https://<project-ref>.supabase.co`). Auth is Privy, not Supabase Auth: clients read with the publishable key, and every write goes through an edge function that verifies the Privy access token (`privy-token` header) and uses the service role.
 
-Migrations are numbered `0001_<name>.sql` … `0061_<name>.sql`; a new one takes the next number. Below, `*_name` means the migration of that name.
+Migrations are numbered `0001_<name>.sql` onward; a new one takes the next number. Below, `*_name` means the migration of that name.
 
 ## Database
 
@@ -31,6 +31,7 @@ Migrations are numbered `0001_<name>.sql` … `0061_<name>.sql`; a new one takes
 | `*_go_live_by_take`, `*_claim_hash_author` | `takeCreated` makes exactly one posting take live: the one whose author wallet, claim hash and `horizonEnd` (its `settles_at`) all match, or none. An on-chain take is linked only to its own author's take |
 | `*_live_takes_only` | Every read asks for live takes itself, so posting takes stay hidden even from reads the `social` function runs with the service role |
 | `*_author_sale_closes` | No-timeline takes: `create_take` ignores the horizon (every take is `12mo`, `settles_at` = posting + 365 days). The author's sale closes the take: `takeClosed` sets `chain_takes.closed_at`, `takeSettled` sets `settled_at`, and `take_json()` adds `closed_at`, `settled` and `settled_at`. Holders with open positions get a `take_closed` notification; `apply_marks()` freezes a closed take's return |
+| `*_inverted_takes` | Takes that bet against their basket: `takes.inverted`, set by `create_take` and matched by the go-live check. The database keeps literal on-chain sides and flips them on read for inverted takes (`take_json` backs and fades, the backer and fader scores, the faders board, "faded your take" notifications); a leg's `ret` stays the basket's own move |
 | `*_take_drafts`, `*_take_drafts_for_x`, `*_take_draft_for_x` | Draft takes from the chat bots (`/d/<id>` on the web). An X draft is saved for the asker's X username (`for_x`) and listed only to them; `take_draft()` says whom it's for, and only that account can post it |
 | `*_take_leg_name_120`, `*_gemini_leg_names` | Leg names up to 120 characters; Gemini leg names without the "?" before the contract's label |
 | `*_sources_and_x_copy`, `*_x_poll_cron` | Takes from what you read and copying X accounts: `x_accounts`, `x_follows`, `x_calls` (service role only) and the X poll (pg_cron every 15 minutes; accounts nobody auto-copies are read hourly) ([`docs/share-and-copy.md`](../docs/share-and-copy.md)) |

@@ -205,7 +205,7 @@ basis points.
 
 | `name` | `data` fields |
 | --- | --- |
-| `takeCreated` | `take`, `author`, `claimHash`, `risk` (`low`/`medium`/`high`), `horizonEnd` (Unix s: posting + 365 days), `legs`, `stake` |
+| `takeCreated` | `take`, `author`, `claimHash`, `risk` (`low`/`medium`/`high`), `horizonEnd` (Unix s: posting + 365 days), `legs`, `stake`, `inverted` (the take bets against its basket: the author's buy-in is a fade) |
 | `positionOpened` | `take`, `position`, `owner`, `side` (`back`/`fade`), `stake`, `legsMask`, `fee`, `creatorFee`, `scored`, `escrowed` (the paper legs' share) |
 | `tradeProved` | `position`, `owner`, `spent`, `outputsMask`, `outputs`, `received`: what one proof-of-trade bracket measured |
 | `entryPricesRecorded` | `take`, `position`, `legs` (bit mask), `sourceHash` |

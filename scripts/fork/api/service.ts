@@ -417,7 +417,7 @@ const TAKE_CACHE_MS = 15_000;
 /**
  * How often a take's positions are rescanned from program accounts (see #positionsOf): every few
  * minutes, or every 30 s for a while after a trade on that take. Each scan is a getProgramAccounts
- * that Surfpool forwards to its mainnet datasource (Helius credits).
+ * that Surfpool forwards to its mainnet datasource (QuickNode credits).
  */
 const POSITION_SCAN_MS = 5 * 60_000;
 const POSITION_SCAN_BUSY_MS = 30_000;

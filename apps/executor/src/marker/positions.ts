@@ -74,7 +74,7 @@ export const FRESH_MS = 10 * 60_000;
 /**
  * Addresses the chain didn't have, skipped until the next full check (hourly). The fork's RPC
  * (Surfpool) never caches a missing account: every read of one goes on to its mainnet source
- * (Helius) and costs a credit. After a reset, `chain_positions` still lists the old fork's
+ * (QuickNode) and costs a credit. After a reset, `chain_positions` still lists the old fork's
  * positions, and reading them all every run cost ~2,600 credits an hour.
  */
 export class MissingAccounts {

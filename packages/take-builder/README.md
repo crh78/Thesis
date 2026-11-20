@@ -8,6 +8,7 @@ House rules (`supabase/functions/take-builder/rules.ts`; the card rules are in `
 - a perp pick's leverage is the model's choice, from the risk the user picked and how directly the name is the take, at most 5x and the market's own max; 2x when no model chose it (the rules fallback, a switch to high risk, an add by name);
 - a perp is at most 30% when the basket holds other picks; one pick per name;
 - Collector Crypt cards (live search) at medium and high risk only: a take about cards can be all cards, any other take gets at most three cards, each at most 20%, never only cards;
+- a bearish take ("crypto sucks") is built inverted (`inverted: true`): the basket it's against, with only shortable picks (perps at any risk, 1x below high; stocks with a perp; prediction markets on the outcome it's against). Edits and risk changes keep it inverted;
 - only assets the catalog rates "tradeable". Everyone gets the whole catalog for now (`US_RESTRICTIONS=on` brings back the US rule).
 
 Each pick says whether a fade can short it (`canShort`), which the apps use to show Fade only when a leg can be faded.

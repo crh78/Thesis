@@ -37,4 +37,3 @@ Two weeks of dogfooding comes to under ~55,000 invocations and ~0.35 GB. No WebS
 
 - Should a contract need a minimum relevance to be offered? (Unrelated sports lines used to rank high; recheck with the BM25 search.)
 - Before real users: paper-leg labels, or real Gemini orders.
-- The trading/fading bar reads "0% trading, 100% fading" on a take with no trades yet.

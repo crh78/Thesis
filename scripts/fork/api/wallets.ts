@@ -77,7 +77,7 @@ export class Wallets {
 
   /**
    * USDC, holdings and activity, cached WALLET_CACHE_MS and read once at a time per wallet: each
-   * read is a few RPC calls that Surfpool forwards to its mainnet datasource (Helius credits), and
+   * read is a few RPC calls that Surfpool forwards to its mainnet datasource (QuickNode credits), and
    * the apps poll it. Trades and cash changes clear the entry (`forgetActivity`).
    */
   wallet(addr: string) {
