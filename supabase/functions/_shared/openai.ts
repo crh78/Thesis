@@ -51,8 +51,11 @@ export type Tool = {
  * asks to look things up and the lookups turn up nothing new (`fresh()` is false afterwards),
  * that tools-off answer is used instead of a second turn, so a search that only restates the
  * question costs no extra round trip. `rounds` in the result is 1 then, and `speculated` true.
+ *
+ * `lookFirst`: the first turn must call a tool (tool_choice "required"), so the model sees what's
+ * out there before it answers.
  */
-export async function toolCall<T>(system: string, user: unknown, tools: Tool[], name: string, schema: object, opts: { timeoutMs?: number; maxTokens?: number; priority?: boolean; model?: string; rounds?: number; fresh?: () => boolean; reasoning?: "none" | "low" | "medium" } = {}): Promise<{ out: T; calls: string[]; rounds: number; speculated?: boolean }> {
+export async function toolCall<T>(system: string, user: unknown, tools: Tool[], name: string, schema: object, opts: { timeoutMs?: number; maxTokens?: number; priority?: boolean; model?: string; rounds?: number; fresh?: () => boolean; reasoning?: "none" | "low" | "medium"; lookFirst?: boolean } = {}): Promise<{ out: T; calls: string[]; rounds: number; speculated?: boolean }> {
   const deadline = Date.now() + (opts.timeoutMs ?? 60_000);
   const rounds = opts.rounds ?? 3;
   const byName = new Map(tools.map((t) => [t.name, t]));
@@ -90,7 +93,7 @@ export async function toolCall<T>(system: string, user: unknown, tools: Tool[], 
         model: opts.model ?? FAST_MODEL,
         input,
         tools: tools.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters, strict: true })),
-        tool_choice: round < rounds ? "auto" : "none",
+        tool_choice: round >= rounds ? "none" : round === 1 && opts.lookFirst ? "required" : "auto",
         parallel_tool_calls: true,
         store: false,
         reasoning: { effort: opts.reasoning ?? "none" },

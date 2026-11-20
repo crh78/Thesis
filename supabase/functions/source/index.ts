@@ -233,9 +233,9 @@ async function buildDraft(b: Record<string, unknown>) {
       // A bot's draft is a public reply, and its asker isn't waiting on a composer: the builder
       // thinks longer (reasoning medium, ~3 s instead of ~1.5) and gets a take's direction right
       // more often ("$TSLA demand is collapsing" isn't a Tesla buy).
-      variant: { reasoning: "medium", timeoutMs: 20_000 },
+      variant: { reasoning: "medium", timeoutMs: 30_000 },
     }),
-    signal: AbortSignal.timeout(25_000),
+    signal: AbortSignal.timeout(35_000),
   });
   if (!r.ok) throw new Error(`take-builder ${r.status}`);
   const built = await r.json() as { verdict: string; summary?: string; reason?: string | null; legs?: BuiltLeg[] };
