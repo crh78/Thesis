@@ -19,6 +19,7 @@
 // wallet's abandoned tickets are looked for (a getProgramAccounts): when one is known, or at most
 // every TICKET_SCAN_MS per wallet.
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { chainSide } from "@thesis/chain";
 import type { IncompleteTrade } from "./common.ts";
 import type { StateStore } from "./store.ts";
 
@@ -82,13 +83,17 @@ export function sweepLegs(ticket: TicketView, trade: Pick<IncompleteTrade, "lend
   return out;
 }
 
-/** What a client sees of an incomplete trade (in `trade_incomplete` errors and GET .../incomplete). */
+/**
+ * What a client sees of an incomplete trade (in `trade_incomplete` errors and GET .../incomplete).
+ * `side` is take-relative, as the API's sides are: "back" agrees with the take (an inverted take's
+ * on-chain fade).
+ */
 export function incompleteView(position: string, t: IncompleteTrade) {
   return {
     position,
     take: t.take,
     takeId: t.takeId,
-    side: t.side,
+    side: chainSide(t.side, t),
     usd: t.usd,
     /** "retry": POST /wallets/:address/retry { position }; "sweep": POST /wallets/:address/sweep { position }. */
     next: t.next,

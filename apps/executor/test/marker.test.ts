@@ -2,12 +2,14 @@
 // No network: every price is in the snapshot.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { positionReturnBps } from "@thesis/chain";
+import { Keypair } from "@solana/web3.js";
+import { authorPositionAddress, positionAddress, positionReturnBps } from "@thesis/chain";
 import type { GeminiContract } from "@thesis/venues/gemini";
 import {
   leverageOf, legReturnPct, markPick, planTake, predictionSide, resolvePick, takeReturnPct,
   type Base, type BankLookup, type Leg, type PickAsset, type Security, type Snapshot,
 } from "../src/marker/mark.ts";
+import { Db, isBuyIn } from "../src/marker/live.ts";
 import { MissingAccounts, positionExit, positionLiveBps, readBatched } from "../src/marker/positions.ts";
 import { toPriceUnits } from "../src/settler/pricing.ts";
 
@@ -225,7 +227,74 @@ test("a prediction that resolved before its first mark is void (no history to ba
   assert.ok(plan.notes.some((n) => /void \(resolved no/.test(n)));
 });
 
+test("an inverted take's headline is its agreeing side's (a fade); its picks still read the basket's own move", () => {
+  const pick: PickAsset = { type: "prediction", eventTicker: "FED", instrument: "GEMI-CUT", side: "yes" };
+  const s = snap({ events: new Map([["FED", [contract()]]]) });
+  const legs: Leg[] = [
+    { ...leg({ idx: 0, weight: 50 }), base_price: 100, base_at: iso(NOW - 3600), base_source: { source: "token", rule: "token", mint: "NVDAx", perUi: 1, multiplier: 1, premium: 1 }, mark_price: 100 },
+    { idx: 1, name: "Cut: Yes", kind: "Prediction · Yes", weight: 50, asset_id: "gemini:GEMI-CUT", base_price: 0.5, base_at: iso(NOW - 3600), base_source: { source: "gemini", rule: "gemini-bid", instrument: "GEMI-CUT", side: "yes" }, mark_price: 0.5 },
+  ];
+  const assets = new Map<number, PickAsset>([[0, nvda], [1, pick]]);
+  // NVIDIA 100 → 103 (+3%), the Yes bid 0.5 → 0.4 (−20% held, +20% faded: (0.5 − 0.4) / (1 − 0.5)).
+  const plain = planTake({ id: "T", created_at: iso(NOW - 3600) }, legs, assets, s);
+  const inverted = planTake({ id: "T", created_at: iso(NOW - 3600), inverted: true }, legs, assets, s);
+  assert.equal(plain.take!.ret_pct, 0.5 * 3 + 0.5 * -20);
+  assert.equal(inverted.take!.ret_pct, 0.5 * -3 + 0.5 * 20);
+  assert.deepEqual(inverted.legs.map((l) => l.ret_pct), plain.legs.map((l) => l.ret_pct), "a pick's ret is the basket's move either way");
+  assert.deepEqual(inverted.legs.map((l) => l.ret_pct), [3, -20]);
+  // Parity with the program's fade.
+  const direct = positionReturnBps(
+    [{ kind: { spot: {} }, weightBps: 5_000, leverage: 1 }, { kind: { prediction: {} }, weightBps: 5_000, leverage: 1 }] as any,
+    { side: { fade: {} }, legsMask: 3, prices: [{ entry: toPriceUnits(100), exit: toPriceUnits(103) }, { entry: toPriceUnits(0.5), exit: toPriceUnits(0.4) }] },
+  )!;
+  assert.equal(inverted.take!.ret_pct, direct / 100);
+  assert.equal(legReturnPct("prediction", 1, 0.5, 0.4, "fade"), 20);
+  assert.equal(legReturnPct("perp", 2, 100, 110, "fade"), -20);
+});
+
 // --- On-chain positions --------------------------------------------------------------------------
+
+test("the author's buy-in is position 0 at its own address, whichever side it holds", async () => {
+  const author = Keypair.generate().publicKey;
+  const take = Keypair.generate().publicKey;
+  const buyIn = authorPositionAddress(take, author).toBase58();
+  const later = positionAddress(take, author, 7n).toBase58();
+  assert.equal(isBuyIn(buyIn, take.toBase58(), author.toBase58()), true);
+  assert.equal(isBuyIn(later, take.toBase58(), author.toBase58()), false, "the author's later position isn't the buy-in");
+  assert.equal(isBuyIn(buyIn, take.toBase58(), "not a key"), false);
+
+  // An inverted take's buy-in is a fade: still the author's; a back the author added isn't.
+  const someone = Keypair.generate().publicKey.toBase58();
+  const db = new Db("https://db.example", "key");
+  db.get = async (path: string) =>
+    path.startsWith("chain_positions")
+      ? [
+        { address: buyIn, take: take.toBase58(), owner: author.toBase58(), side: "fade", opened_at: null },
+        { address: later, take: take.toBase58(), owner: author.toBase58(), side: "back", opened_at: null },
+        { address: positionAddress(take, Keypair.generate().publicKey, 0n).toBase58(), take: take.toBase58(), owner: someone, side: "fade", opened_at: null },
+      ]
+      : [{ address: take.toBase58(), take_id: "T", author_wallet: author.toBase58() }];
+  const rows = await db.openPositions("solana-mainnet");
+  assert.deepEqual(rows.map((r) => r.isAuthor), [true, false, false]);
+});
+
+test("open takes carry inverted, and read without it before the column exists", async () => {
+  const db = new Db("https://db.example", "key");
+  let withColumn = true;
+  db.get = async (path: string) => {
+    if (path.startsWith("takes?")) {
+      if (path.includes("inverted") && !withColumn) throw new Error("HTTP 400 42703 column takes.inverted does not exist");
+      return [{ id: "T", created_at: iso(NOW), settles_at: iso(NOW + 86_400), ...(withColumn ? { inverted: true } : {}) }];
+    }
+    return [];
+  };
+  assert.equal((await db.openTakes())[0].inverted, true);
+  withColumn = false;
+  const fresh = new Db("https://db.example", "key");
+  fresh.get = db.get;
+  assert.equal((await fresh.openTakes())[0].inverted, false);
+  assert.equal(fresh.hasInvertedColumn, false);
+});
 
 test("an on-chain position's live return is the program's formula on its signed entries", () => {
   const legs = [{ kind: { spot: {} }, weightBps: 6_000, leverage: 1 }, { kind: { prediction: {} }, weightBps: 4_000, leverage: 1 }];

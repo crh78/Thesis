@@ -14,7 +14,7 @@ test("Blink links a take to one wallet transaction and exposes only preview rout
       return { transaction: "transaction", feeUsd: 0.01, included: [0], excluded: [], checkoutId: args[3] ? id : undefined };
     },
     submitBlinkBack: async () => ({ signature: "signature" }),
-    receipt: async () => ({ takeId: id, onChain: false, legs: [], canBack: false, canFade: false, fadeBlocked: "" }),
+    receipt: async () => ({ takeId: id, onChain: false, inverted: false, legs: [], canBack: false, canFade: false, fadeBlocked: "" }),
   }, "https://example.com", "solana:fork", () => {});
   server.listen(0, "127.0.0.1");
   t.after(() => server.close());

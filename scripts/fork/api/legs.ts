@@ -258,9 +258,25 @@ export function mapLegs(legs: AppLeg[], resolve: NameResolver = fixedNames, cont
   });
 }
 
-/** Same legs (asset, weight, leverage, in order) as a take already on-chain? */
-export function sameLegs(onChain: { asset: PublicKey; weightBps: number; leverage: number }[], legs: MappedLeg[]): boolean {
+/**
+ * Whether every leg is one a fade can hold (a Phoenix short, or a prediction's other side): what an
+ * inverted take needs, as create_take checks it. Yield and card legs never can.
+ */
+export function invertible(legs: MappedLeg[]): boolean {
+  return legs.every((l) => !("none" in l.spec.fadeVia) && ("prediction" in l.spec.kind || "phoenixShort" in l.spec.fadeVia));
+}
+
+/**
+ * Same legs (asset, weight, leverage, in order) as a take already on-chain, and the same direction:
+ * an app take that became inverted (or stopped being) since it was mirrored isn't the same take.
+ */
+export function sameLegs(
+  onChain: { asset: PublicKey; weightBps: number; leverage: number }[],
+  legs: MappedLeg[],
+  inverted: { onChain?: boolean | null; app?: boolean | null } = {},
+): boolean {
   return (
+    Boolean(inverted.onChain) === Boolean(inverted.app) &&
     onChain.length === legs.length &&
     legs.every((l, i) => onChain[i].asset.equals(l.spec.asset) && onChain[i].weightBps === l.spec.weightBps && onChain[i].leverage === l.spec.leverage)
   );

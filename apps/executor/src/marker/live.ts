@@ -1,5 +1,7 @@
 // Live marks, the I/O part: what's open (public reads with the publishable key), and the prices
 // the marking rules in mark.ts read, fetched once per run and paced for each source.
+import { PublicKey } from "@solana/web3.js";
+import { authorPositionAddress } from "@thesis/chain";
 import { fetchGeminiEvent, type GeminiContract, type GeminiProxy } from "@thesis/venues/gemini";
 import { jupiterLendShareValue } from "@thesis/venues/jupiter";
 import type { PhoenixVenue } from "@thesis/venues/phoenix";
@@ -19,9 +21,10 @@ export function getJson(url: string, headers: Record<string, string> = {}): Prom
 
 /**
  * `frozen`: the author has sold (the take closed, or settled on that sale). Its headline and pick
- * marks stay at the sale; only positions still open on it are marked.
+ * marks stay at the sale; only positions still open on it are marked. `inverted`: the take bets
+ * against its basket (its author's buy-in, and agreeing, are fades).
  */
-export type OpenTake = { id: string; created_at: string; settles_at: string; legs: Leg[]; frozen: boolean };
+export type OpenTake = { id: string; created_at: string; settles_at: string; legs: Leg[]; frozen: boolean; inverted: boolean };
 
 export class Db {
   url: string;
@@ -38,6 +41,8 @@ export class Db {
 
   /** False until a read shows chain_takes has closed_at (the author's sale). */
   hasClosedColumn = true;
+  /** False until a read shows takes has inverted (0061_inverted_takes); before it, no take is. */
+  hasInvertedColumn = true;
 
   /**
    * Takes before their horizon, with their picks. Takes closed by their author's sale, or settled
@@ -45,7 +50,7 @@ export class Db {
    */
   async openTakes(limit = 500): Promise<OpenTake[]> {
     const now = new Date().toISOString();
-    const takes: { id: string; created_at: string; settles_at: string }[] = await this.get(`takes?select=id,created_at,settles_at&settles_at=gt.${now}&order=created_at.desc&limit=${limit}`);
+    const takes = await this.#takesBefore(now, limit);
     if (!takes.length) return [];
     const ids = takes.map((t) => t.id);
     const frozen = new Set<string>();
@@ -71,7 +76,21 @@ export class Db {
       list.push(l);
       byTake.set(l.take_id, list);
     }
-    return takes.map((t) => ({ ...t, legs: byTake.get(t.id) ?? [], frozen: frozen.has(t.id) }));
+    return takes.map((t) => ({ ...t, inverted: t.inverted === true, legs: byTake.get(t.id) ?? [], frozen: frozen.has(t.id) }));
+  }
+
+  /** Takes before their horizon, newest first; before the migration that adds inverted, without it. */
+  async #takesBefore(now: string, limit: number): Promise<{ id: string; created_at: string; settles_at: string; inverted?: boolean }[]> {
+    const q = (cols: string) => this.get(`takes?select=${cols}&settles_at=gt.${now}&order=created_at.desc&limit=${limit}`);
+    if (this.hasInvertedColumn) {
+      try {
+        return await q("id,created_at,settles_at,inverted");
+      } catch (e) {
+        if (!/column|42703|PGRST/.test(String(e))) throw e;
+        this.hasInvertedColumn = false;
+      }
+    }
+    return q("id,created_at,settles_at");
   }
 
   /** Takes' chain state; before the migration that adds closed_at, without it. */
@@ -99,7 +118,8 @@ export class Db {
 
   /**
    * Open on-chain positions on a network, with the Thesis take each is on, and whether it's the
-   * take author's own buy-in (its entry prices set the take's result).
+   * take author's own buy-in (its entry prices set the take's result): the author's position 0, at
+   * its own address. Not "the author's back": an inverted take's buy-in is a fade.
    */
   async openPositions(network: string): Promise<{ address: string; take: string; side: "back" | "fade"; opened_at: string | null; take_id: string | null; isAuthor: boolean }[]> {
     const rows: any[] = await this.get(`chain_positions?select=address,take,owner,side,opened_at&network=eq.${network}&settled_at=is.null&limit=2000`);
@@ -114,8 +134,17 @@ export class Db {
     }
     return rows.map(({ owner, ...r }) => {
       const t = byAddress.get(r.take);
-      return { ...r, take_id: t?.take_id ?? null, isAuthor: !!t?.author && owner === t.author && r.side === "back" };
+      return { ...r, take_id: t?.take_id ?? null, isAuthor: !!t?.author && owner === t.author && isBuyIn(r.address, r.take, owner) };
     });
+  }
+}
+
+/** Whether `address` is the author's buy-in on `take` (position id 0, the program's author position). */
+export function isBuyIn(address: string, take: string, author: string): boolean {
+  try {
+    return authorPositionAddress(new PublicKey(take), new PublicKey(author)).toBase58() === address;
+  } catch {
+    return false;
   }
 }
 

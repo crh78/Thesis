@@ -3,7 +3,7 @@
 import type BN from "bn.js";
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import type { PublicKey } from "@solana/web3.js";
-import { USDC_MINT_MAINNET, thesisTransactionEvents, type ThesisProgram } from "@thesis/chain";
+import { USDC_MINT_MAINNET, chainSide, thesisTransactionEvents, type ThesisProgram } from "@thesis/chain";
 import { ApiError, USD, checkAmount, once, parseKey, type CashEntry, type ChainActivity, type ServiceOpts } from "./common.ts";
 import type { StateStore } from "./store.ts";
 
@@ -52,6 +52,8 @@ export class Wallets {
   #program: ThesisProgram;
   /** Called after a deposit or withdrawal, to take a fresh chart snapshot. */
   #changed: (addr: string) => Promise<unknown>;
+  /** Whether a take is inverted (its on-chain fade agrees with it), so activity reads take-relative. */
+  #inverted: (take: PublicKey) => Promise<boolean>;
   /**
    * A wallet's trades from chain events, cached: getSignaturesForAddress takes about a second on
    * Surfpool, and a fork wallet's trades only change through trades this API sends, which clear
@@ -59,11 +61,12 @@ export class Wallets {
    */
   #chainActivity = new Map<string, { at: number; value: ChainActivity[] }>();
 
-  constructor(o: ServiceOpts, store: StateStore, program: ThesisProgram, changed: (addr: string) => Promise<unknown>) {
+  constructor(o: ServiceOpts, store: StateStore, program: ThesisProgram, changed: (addr: string) => Promise<unknown>, inverted: (take: PublicKey) => Promise<boolean> = async () => false) {
     this.#o = o;
     this.#store = store;
     this.#program = program;
     this.#changed = changed;
+    this.#inverted = inverted;
   }
 
   /** Clears what's cached about the wallet: a trade or a cash change just moved its balances. */
@@ -187,6 +190,10 @@ export class Wallets {
     return [...chain, ...cash].sort((a, b) => b.at.localeCompare(a.at));
   }
 
+  /**
+   * The wallet's backs, fades and posts. `kind` is take-relative, as the API's sides are: "back"
+   * agrees with the take, so a fade of an inverted take (and its author's buy-in) reads "back".
+   */
   async #chainActivityOf(owner: PublicKey): Promise<ChainActivity[]> {
     const conn = this.#o.connection;
     const byAddress = new Map(Object.entries(this.#store.state.takes).map(([id, m]) => [m.address, id]));
@@ -197,14 +204,22 @@ export class Wallets {
     const txs = ok.length
       ? await conn.getTransactions(ok.map((s) => s.signature), { commitment: "confirmed", maxSupportedTransactionVersion: 0 }).catch(() => [])
       : [];
+    const opened: { take: PublicKey; side: "back" | "fade"; usd: number; at: string; signature: string }[] = [];
     for (const [i, s] of ok.entries()) {
       const tx = txs[i];
       for (const e of thesisTransactionEvents(this.#program, tx)) {
         const d = e.data as { owner?: PublicKey; take?: PublicKey; stake?: BN; side?: object };
-        if (e.name !== "positionOpened" || !d.owner?.equals(owner)) continue;
+        if (e.name !== "positionOpened" || !d.owner?.equals(owner) || !d.take) continue;
         const at = new Date((s.blockTime ?? 0) * 1000).toISOString();
-        chain.push({ kind: d.side && "fade" in d.side ? "fade" : "back", usd: (d.stake?.toNumber() ?? 0) / USD, at, takeId: byAddress.get(d.take!.toBase58()) ?? null, signature: s.signature });
+        opened.push({ take: d.take, side: d.side && "fade" in d.side ? "fade" : "back", usd: (d.stake?.toNumber() ?? 0) / USD, at, signature: s.signature });
       }
+    }
+    // Which of those takes are inverted (one read each, kept by the service); unreadable: as literal.
+    const takes = [...new Map(opened.map((o) => [o.take.toBase58(), o.take])).values()];
+    const inverted = new Map(await Promise.all(takes.map(async (t) => [t.toBase58(), await this.#inverted(t).catch(() => false)] as const)));
+    for (const o of opened) {
+      const take = o.take.toBase58();
+      chain.push({ kind: chainSide(o.side, { inverted: inverted.get(take) }), usd: o.usd, at: o.at, takeId: byAddress.get(take) ?? null, signature: o.signature });
     }
     return chain;
   }

@@ -10,7 +10,7 @@ import { Keypair, PublicKey, VersionedTransaction, type Connection } from "@sola
 import { DEFAULT_CONFIG_PARAMS, TAKE_LIFETIME_SECS, configAddress, takeAddress, thesisProgram, ticketAddress } from "@thesis/chain";
 import { emptyState } from "../../../packages/venues/bank/src/state.ts";
 import { base58, type AppTake, type ServiceOpts } from "../api/common.ts";
-import { mapLegs } from "../api/legs.ts";
+import { contractResolver, mapLegs } from "../api/legs.ts";
 import { ForkService } from "../api/service.ts";
 
 export const TAKE_ID = "00000000-0000-4000-8000-0000000000ee";
@@ -29,6 +29,14 @@ export type FixtureOpts = {
   /** The state file to start from (default: a fresh one in a temp folder). */
   statePath?: string;
   fork?: Partial<ServiceOpts["fork"]>;
+  /** The app take, changed (other legs, a posting take); its on-chain twin is encoded from it. */
+  app?: Partial<AppTake>;
+  /** The asset bank (default: empty); a prediction leg needs its Gemini contract here. */
+  bank?: ServiceOpts["bank"];
+  /** Fields of the on-chain take to change (`inverted`, counters). */
+  takeFields?: Record<string, unknown>;
+  /** false: no on-chain take and no mirror (a take still to publish). */
+  onChain?: boolean;
 };
 
 export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
@@ -47,10 +55,13 @@ export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
     author: { handle: "someone" },
     author_wallet: author.publicKey.toBase58(),
     legs: [{ name: "Charizard PSA 10", kind: "Card", weight: 100, fade_how: null, asset_id: "card:2026120156C116510" }],
+    ...o.app,
   };
+  const bank = o.bank ?? emptyState;
   const take = takeAddress(author.publicKey, 1n);
   const statePath = o.statePath ?? join(dir, "api-state.json");
-  if (!o.statePath) writeFileSync(statePath, JSON.stringify({ forkId: "none", takes: { [TAKE_ID]: { address: take.toBase58(), author: author.publicKey.toBase58(), mirroredAt: new Date().toISOString() } }, cash: [] }));
+  const onChain = o.onChain !== false;
+  if (!o.statePath) writeFileSync(statePath, JSON.stringify({ forkId: "none", takes: onChain ? { [TAKE_ID]: { address: take.toBase58(), author: author.publicKey.toBase58(), mirroredAt: new Date().toISOString() } } : {}, cash: [] }));
   const k = () => Keypair.generate().publicKey;
   const accounts = new Map<string, Buffer>();
   accounts.set(configAddress().toBase58(), await program.coder.accounts.encode("config", {
@@ -58,11 +69,12 @@ export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
     feeVault: k(), creatorVault: k(), escrowVault: k(), params: DEFAULT_CONFIG_PARAMS, bump: 255, feeVaultBump: 255,
     creatorVaultBump: 255, escrowVaultBump: 255, tradePrograms: [], badgeUriBase: "",
   }));
-  accounts.set(take.toBase58(), await program.coder.accounts.encode("take", {
+  if (onChain) accounts.set(take.toBase58(), await program.coder.accounts.encode("take", {
     author: author.publicKey, id: new BN(1), claimHash: Array(32).fill(0), risk: { medium: {} }, createdAt: new BN(0),
-    horizonEnd: new BN(Math.floor(Date.now() / 1000) + 86_400), legs: mapLegs(app.legs).map((l) => l.spec), backers: 0, faders: 0,
+    horizonEnd: new BN(Math.floor(Date.now() / 1000) + 86_400),
+    legs: mapLegs(app.legs, undefined, contractResolver(bank().venues.gemini?.contracts)).map((l) => l.spec), backers: 0, faders: 0,
     totalBacked: new BN(0), totalFaded: new BN(0), openPositions: 0, creatorFeesUnclaimed: new BN(0), platformFeesFromBacks: new BN(0),
-    status: { open: {} }, resultBps: new BN(0), bump: 255, closedAt: new BN(0),
+    status: { open: {} }, resultBps: new BN(0), bump: 255, closedAt: new BN(0), inverted: Boolean(app.inverted), ...o.takeFields,
   }));
   const ticket = async (position: PublicKey) => program.coder.accounts.encode("tradeTicket", {
     owner: owner.publicKey, position, rentPayer: appPayer.publicKey, ownerUsdc: k(),
@@ -105,7 +117,7 @@ export async function tradeFixture(t: TestContext, o: FixtureOpts = {}) {
     connection,
     appPayer,
     lookupTable: null,
-    bank: emptyState,
+    bank,
     takes: async (id) => (id === TAKE_ID ? app : null),
     stocks: null,
     pricesFile: null,

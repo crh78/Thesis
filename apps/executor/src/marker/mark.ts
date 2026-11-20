@@ -16,11 +16,13 @@
 //     A card category pick (cards:<category>) isn't one card: left out.
 //   - picks with no catalog row: left out of the take's return (as a position leaves out legs it
 //     couldn't buy).
-// A pick's return is the program's own formula as a back (positionReturnBps); the take's is the
-// weight-weighted average over the picks it includes. A pick with no price this run keeps its
+// A pick's return is the program's own formula as a back (positionReturnBps): the basket's own
+// move, on every take. The take's is the weight-weighted average over the picks it includes, on
+// the side that agrees with it: an inverted take (it bets against its basket) agrees as a fade,
+// so its headline is the fade's return (a prediction leg's is (entry − exit) / (1 − entry)). A pick with no price this run keeps its
 // last mark; one that has never been marked holds the whole take back (no return is written,
 // rather than a wrong one).
-import { positionReturnBps } from "@thesis/chain";
+import { agreeSide, positionReturnBps } from "@thesis/chain";
 import { effectiveMultiplier, type ScaledUi } from "@thesis/venues/bank";
 import type { GeminiContract, GeminiSide } from "@thesis/venues/gemini";
 import { legReturnBps, liquidTokenPrice, perpPrice, positive, predictionPrice, spotPrice, tokenPremium, toPriceUnits } from "../settler/leg-value.ts";
@@ -217,20 +219,26 @@ function predictionAsk(asset: Extract<PickAsset, { type: "prediction" }>, snap: 
 type ReturnKind = "spot" | "perp" | "prediction" | "yield" | "card";
 const returnKind = (a: PickAsset): ReturnKind | null => (a.type === "void" ? null : a.type);
 
-/** One pick's return in percent: the program's formula as a back. Null when it can't be computed (base ≤ 0). */
-export function legReturnPct(kind: ReturnKind, leverage: number, base: number, mark: number): number | null {
-  const bps = legReturnBps(kind, "back", leverage, base, mark);
+/**
+ * One pick's return in percent: the program's formula on side `held` (default a back, the pick's
+ * own move). Null when it can't be computed (base ≤ 0; a fade's prediction at a base of 1).
+ */
+export function legReturnPct(kind: ReturnKind, leverage: number, base: number, mark: number, held: "back" | "fade" = "back"): number | null {
+  const bps = legReturnBps(kind, held, leverage, base, mark);
   return bps === null ? null : bps / 100;
 }
 
-/** The take's return in percent over the included picks, by weight (the program's weighted average). */
-export function takeReturnPct(legs: { kind: ReturnKind; leverage: number; weight: number; base: number; mark: number }[]): number | null {
+/**
+ * The take's return in percent over the included picks, by weight (the program's weighted
+ * average), on side `held`: the side that agrees with the take (`agreeSide`; a fade when inverted).
+ */
+export function takeReturnPct(legs: { kind: ReturnKind; leverage: number; weight: number; base: number; mark: number }[], held: "back" | "fade" = "back"): number | null {
   if (!legs.length) return null;
   const weights = legs.map((l) => Math.max(1, Math.round(l.weight * 100)));
   const bps = positionReturnBps(
     legs.map((l, i) => ({ kind: { [l.kind]: {} } as any, weightBps: weights[i], leverage: l.leverage })),
     {
-      side: { back: {} },
+      side: { [held]: {} },
       legsMask: (1 << legs.length) - 1,
       prices: legs.map((l) => ({ entry: toPriceUnits(l.base), exit: toPriceUnits(l.mark) })),
     },
@@ -253,10 +261,12 @@ export type TakePlan = { legs: LegUpdate[]; take: { take_id: string; ret_pct: nu
 
 /**
  * One take's run: bases for picks that have none (from `historical` when the marker read one,
- * else the current mark), marks, and the take's return.
+ * else the current mark), marks, and the take's return. Picks' marks and returns are the basket's
+ * own (the same on an inverted take); the take's return is on its agreeing side. That return is the
+ * fallback until its author's buy-in has entry prices (marker.ts then uses the buy-in's).
  */
 export function planTake(
-  take: { id: string; created_at: string },
+  take: { id: string; created_at: string; inverted?: boolean },
   legs: Leg[],
   assets: Map<number, PickAsset>,
   snap: Snapshot,
@@ -344,7 +354,7 @@ export function planTake(
       });
     }
   }
-  const ret = blocked ? null : takeReturnPct(included);
+  const ret = blocked ? null : takeReturnPct(included, agreeSide(take));
   if (blocked) notes.push("take return not written: a pick has no price yet");
   return { legs: out, take: ret === null ? null : { take_id: take.id, ret_pct: ret }, notes };
 }
