@@ -13,13 +13,23 @@ The bot runs on Railway with the iMessage and X bots together (`infra/bots/READM
 
 1. **Get added.** Sendblue's free plan replies only to verified contacts, up to 10. Someone with the Sendblue login runs `npx @sendblue/cli add-contact +1XXXXXXXXXX`.
 2. **Text the number once.** That verifies you. The first reply includes the Thesis contact card, so save it.
-3. **Text it a take** in plain words, like "AI power demand is underrated", "Eli Lilly keeps winning on GLP-1s" or "Tesla is overvalued". You can add a risk ("high risk") or a horizon ("over a year"). If you don't, it uses medium risk and 3 months.
+3. **Text it a take** in plain words, like "AI power demand is underrated", "Eli Lilly keeps winning on GLP-1s" or "Tesla is overvalued". You can add a risk level ("high risk"); otherwise it uses medium. A take has no end date: it runs until you sell.
 4. **It replies** with one line on what has to be true and up to 5 picks (`Name 40%: why`). It ends with a link to a **draft take**. If nothing you can buy goes up when the take is right, it says so instead of guessing.
 5. **Tap the link and sign in.** The draft becomes your take: change the picks or the amount, then post it and buy in. Anyone you send the link to after that sees the live take and can back it or fade it.
 
-You can also just ask it things ("what's a fade?", "why Nvidia?"). It answers in a sentence or two and keeps track of the conversation. A reply with a basket can take up to about 20 seconds. The bot never buys or posts anything itself; nothing happens until someone taps the link and posts.
+You can also just ask it things ("what's a fade?", "why Nvidia?"). It answers in a sentence or two and keeps track of the conversation. A reply with a basket can take up to about 20 seconds.
 
-**Doesn't work yet:** group chats (they need a paid dedicated line, or BlueBubbles below), trading by text, and texting from a number that isn't verified (the bot doesn't see those messages).
+### Trading by text
+
+It can also trade from your own Thesis account, within limits you set:
+
+- "make this a take for $20" posts the last basket as your take with a $20 buy-in.
+- "I'm in for $50 on Jake's take" backs a take; "fading Jake for $25" fades it. It finds the take from the chat or a `/t/` link, and asks which one if more than one fits.
+- "sell half my nuclear take", "sell 25%" or "sell $20" sells; "what do I hold?" lists your positions.
+
+The first time, it texts you a one-time link to connect your number and set a per-trade and daily limit (`/limits` on the web app). Every trade waits for you to confirm: it says "On it. Like this message or reply yes to confirm: …", and a like or "yes" within 10 minutes runs it ("no" drops it). Over your limit, it sends the take's link so you can do it yourself. `IMESSAGE_TRADING=0` on Railway turns trading off.
+
+**Doesn't work yet:** group chats (they need a paid dedicated line, or BlueBubbles below) and texting from a number that isn't verified (the bot doesn't see those messages).
 
 **If it stops replying:** check `railway logs --service bots` (lines start with `[imessage]`). Don't start the bot on your laptop while Railway runs it. Both copies would poll the same line and reply to every text twice.
 
