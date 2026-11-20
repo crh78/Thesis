@@ -43,7 +43,7 @@ export type Plan =
     kind: "reply"; text: string; link?: string;
     /** The basket as a picture (the web app's /d/<id>/basket.png), attached to the reply. */
     image?: string;
-    what: "take" | "no_exposure" | "explain" | "opt_out" | "opt_in" | "trade" | "trade_refused" | "trade_failed" | "not_linked" | "sell" | "score" | "copy";
+    what: "take" | "no_exposure" | "no_view" | "explain" | "opt_out" | "opt_in" | "trade" | "trade_refused" | "trade_failed" | "not_linked" | "sell" | "score" | "copy";
     trade?: { status: string; takeId?: string; error?: string };
     remember?: Remember;
   };
@@ -171,6 +171,7 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
     const v = await deps.vet({ ...m, fade: side === "fade" });
     if (v.action === "ignore") return { kind: "skip", reason: `vetted out: ${v.reason}` };
     if (v.action === "explain") return { kind: "reply", text: EXPLAIN, what: "explain" };
+    if (v.action === "no_view") return { kind: "reply", text: NO_EXPOSURE, what: "no_view" };
     const c = safeClaim(v.claim);
     if (!c) return { kind: "skip", reason: "claim failed the checks" };
     claim = c;
