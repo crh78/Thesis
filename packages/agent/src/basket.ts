@@ -4,9 +4,7 @@
 // someone, so whoever taps the link posts it as theirs (decided 2026-11-16; apps/www/app/d).
 
 export const RISKS = ["low", "medium", "high"] as const;
-export const HORIZONS = ["2 weeks", "1 month", "3 months", "6 months"] as const;
 type Risk = (typeof RISKS)[number];
-type Horizon = (typeof HORIZONS)[number];
 
 export type BasketConfig = {
   /** https://<ref>.supabase.co/functions/v1/take-builder: only warmed up from here. */
@@ -19,7 +17,8 @@ export type BasketConfig = {
   webUrl: string;
 };
 
-export type BasketArgs = { claim: string; risk: Risk; horizon: Horizon };
+// No horizon: a take runs until its author sells, a year at most (CLAUDE.md "No-timeline takes").
+export type BasketArgs = { claim: string; risk: Risk };
 
 /** Where a draft came from, for its page and link preview. */
 export type DraftMeta = {
@@ -57,11 +56,10 @@ export const basketTool = {
   parameters: {
     type: "object",
     additionalProperties: false,
-    required: ["claim", "risk", "horizon"],
+    required: ["claim", "risk"],
     properties: {
       claim: { type: "string", description: "The take as one short sentence in the person's words, 5-140 chars." },
       risk: { type: "string", enum: [...RISKS], description: "Default medium unless they said otherwise." },
-      horizon: { type: "string", enum: [...HORIZONS], description: "Default 3 months unless they said otherwise." },
     },
   },
 };
@@ -78,7 +76,7 @@ export async function buildBasket(cfg: BasketConfig, args: BasketArgs, meta: Dra
     method: "POST",
     headers: { "content-type": "application/json", "x-bot-secret": cfg.botSecret },
     body: JSON.stringify({
-      claim, risk: args.risk, horizon: args.horizon,
+      claim, risk: args.risk,
       origin: meta.origin, context: meta.context, origin_ref: meta.originRef, for_x: meta.forX,
       ...(meta.source ? { source: { text: meta.source.text.slice(0, 2000), url: meta.source.url, label: meta.source.label, kind: "x" } } : {}),
     }),

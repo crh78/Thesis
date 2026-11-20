@@ -2,7 +2,7 @@
 // inbound message (Luna, low reasoning effort), with tools for the actions a
 // chat can take. Today: build_basket. Later: back / fade / receipts.
 import OpenAI from "openai";
-import { basketTool, buildBasket, warmBasket, HORIZONS, RISKS, type BasketArgs, type BasketConfig } from "./basket.ts";
+import { basketTool, buildBasket, warmBasket, RISKS, type BasketArgs, type BasketConfig } from "./basket.ts";
 import { cleanReply } from "./style.ts";
 
 export type { BasketConfig, BasketResult, DraftMeta } from "./basket.ts";
@@ -36,7 +36,7 @@ const INSTRUCTIONS = [
   "Thesis turns a take into a basket of 1-5 real investments; friends can back it or fade it.",
   "When someone states a take, asks what to buy for an idea, or asks you to make one into a basket, call build_basket.",
   "Only call it for an opinion about the world, a company or a market. Plans, logistics, jokes, greetings and small talk are not takes: don't call it.",
-  "Use the take in their own words. Risk and horizon: use what they said, else medium and 3 months. Don't ask first.",
+  "Use the take in their own words. Risk: what they said, else medium. Don't ask first. A take has no timeline: it runs until its author sells, so never ask for or mention one.",
   "After build_basket: one line (max 12 words) on what has to be true, then each pick on its own line as `Name 40%: why` with the why in 6 words or fewer, then the link on its own line, exactly as given.",
   "If there's no clean exposure, say so in one line with the reason. Never invent picks, prices or returns.",
   "Be brief. Most replies are one or two short sentences. Answer only what was asked, no preamble, no recap, no follow-up offers.",
@@ -78,7 +78,6 @@ export function createAgent(cfg: AgentConfig) {
       args = {
         claim: String(raw.claim ?? ""),
         risk: RISKS.includes(raw.risk as never) ? raw.risk! : "medium",
-        horizon: HORIZONS.includes(raw.horizon as never) ? raw.horizon! : "3 months",
       };
     } catch {
       return JSON.stringify({ error: "bad arguments" });

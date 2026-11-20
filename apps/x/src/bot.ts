@@ -15,11 +15,6 @@ export type MentionInput = Mention & {
   parentUrl: string | null;
 };
 
-// A take has no timeline: it runs until its author sells, a year at most, and the drafts route
-// ignores any horizon it's sent. `@thesis/agent` still requires one, so the bot sends its old
-// default until that's optional.
-export const FIXED_HORIZON = "3 months" as const;
-
 export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConfig }): Promise<Plan> {
   const v = await deps.vet(m);
   if (v.action === "ignore") return { kind: "skip", reason: `vetted out: ${v.reason}` };
@@ -29,7 +24,7 @@ export async function plan(m: MentionInput, deps: { vet: Vet; basket: BasketConf
   if (!claim) return { kind: "skip", reason: "claim failed the checks" };
 
   const fromParent = v.fromParent && m.parent && m.parentUrl;
-  const out = await buildBasket(deps.basket, { claim, risk: v.risk, horizon: FIXED_HORIZON }, {
+  const out = await buildBasket(deps.basket, { claim, risk: v.risk }, {
     origin: "x",
     originRef: m.id,
     forX: m.author.username,
