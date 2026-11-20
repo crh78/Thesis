@@ -4,6 +4,7 @@ import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import { notFound } from "next/navigation";
 import Avatar from "@/components/Avatar";
+import CopyButton from "@/components/CopyButton";
 import FollowButton from "@/components/FollowButton";
 import ShareButton from "@/components/ShareButton";
 import { calledIt, getProfile, getProfileTakes, money, nameOf, pct, shortDate, stateShort, takeState } from "@/lib/data";
@@ -77,6 +78,7 @@ export default async function ProfilePage({ params }: Props) {
 
       <div className="actions profile-actions" style={{ marginTop: 18 }}>
         <FollowButton profileId={p.id} />
+        <CopyButton profileId={p.id} />
         <ShareButton text={`${nameOf(p)}'s takes on Thesis`} label="Share profile" className="btn ghost" />
       </div>
 

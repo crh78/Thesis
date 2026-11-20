@@ -75,6 +75,7 @@ function Drawer({ onClose }: { onClose: () => void }) {
           <Link href="/me" onClick={onClose} className="ditem">Profile</Link>
           <Link href="/saved" onClick={onClose} className="ditem">Saved {saved ? <span className="muted mono">{saved}</span> : null}</Link>
           <Link href="/scores" onClick={onClose} className="ditem">Scores</Link>
+          <Link href="/copy" onClick={onClose} className="ditem">Copy trading</Link>
           <button className="ditem" onClick={() => setSheet("add")}>Add cash {wallet ? <span className="muted mono">{money(wallet.usdc)}</span> : null}</button>
         </nav>
         <div style={{ flex: 1 }} />

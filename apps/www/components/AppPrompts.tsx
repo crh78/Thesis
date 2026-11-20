@@ -3,6 +3,8 @@
 // notifications ask (once Thesis runs from the home screen). Settings can bring the install steps
 // back ("thesis:install" event).
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { X_BOT } from "@/lib/flags";
 import { enablePush, iosBrowser, isIOS, isPhone, isStandalone, pushSupported, registerServiceWorker, type IOSBrowser } from "@/lib/push";
 import { useSession } from "@/lib/session";
 
@@ -18,9 +20,10 @@ export const showInstall = () => window.dispatchEvent(new Event("thesis:install"
 export default function AppPrompts({ ready }: { ready: boolean }) {
   const { userId, token } = useSession();
   const [installEvent, setInstallEvent] = useState<BeforeInstallPrompt | null>(null);
-  const [which, setWhich] = useState<"install" | "push" | null>(null);
+  const [which, setWhich] = useState<"trade" | "install" | "push" | null>(null);
   const installKey = `thesis.install.seen.${userId}`;
   const pushKey = `thesis.push.asked.${userId}`;
+  const tradeKey = `thesis.trade.asked.${userId}`;
 
   // The service worker is always registered (it's what shows a push); Chrome's install event is kept for the button.
   useEffect(() => {
@@ -37,6 +40,14 @@ export default function AppPrompts({ ready }: { ready: boolean }) {
     if (!ready || !userId) return;
     let live = true;
     (async () => {
+      // Once per account: trading from X and iMessage (limits for the session signer), unless it's on.
+      if (!seen(tradeKey)) {
+        const on = await fetch("/api/agent/grant", { headers: { "privy-token": await token() }, cache: "no-store" })
+          .then((r) => r.json()).then((j: { grant?: { active?: boolean } | null }) => !!j.grant?.active).catch(() => true);
+        if (!live) return;
+        if (!on) return setWhich("trade");
+        markSeen(tradeKey);
+      }
       // Already allowed on this browser: save it for whoever just signed in, every time, so a browser
       // used by another account before moves to this one.
       if (pushSupported() && Notification.permission === "granted") {
@@ -51,8 +62,9 @@ export default function AppPrompts({ ready }: { ready: boolean }) {
       }
     })();
     return () => { live = false; };
-  }, [ready, userId, installKey, pushKey, token]);
+  }, [ready, userId, installKey, pushKey, tradeKey, token]);
 
+  if (which === "trade") return <TradeSheet onClose={() => { markSeen(tradeKey); setWhich(null); }} />;
   if (which === "install") return <InstallSheet event={installEvent} onClose={() => { markSeen(installKey); setWhich(null); }} />;
   if (which === "push") return <PushSheet onClose={() => { markSeen(pushKey); setWhich(null); }} />;
   return null;
@@ -79,6 +91,21 @@ function IOSSteps({ browser }: { browser: IOSBrowser }) {
       <li>Scroll down and tap <b>Add to Home Screen</b>. (Not there? Open this page in Safari.)</li>
       <li>Tap <b>Add</b>, then open Thesis from your home screen.</li>
     </ol>
+  );
+}
+
+/** Trade from X and iMessage: sets up the limits once (/limits), or not now. */
+function TradeSheet({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  return (
+    <div className="sheet-wrap" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet" role="dialog" aria-label="Trade from X and iMessage">
+        <h3>Trade from X and iMessage</h3>
+        <p className="muted">Reply to any post with @{X_BOT} back $20, text Thesis a take, or auto-copy traders. Thesis trades for you, only up to limits you set. Turn it off any time.</p>
+        <button className="obtn filled" onClick={() => { onClose(); router.push("/limits"); }}>Set my limits</button>
+        <button className="obtn plain" onClick={onClose}>Not now</button>
+      </div>
+    </div>
   );
 }
 
