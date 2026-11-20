@@ -28,6 +28,7 @@ const ICON: Record<string, [PixelIconName, string]> = {
   new_take: ["spark", "gold"], comment: ["comment", "blue"], take_traded: ["up", "up"], take_faded: ["down", "down"],
   take_settled: ["flag", "plain"], take_closed: ["flag", "plain"], badge: ["medal", "gold"],
   daily_positions: ["chart", "up"], liquidation_risk: ["warn", "amber"], x_call: ["x", "plain"],
+  copy_done: ["up", "up"], copy_skipped: ["warn", "amber"],
 };
 
 /** The bell on Home: a dot while something's unread; opens the inbox. */
