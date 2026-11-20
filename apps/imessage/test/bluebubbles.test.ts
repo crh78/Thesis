@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { bluebubbles } from "../src/providers/bluebubbles.ts";
 import type { Inbound } from "../src/types.ts";
 
-test("replies in the group, skips its own messages and reactions", async () => {
+test("replies in the group, skips its own messages, passes likes and loves, skips other tapbacks", async () => {
   const sent: Array<{ chatGuid: string; message: string }> = [];
   let served = false;
   const server = createServer(async (req, res) => {
@@ -25,7 +25,8 @@ test("replies in the group, skips its own messages and reactions", async () => {
       const data = served ? [] : [
         { guid: "m1", text: "thesis nvidia keeps winning", isFromMe: false, dateCreated: q.after + 1, handle: { address: "+15550001111" }, chats: group },
         { guid: "m2", text: "my own reply", isFromMe: true, dateCreated: q.after + 2, chats: group },
-        { guid: "m3", text: "Loved “x”", isFromMe: false, dateCreated: q.after + 3, associatedMessageGuid: "m1", chats: group },
+        { guid: "m3", text: "Loved “x”", isFromMe: false, dateCreated: q.after + 3, associatedMessageGuid: "m1", associatedMessageType: "love", handle: { address: "+15550001111" }, chats: group },
+        { guid: "m4", text: "Laughed at “x”", isFromMe: false, dateCreated: q.after + 4, associatedMessageGuid: "m1", associatedMessageType: "laugh", chats: group },
       ];
       served = true;
       return void res.end(JSON.stringify({ data }));
@@ -43,15 +44,18 @@ test("replies in the group, skips its own messages and reactions", async () => {
   const seen: Inbound[] = [];
   const running = provider.run(async (m) => {
     seen.push(m);
-    return "on it";
+    return m.reaction ? null : "on it";
   });
   await new Promise((r) => setTimeout(r, 2_500));
   await provider.stop();
   await running;
   server.close();
 
-  assert.equal(seen.length, 1);
+  // A love tapback comes through (it can confirm a trade); a laugh doesn't.
+  assert.equal(seen.length, 2);
   assert.deepEqual(seen[0], { provider: "bluebubbles", chatId: "iMessage;+;chat42", chatType: "group", senderId: "+15550001111", messageId: "m1", text: "thesis nvidia keeps winning" });
+  assert.equal(seen[1].reaction, "love");
+  assert.equal(seen[1].messageId, "m3");
   assert.equal(sent.length, 1);
   assert.equal(sent[0].chatGuid, "iMessage;+;chat42");
   assert.equal(sent[0].message, "on it");

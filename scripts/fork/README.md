@@ -132,7 +132,7 @@ Keeping load down (every RPC read of an account the fork doesn't have goes to th
 | `GET /wallets/:address/history?range=1D\|1W\|1M\|ALL` | The portfolio chart (≤120 points; deposits don't move the line). Kept only for wallets with a deposit or an open position: snapshots every 5 minutes and after each trade, full resolution for 7 days, hourly before that. Any other wallet gets its value now, and nothing is saved |
 | `GET /wallets/:addr/phoenix`, `POST /wallets/:addr/phoenix/cash-out` | Phoenix cash and leftover positions; cash-out closes and sweeps them back to USDC |
 | `POST /digests` | Sends today's positions digests now (otherwise daily after 9 am New York, or `DIGEST_HOUR_UTC`) through `notify`. Service key only |
-| `POST /wallets/:address/deposits` `{ usd }` | Fake USDC in, at most $1,000 per wallet ever (`403 deposit_cap`; `FORK_DEPOSIT_CAP_USD`, 0 for none) |
+| `POST /wallets/:address/deposits` `{ usd }` | Fake USDC in, at most $1,000 per wallet ever (`403 deposit_cap`; `FORK_DEPOSIT_CAP_USD`, 0 for none; `FORK_DEPOSIT_CAP_OVERRIDES="<wallet>=10000"` gives single wallets their own cap) |
 | `POST /wallets/:address/withdrawals` | Off: `403 withdrawals_off` |
 
 ### Abuse limits

@@ -54,7 +54,7 @@ export function takeReply(claim: string, picks: Pick[]): string | null {
   return xLength(text) <= MAX ? text : null;
 }
 
-export const NO_EXPOSURE = "No clean way to trade that one yet. Try a sharper take, like which companies win if you're right.";
+export const NO_EXPOSURE = "No clean way to trade that one yet. Try a sharper take.";
 export const EXPLAIN = "Thesis turns a take into a basket of real investments. Reply to any post with @yourthesisxyz and I'll build one you can post and trade. Mention me with \"stop\" to opt out.";
 
 // Opting out, as X's automation rules require: "stop" ends replies to that person, "start" brings them back.

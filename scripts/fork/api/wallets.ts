@@ -28,6 +28,24 @@ type WalletView = {
  */
 export const DEPOSIT_CAP_USD = Number(process.env.FORK_DEPOSIT_CAP_USD ?? 1000);
 
+/**
+ * Wallets with their own cap (the team's accounts; owner's decision 2026-11-19):
+ * FORK_DEPOSIT_CAP_OVERRIDES="<wallet>=10000,<wallet>=5000". Anything unreadable is ignored.
+ */
+export function parseCapOverrides(raw: string | undefined): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const part of (raw ?? "").split(",")) {
+    const [wallet, usd] = part.split("=").map((x) => x?.trim());
+    const n = Number(usd);
+    if (wallet && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet) && Number.isFinite(n) && n >= 0) out.set(wallet, n);
+  }
+  return out;
+}
+const CAP_OVERRIDES = parseCapOverrides(process.env.FORK_DEPOSIT_CAP_OVERRIDES);
+
+/** This wallet's play-money cap (0: no cap). */
+export const depositCapFor = (addr: string, overrides = CAP_OVERRIDES, base = DEPOSIT_CAP_USD) => overrides.get(addr) ?? base;
+
 export class Wallets {
   #o: ServiceOpts;
   #store: StateStore;
@@ -96,12 +114,13 @@ export class Wallets {
       .map((a) => a.account.data.parsed.info as { mint: string; tokenAmount: { amount: string; uiAmount: number; decimals: number } })
       .filter((i) => i.tokenAmount.amount !== "0");
     const usdc = holdings.find((h) => h.mint === USDC_MINT_MAINNET.toBase58());
+    const cap = depositCapFor(addr);
     return {
       wallet: addr,
       usdc: usdc ? usdc.tokenAmount.uiAmount : 0,
       // Play money left to add (null: no cap).
-      depositCapUsd: DEPOSIT_CAP_USD > 0 ? DEPOSIT_CAP_USD : null,
-      depositLeftUsd: DEPOSIT_CAP_USD > 0 ? Math.max(0, DEPOSIT_CAP_USD - this.depositedUsd(addr)) : null,
+      depositCapUsd: cap > 0 ? cap : null,
+      depositLeftUsd: cap > 0 ? Math.max(0, cap - this.depositedUsd(addr)) : null,
       holdings: holdings
         .filter((h) => h.mint !== USDC_MINT_MAINNET.toBase58())
         .map((h) => ({ mint: h.mint, symbol: tokens[h.mint]?.symbol ?? null, underlying: tokens[h.mint]?.underlying ?? null, amount: h.tokenAmount.uiAmount })),
@@ -128,11 +147,12 @@ export class Wallets {
     await this.#store.withWallet(addr, async () => {
       if (kind === "deposit") {
         const added = this.depositedUsd(addr);
-        if (DEPOSIT_CAP_USD > 0 && added + usd > DEPOSIT_CAP_USD + 1e-9) {
-          const left = Math.max(0, DEPOSIT_CAP_USD - added);
+        const cap = depositCapFor(addr);
+        if (cap > 0 && added + usd > cap + 1e-9) {
+          const left = Math.max(0, cap - added);
           throw new ApiError(403, "deposit_cap", left > 0
-            ? `Play money is capped at $${DEPOSIT_CAP_USD} per account. You can add $${left.toFixed(2)} more.`
-            : `You've added the $${DEPOSIT_CAP_USD} of play money each account gets.`);
+            ? `Play money is capped at $${cap} per account. You can add $${left.toFixed(2)} more.`
+            : `You've added the $${cap} of play money each account gets.`);
         }
         await this.#o.fork.addUsdc(owner, usd);
       } else {

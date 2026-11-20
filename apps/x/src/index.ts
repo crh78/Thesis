@@ -27,6 +27,8 @@ const POLL_MS = num("X_POLL_SECONDS", 30) * 1000;
 const MAX_PER_DAY = num("X_MAX_REPLIES_PER_DAY", 100);
 const MAX_PER_AUTHOR = num("X_MAX_PER_AUTHOR", 10);
 const MAX_PER_THREAD = num("X_MAX_PER_THREAD", 3);
+/** X usernames with no reply caps at all (the team's own accounts): X_UNLIMITED="chrisherzog78,other". */
+const UNLIMITED = new Set((process.env.X_UNLIMITED ?? "").split(",").map((u) => u.trim().replace(/^@/, "").toLowerCase()).filter(Boolean));
 // Trading from replies ("back $20"): only when replies really go out, unless X_DRY_RUN_TRADES=1
 // (a dry run reads real mentions, and a trade is real), and X_TRADING isn't 0.
 const TRADING = process.env.X_TRADING !== "0" && (!DRY_RUN || process.env.X_DRY_RUN_TRADES === "1");
@@ -65,7 +67,7 @@ const me = await x.me().catch((e) => {
 });
 const state = loadState(STATE_FILE);
 saveState(STATE_FILE, state);
-log("starting", { as: `@${me.username}`, dryRun: DRY_RUN, trading: !!trading, pollSec: POLL_MS / 1000, maxPerDay: MAX_PER_DAY, sinceId: state.sinceId });
+log("starting", { as: `@${me.username}`, dryRun: DRY_RUN, trading: !!trading, pollSec: POLL_MS / 1000, maxPerDay: MAX_PER_DAY, unlimited: [...UNLIMITED], sinceId: state.sinceId });
 
 /** Fetches the basket picture from the web app and uploads it to X: its media id. */
 async function basketImage(url: string): Promise<string> {
@@ -93,9 +95,10 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
   if (cmd === "stop") state.optedOut[p.author_id] = true;
   if (cmd === "start" && wasOut) delete state.optedOut[p.author_id];
   if (wasOut && cmd !== "start") { log("skip", { ...base, reason: "opted out" }); return true; }
-  if (state.replies >= MAX_PER_DAY) { log("skip", { ...base, reason: "daily reply cap" }); return true; }
-  if ((state.byAuthor[p.author_id] ?? 0) >= MAX_PER_AUTHOR) { log("skip", { ...base, reason: "author cap" }); return true; }
-  if ((state.byConversation[thread] ?? 0) >= MAX_PER_THREAD) { log("skip", { ...base, reason: "thread cap" }); return true; }
+  const capped = !UNLIMITED.has(author?.username?.toLowerCase() ?? "");
+  if (capped && state.replies >= MAX_PER_DAY) { log("skip", { ...base, reason: "daily reply cap" }); return true; }
+  if (capped && (state.byAuthor[p.author_id] ?? 0) >= MAX_PER_AUTHOR) { log("skip", { ...base, reason: "author cap" }); return true; }
+  if (capped && (state.byConversation[thread] ?? 0) >= MAX_PER_THREAD) { log("skip", { ...base, reason: "thread cap" }); return true; }
 
   if (!text && !parentPost) { log("skip", { ...base, reason: "empty" }); return true; }
 

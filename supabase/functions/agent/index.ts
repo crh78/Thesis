@@ -2,7 +2,7 @@
 // The X reply agent, iMessage trading, and later auto-copy and the MCP server all trade here.
 //
 // The user's own routes (Privy token, from the web app's limits screen /limits):
-//   GET    /agent/grant              → { grant, signer_id, policy_ids } the caller's limits
+//   GET    /agent/grant              → { grant, signer_id, policy_ids, max_usd } the caller's limits
 //                                      (grant null when never approved): { per_trade_usd, daily_usd,
 //                                      left_usd, x_username, imessage, active }
 //   PUT    /agent/grant              { per_trade_usd, daily_usd, link? } after the web app added our
@@ -34,6 +34,10 @@
 //                                      draft_for_other_account; a fork refusal passes through as
 //                                      { error, message } with its status
 //   POST   /agent/positions          { who } → { positions } open positions (the fork API's portfolio)
+//   POST   /agent/takes              { take_id } → { claim, author, status } a live take (the
+//                                      bots' confirmation text names it); 404 no_such_take
+//   A trade with wait: false answers once the fork accepted it (status pending) and follows it
+//   to the end in the background (EdgeRuntime.waitUntil), so a bot can say "you're in" sooner.
 //
 // How a trade runs: agent_reserve (migrations/*_agent_grants.sql) holds it to the limits and
 // records it; the fork API builds it for the user's wallet (service key); Privy signs each
@@ -43,14 +47,15 @@
 // Secrets: PRIVY_APP_ID, PRIVY_APP_SECRET, PRIVY_VERIFICATION_KEY (as the other functions),
 // PRIVY_AUTHORIZATION_KEY (the session signer's private key) and PRIVY_SIGNER_ID (its id),
 // PRIVY_SIGNER_POLICY_IDS (optional, comma-separated), FORK_API_URL and FORK_API_SERVICE_KEY (the
-// fork API's "agent" service key), WEB_URL (default https://yourthesis.xyz). BOT_SECRET from the
+// fork API's "agent" service key), WEB_URL (default https://yourthesis.xyz), AGENT_LIMIT_OVERRIDES
+// (optional: "<wallet>=10000" lets a wallet with more play money allow more than $1,000). BOT_SECRET from the
 // function's secrets or the Vault's bot_secret.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { privyDid } from "../_shared/privy.ts";
 import { embeddedSolana, hasSigner, linkedX, PrivyError, privyClient } from "./privy.ts";
 import {
-  ACTIONS, type Action, isRequote, LINK_TTL_MS, linkToken, MIN_USD, normalizeHandle, readLimits, readWho, sha256Hex,
+  ACTIONS, type Action, HARD_MAX_USD, isRequote, LINK_TTL_MS, linkToken, MAX_USD, MIN_USD, normalizeHandle, parseLimitOverrides, readLimits, readWho, sha256Hex,
   SURFACES, type Surface, takeLegs, topicGuess, type Who,
 } from "./rules.ts";
 
@@ -61,6 +66,9 @@ const env = (k: string) => Deno.env.get(k) ?? "";
 const WEB_URL = (env("WEB_URL") || "https://yourthesis.xyz").replace(/\/$/, "");
 const SIGNER_ID = env("PRIVY_SIGNER_ID") || null;
 const POLICY_IDS = env("PRIVY_SIGNER_POLICY_IDS").split(",").map((s) => s.trim()).filter(Boolean);
+const LIMIT_OVERRIDES = parseLimitOverrides(env("AGENT_LIMIT_OVERRIDES"));
+/** The most this wallet may allow per trade and per day. */
+const maxFor = (wallet: string | null | undefined) => (wallet && LIMIT_OVERRIDES.get(wallet)) || MAX_USD;
 const privy = privyClient({
   appId: env("PRIVY_APP_ID"),
   appSecret: env("PRIVY_APP_SECRET"),
@@ -144,17 +152,18 @@ async function grantView(g: Grant) {
 async function getGrant(profile: string) {
   const { data, error } = await db.from("agent_grants").select("*").eq("profile_id", profile).maybeSingle();
   dbCheck(error);
-  return json(200, { grant: data ? await grantView(data as Grant) : null, signer_id: SIGNER_ID, policy_ids: POLICY_IDS });
+  // Before a first grant there's no wallet on file: read it from the profile for max_usd.
+  const wallet = (data as Grant | null)?.wallet ?? (await db.from("profiles").select("solana_address").eq("id", profile).maybeSingle()).data?.solana_address;
+  return json(200, { grant: data ? await grantView(data as Grant) : null, signer_id: SIGNER_ID, policy_ids: POLICY_IDS, max_usd: maxFor(wallet) });
 }
 
 async function putGrant(did: string, profile: string, b: Record<string, unknown>) {
   if (!SIGNER_ID) throw new HttpError(503, "signer_not_configured");
-  const limits = readLimits(b);
-  check(limits, "invalid_limits");
-
   const user = await privy.user(did);
   const sol = embeddedSolana(user);
   if (!sol) throw new HttpError(409, "no_wallet");
+  const limits = readLimits(b, maxFor(sol.address));
+  check(limits, "invalid_limits");
   const walletId = sol.walletId ?? await privy.walletIdFor(did, sol.address);
   if (!walletId) throw new HttpError(409, "no_wallet");
   const wallet = await privy.wallet(walletId);
@@ -266,7 +275,7 @@ type Submission = { status?: string; signatures?: string[]; error?: { code?: str
 // Trades ------------------------------------------------------------------------------------------
 
 type TradeReq = {
-  who: Who; surface: Surface; ref: string | null; action: Action;
+  who: Who; surface: Surface; ref: string | null; action: Action; wait: boolean;
   takeId: string | null; draftId: string | null; usd: number | null; bps: number | null; side: "back" | "fade";
 };
 
@@ -282,12 +291,12 @@ function readTrade(b: Record<string, unknown>): TradeReq {
   const draftId = typeof b.draft_id === "string" && DRAFT_ID_RE.test(b.draft_id) ? b.draft_id : null;
   const usd = b.usd == null ? null : Math.round(Number(b.usd) * 100) / 100;
   const bps = b.bps == null ? null : Math.round(Number(b.bps));
-  if (usd !== null) check(Number.isFinite(usd) && usd > 0 && usd <= 1000, "invalid_usd");
+  if (usd !== null) check(Number.isFinite(usd) && usd > 0 && usd <= HARD_MAX_USD, "invalid_usd");
   if (bps !== null) check(Number.isInteger(bps) && bps >= 1 && bps <= 10_000, "invalid_bps");
   if (action === "post") check(draftId && usd !== null && usd >= MIN_USD, draftId ? "invalid_usd" : "invalid_draft_id");
   if (action === "back" || action === "fade") check(takeId && usd !== null && usd >= MIN_USD, takeId ? "invalid_usd" : "invalid_take_id");
   if (action === "sell") check(takeId, "invalid_take_id");
-  return { who, surface, ref, action, takeId, draftId, usd, bps, side: b.side === "fade" ? "fade" : "back" };
+  return { who, surface, ref, action, takeId, draftId, usd, bps, side: b.side === "fade" ? "fade" : "back", wait: b.wait !== false };
 }
 
 async function finish(id: string, fields: Record<string, unknown>) {
@@ -386,6 +395,21 @@ async function trade(b: Record<string, unknown>) {
       await finish(tradeId, { take_id: takeId });
     }
     const { built, sub } = await signAndSend(t, g, takeId!);
+    if (!t.wait && sub.status === "pending") {
+      // Answer now; follow it to the end in the background.
+      const tail = settle(built.buildId, sub).then(async (d) => {
+        const st = d.status === "landed" ? "landed" : d.status === "pending" ? "pending" : "failed";
+        await finish(tradeId, { status: st, build_id: built.buildId, signatures: d.signatures ?? null, error: d.error?.code?.slice(0, 200) ?? null });
+        if (st === "failed" && created) await db.rpc("discard_posting_take", { p_author: g.profile_id, p_id: takeId });
+      }).catch((e) => console.error("settle", e));
+      const rt = (globalThis as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } }).EdgeRuntime;
+      if (rt) rt.waitUntil(tail);
+      await finish(tradeId, { build_id: built.buildId, signatures: sub.signatures ?? null });
+      return json(200, {
+        status: "pending", trade_id: tradeId, take_id: takeId, url: `${WEB_URL}/t/${takeId}`, usd: t.usd ?? built.expectedUsd ?? null,
+        signatures: sub.signatures ?? [], closes_take: built.closesTake ?? false,
+      });
+    }
     const done = await settle(built.buildId, sub);
     const status = done.status === "landed" ? "landed" : done.status === "pending" ? "pending" : "failed";
     await finish(tradeId, { status, build_id: built.buildId, signatures: done.signatures ?? null, error: done.error?.code?.slice(0, 200) ?? null });
@@ -406,6 +430,16 @@ async function trade(b: Record<string, unknown>) {
     }
     throw e;
   }
+}
+
+async function takeInfo(b: Record<string, unknown>) {
+  const id = typeof b.take_id === "string" && UUID_RE.test(b.take_id) ? b.take_id : null;
+  check(id, "invalid_take_id");
+  const { data, error } = await db.from("takes").select("claim, status, profiles:author_id(handle)").eq("id", id).maybeSingle();
+  dbCheck(error);
+  if (!data || data.status !== "live") throw new HttpError(404, "no_such_take");
+  const author = (data.profiles as { handle?: string | null } | null)?.handle ?? null;
+  return json(200, { claim: data.claim, author, status: data.status });
 }
 
 async function positions(b: Record<string, unknown>) {
@@ -446,13 +480,14 @@ Deno.serve(async (req) => {
       if (m === "DELETE") return await revokeGrant(profile);
     }
     if (route === "links" && arg && m === "GET") return await peekLink(arg);
-    if (m === "POST" && ["links", "whois", "trades", "positions"].includes(route ?? "")) {
+    if (m === "POST" && ["links", "whois", "trades", "positions", "takes"].includes(route ?? "")) {
       await requireBot(req);
       const b = await body();
       if (route === "links") return await makeLink(b);
       if (route === "whois") return await whois(b);
       if (route === "trades") return await trade(b);
       if (route === "positions") return await positions(b);
+      if (route === "takes") return await takeInfo(b);
     }
     return json(404, { error: "not_found" });
   } catch (e) {

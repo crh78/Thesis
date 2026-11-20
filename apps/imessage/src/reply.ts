@@ -25,8 +25,8 @@ export function createReply(): { handler: Handler; agent: Agent } {
 
   const handler: Handler = async (msg) => {
     const text = msg.text.trim();
-    if (!text) return null;
-    return agent.respond({ chatId: msg.chatId, chatType: msg.chatType, sender: mask(msg.senderId), senderId: msg.senderId, messageId: msg.messageId, text });
+    if (!text && !msg.reaction) return null;
+    return agent.respond({ chatId: msg.chatId, chatType: msg.chatType, sender: mask(msg.senderId), senderId: msg.senderId, messageId: msg.messageId, reaction: msg.reaction, text });
   };
   return { handler, agent };
 }

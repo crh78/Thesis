@@ -5,7 +5,7 @@
 // has no webhooks, and polling needs no public URL. When we move to a paid
 // line on a server, swap this for the `receive` webhook.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import type { Handler, Inbound, Provider } from "../types.ts";
+import { tapbackFromText, type Handler, type Inbound, type Provider } from "../types.ts";
 import { contactCard } from "../contact-card.ts";
 import { log, mask } from "../log.ts";
 
@@ -32,6 +32,7 @@ type SbMessage = {
   group_id?: string | null;
   date_sent?: string;
   createdAt?: string;
+  message_type?: string | null;
 };
 
 export function sendblue(env: SendblueEnv): Provider {
@@ -92,10 +93,13 @@ export function sendblue(env: SendblueEnv): Provider {
 
   async function handle(handler: Handler, m: SbMessage) {
     const text = m.content?.trim();
+    // Sendblue doesn't document inbound tapbacks: log any type that isn't a plain message, to learn.
+    if (m.message_type && m.message_type !== "message") log("inbound type", { chat: mask(m.group_id || m.number), type: m.message_type });
     if (!text) {
       log("skip non-text", { chat: mask(m.group_id || m.number) });
       return;
     }
+    const reaction = (m.message_type === "reaction" ? "like" : null) ?? tapbackFromText(text);
     const msg: Inbound = {
       provider: "sendblue",
       chatId: m.group_id || m.number,
@@ -103,8 +107,9 @@ export function sendblue(env: SendblueEnv): Provider {
       senderId: m.from_number,
       messageId: m.message_handle,
       text,
+      ...(reaction ? { reaction } : {}),
     };
-    log("inbound", { chat: mask(msg.chatId), type: msg.chatType, from: mask(msg.senderId), chars: text.length });
+    log("inbound", { chat: mask(msg.chatId), type: msg.chatType, from: mask(msg.senderId), chars: text.length, ...(reaction ? { reaction } : {}) });
 
     // Typing bubble: DMs only (Sendblue doesn't support it in groups), best-effort.
     if (msg.chatType === "dm") {
