@@ -5,6 +5,7 @@
 // feeds), a trader's new take is backed. Add X accounts in Copy from X (/x) or by replying
 // "@yourthesisxyz copy" on X; add a trader from their profile.
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import TopBar from "@/components/TopBar";
 import Avatar from "@/components/Avatar";
@@ -22,10 +23,9 @@ const ago = (iso: string) => {
 function Settings({ auto, amount, daily, onSave, onRemove }: { auto: boolean; amount: number; daily: number; onSave: (s: CopySettings) => void; onRemove: () => void }) {
   return (
     <div className="copy-settings">
-      <label className="set-row">
-        <span>Auto-copy</span>
-        <input type="checkbox" className="switch" checked={auto} onChange={() => onSave({ auto: !auto })} />
-      </label>
+      {auto ? (
+        <p className="muted small">Only calls posted after you turned it on are copied.</p>
+      ) : null}
       {auto ? (
         <>
           <div className="caps">Per call</div>
@@ -58,6 +58,7 @@ function JobRow({ j, name }: { j: CopyJob; name: string }) {
 }
 
 export default function CopyPage() {
+  const router = useRouter();
   const { copies, error, setX, removeX, setTrader, removeTrader } = useCopies();
   const [open, setOpen] = useState<string | null>(null);
   const traderName = (id: string | null) => copies?.traders.find((t) => t.trader_id === id)?.handle ?? "a trader";
@@ -87,8 +88,10 @@ export default function CopyPage() {
                     ? <img src={c.avatar_url} alt="" width={40} height={40} className="copy-avatar" />
                     : <span className="copy-avatar copy-letter">{c.handle.slice(0, 1).toUpperCase()}</span>}
                   <span className="copy-name"><b>{c.name || `@${c.username ?? c.handle}`}</b><span className="muted small">@{c.username ?? c.handle} on X</span></span>
-                  <span className={c.auto ? "up small" : "muted small"}>{c.auto ? `${usd(c.usd)} · ${c.daily}/day` : "Calls only"}</span>
+                  <span className={c.auto ? "up small" : "muted small"}>{c.auto ? `Auto · ${usd(c.usd)} · ${c.daily}/day` : "Auto-copy off"}</span>
                 </button>
+                <input type="checkbox" className="switch copy-switch" checked={c.auto} aria-label={`Auto-copy @${c.username ?? c.handle}`}
+                  onChange={() => (copies.linked || c.auto ? setX(c.handle, { auto: !c.auto }).catch(() => {}) : router.push("/limits"))} />
                 {open === `x:${c.handle}` ? (
                   <Settings auto={c.auto} amount={c.usd} daily={c.daily} onSave={(s) => setX(c.handle, s).catch(() => {})} onRemove={() => removeX(c.handle).catch(() => {})} />
                 ) : null}
@@ -105,8 +108,10 @@ export default function CopyPage() {
                 <button className="copy-head" onClick={() => setOpen(open === `t:${t.trader_id}` ? null : `t:${t.trader_id}`)}>
                   <Avatar person={{ handle: t.handle ?? null, avatar_url: t.avatar_url ?? null }} size={40} />
                   <span className="copy-name"><b>{t.display_name || `@${t.handle}`}</b><span className="muted small">@{t.handle}</span></span>
-                  <span className={t.auto ? "up small" : "muted small"}>{t.auto ? `${usd(t.usd)} · ${t.daily}/day` : "Off"}</span>
+                  <span className={t.auto ? "up small" : "muted small"}>{t.auto ? `Auto · ${usd(t.usd)} · ${t.daily}/day` : "Auto-copy off"}</span>
                 </button>
+                <input type="checkbox" className="switch copy-switch" checked={t.auto} aria-label={`Auto-copy @${t.handle}`}
+                  onChange={() => (copies.linked || t.auto ? setTrader(t.trader_id, { auto: !t.auto }).catch(() => {}) : router.push("/limits"))} />
                 {open === `t:${t.trader_id}` ? (
                   <Settings auto={t.auto} amount={t.usd} daily={t.daily} onSave={(s) => setTrader(t.trader_id, s).catch(() => {})} onRemove={() => removeTrader(t.trader_id).catch(() => {})} />
                 ) : null}
