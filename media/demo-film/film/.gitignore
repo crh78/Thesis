@@ -1,0 +1,4 @@
+node_modules/
+out/*
+!out/thesis-film-final.mp4
+!out/thesis-film-walkthrough.mp4

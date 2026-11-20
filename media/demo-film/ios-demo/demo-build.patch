@@ -1,0 +1,82 @@
+diff --git a/apps/ios/Thesis/App/AppState.swift b/apps/ios/Thesis/App/AppState.swift
+index a36bcef..71c0b7d 100644
+--- a/apps/ios/Thesis/App/AppState.swift
++++ b/apps/ios/Thesis/App/AppState.swift
+@@ -99,7 +99,17 @@ final class AppState {
+     // MARK: Data
+ 
+     /// Your cash. Signed in, it's whatever the server's ledger says.
++    #if DEBUG
++    // DEMO REEL ONLY, never commit: the balance always shows $1,000,000.
++    // Launch with `-demoBalance 1250000 -demoGain 1150000` to set the shown balance and the week's gain.
++    static let demoBalance = (UserDefaults.standard.string(forKey: "demoBalance").flatMap(Double.init) ?? 1_000_000)
++    static let demoGain = (UserDefaults.standard.string(forKey: "demoGain").flatMap(Double.init) ?? 100_000)
++    private(set) var balance: Double = AppState.demoBalance {
++        didSet { if balance != AppState.demoBalance { balance = AppState.demoBalance } }
++    }
++    #else
+     private(set) var balance: Double = MockData.balance
++    #endif
+     /// Deposits, withdrawals, trades and fades, newest first.
+     private(set) var cashActivity: [CashEntry] = []
+     /// Fork mode: your open positions and on-chain badges, for the profile.
+@@ -710,6 +720,30 @@ final class AppState {
+             }
+             return BuiltBasket(legs: legs, summary: nil, noExposureReason: nil)
+         }
++        #if DEBUG
++        // DEMO REEL ONLY, never commit: "everyone is betting on everything" builds a fixed betting basket.
++        if draft.claim.lowercased().contains("betting on everything") {
++            try? await Task.sleep(for: .seconds(4))
++            let picks: [(String, String, String, String, Double, String)] = [
++                ("Kalshi", "Pre-IPO", "jup:TKLSidmLVt3cqGaaodG8tyRzoANfQwoh67AccjmubeZ", "KALSHI", 30,
++                 "Lets you bet on anything: elections, the weather, the Oscars."),
++                ("DraftKings", "Stock", "jup:DKNGQFNGQmoBdXSRGKJ8tTu7uPDasw5JDcfMmWniNfow", "DKNG", 25,
++                 "Takes the other side of every sports bet. More bets, more money."),
++                ("Polymarket", "Pre-IPO", "jup:Pre8AREmFPtoJFT8mQSXQLh56cwJmM7CFDRuoGBZiUP", "POLYMARKET", 20,
++                 "The biggest prediction market. Every hot take runs through it."),
++                ("Coinbase", "Stock", "jup:Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu", "COIN", 15,
++                 "Crypto is the original everyone-is-betting trade."),
++                ("Robinhood", "Stock", "jup:HooDYv5RewLRiMLnEVq3VJqdqxhuE6c5eYvqejMC3e9A", "HOOD", 10,
++                 "Its prediction markets turned a trading app into a betting app."),
++            ]
++            let legs = picks.enumerated().map { i, p in
++                Leg(name: p.0, kind: p.1, weight: p.4, why: p.5, ret: 0, slot: i, fadeHow: nil,
++                    assetID: p.2, assetKey: p.3)
++            }
++            return BuiltBasket(legs: legs, summary: "When everyone bets on everything, the house wins. Own the house.",
++                               noExposureReason: nil)
++        }
++        #endif
+         return try await api.buildBasket(claim: draft.claim, risk: draft.risk, horizon: draft.horizon,
+                                          include: draft.seed.map { [$0.id] } ?? [])
+     }
+diff --git a/apps/ios/Thesis/Features/Profile/ProfileView.swift b/apps/ios/Thesis/Features/Profile/ProfileView.swift
+index c9a05b4..cc8e3c2 100644
+--- a/apps/ios/Thesis/Features/Profile/ProfileView.swift
++++ b/apps/ios/Thesis/Features/Profile/ProfileView.swift
+@@ -48,6 +48,16 @@ struct ProfileView: View {
+     /// Until there's a score history, live accounts chart start → now. On the fork: the portfolio.
+     private var score: ScoreSeries {
+         guard app.isLive else { return MockData.score(range) }
++        #if DEBUG
++        // DEMO REEL ONLY, never commit: $900K → $1M, a +$100,000 week.
++        if app.isOnFork {
++            let end = AppState.demoBalance, start = end - AppState.demoGain
++            let shape: [Double] = [0, 0.035, 0.012, 0.12, 0.184, 0.15, 0.31, 0.445, 0.401, 0.58, 0.663, 0.799, 0.752, 0.92, 1]
++            let pts = shape.map { start + (end - start) * $0 }
++            return ScoreSeries(points: pts, labels: pts.indices.map { "Day \($0 + 1)" },
++                               pct: start > 0 ? (end - start) / start * 100 : 0, caption: Self.caption[range] ?? "", rank: "")
++        }
++        #endif
+         if app.isOnFork {
+             let h = app.portfolioHistory[range]
+             var points = h?.points ?? []
+@@ -129,6 +139,7 @@ struct ProfileView: View {
+                                 Text(parts.cents).foregroundStyle(Palette.muted)
+                             }
+                             .font(.geist(36, .bold))
++                            .lineLimit(1).minimumScaleFactor(0.5)
+                             .monospacedDigit()
+                             .contentTransition(.numericText())
+                             HStack(spacing: 6) {
