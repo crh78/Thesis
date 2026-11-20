@@ -38,6 +38,25 @@ test("readVerdict defaults risk to medium and ignores what it can't read", () =>
   assert.equal(readVerdict("not json", mention).action, "ignore");
   assert.equal(readVerdict("null", mention).action, "ignore");
   assert.equal(readVerdict(JSON.stringify({ action: "explain", reason: "what is this" }), mention).action, "explain");
+  assert.equal(readVerdict(JSON.stringify({ action: "no_view", reason: "just news" }), mention).action, "no_view");
+});
+
+test("plan says there's no clean trade, instead of going quiet, when the post has no market view", async () => {
+  globalThis.fetch = (async () => {
+    throw new Error("no_view must not build a basket");
+  }) as typeof fetch;
+  const vet = async (): Promise<Verdict> => ({ action: "no_view", reason: "a dip, no view" });
+  const out = await plan({ ...mention, text: "", parent: { text: "AAPL down 4% today", username: "poster" } }, { vet, basket });
+  assert.equal(out.kind, "reply");
+  if (out.kind !== "reply") return;
+  assert.equal(out.what, "no_view");
+  assert.match(out.text, /No clean way to trade/);
+});
+
+test("plan stays quiet when vetting says ignore", async () => {
+  const vet = async (): Promise<Verdict> => ({ action: "ignore", reason: "shill" });
+  const out = await plan(mention, { vet, basket });
+  assert.equal(out.kind, "skip");
 });
 
 test("plan never asks for a timeline: the draft is sent no horizon whatever the post says", async () => {
