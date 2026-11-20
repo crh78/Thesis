@@ -38,7 +38,7 @@
 //                                  copy_of: another draft's id: its basket, saved again for this
 //                                  asker without building (several people replying under one post
 //                                  share one basket); 404 no_such_draft.
-//   GET    /source/drafts/mine     → { x, drafts } the X bot's unposted drafts for the X account
+//   GET    /source/drafts/mine     → { x, drafts } the X bot's never-posted drafts for the X account
 //                                  linked to your Privy login (x null when none is linked), newest
 //                                  first, from the last 14 days: { id, claim, legs, inverted, context,
 //                                  created_at }
@@ -293,7 +293,9 @@ async function myDrafts(req: Request) {
   const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await db.from("take_drafts")
     .select("id, claim, legs, inverted, context, created_at")
-    .eq("for_x", x).is("take_id", null).gte("created_at", since)
+    // posted_at too: a reset's cleanup deletes old takes, which nulls take_id (on delete set null),
+    // and a posted draft must not come back as "Post it".
+    .eq("for_x", x).is("take_id", null).is("posted_at", null).gte("created_at", since)
     .order("created_at", { ascending: false }).limit(10);
   dbCheck(error);
   return json(200, { x, drafts: data ?? [] });
