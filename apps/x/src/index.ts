@@ -133,7 +133,7 @@ async function handle(p: XPost, batch: Mentions): Promise<boolean> {
       conversationId: thread,
       authorId: p.author_id,
       links: [...linksIn(p), ...(parentPost ? linksIn(parentPost) : [])],
-    }, { vet, basket, trading, memory });
+    }, { vet, basket, trading, memory, lookup });
   } catch (e) {
     log("plan failed, retrying next poll", { ...base, error: (e as Error).message });
     return false;

@@ -36,6 +36,10 @@
 //                                      draft_for_other_account; a fork refusal passes through as
 //                                      { error, message } with its status
 //   POST   /agent/positions          { who } → { positions } open positions (the fork API's portfolio)
+//   POST   /agent/score              { x_username } → { found: false } or { found: true, handle,
+//                                      display_name, made, return_pct, backers_made, backers_pct,
+//                                      takes }: the Thesis account that links this X account, and its
+//                                      two scores as its profile shows them (the X bot's "score")
 //   POST   /agent/takes              { take_id } → { claim, author, status } a live take (the
 //                                      bots' confirmation text names it); 404 no_such_take
 //   A trade with wait: false answers once the fork accepted it (status pending) and follows it
@@ -446,6 +450,26 @@ async function takeInfo(b: Record<string, unknown>) {
   return json(200, { claim: data.claim, author, status: data.status });
 }
 
+async function score(b: Record<string, unknown>) {
+  const username = typeof b.x_username === "string" ? b.x_username.trim().replace(/^@/, "").toLowerCase() : "";
+  check(/^[a-z0-9_]{1,15}$/.test(username), "invalid_username");
+  const user = await privy.userByXUsername(username);
+  if (!user) return json(200, { found: false });
+  const { data: acct, error } = await db.from("accounts").select("profile_id").eq("privy_did", user.id).maybeSingle();
+  dbCheck(error);
+  if (!acct) return json(200, { found: false });
+  const { data: p, error: e2 } = await db.rpc("profile", { p_profile: acct.profile_id });
+  dbCheck(e2);
+  const prof = p as Record<string, unknown> | null;
+  // Not onboarded yet (no handle) or deleted: nothing to show.
+  if (!prof || typeof prof.handle !== "string" || !prof.handle || prof.deleted) return json(200, { found: false });
+  const n = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
+  return json(200, {
+    found: true, handle: prof.handle, display_name: prof.display_name ?? null,
+    made: n(prof.made), return_pct: n(prof.return_pct), backers_made: n(prof.backers_made), backers_pct: n(prof.backers_pct), takes: n(prof.takes),
+  });
+}
+
 async function positions(b: Record<string, unknown>) {
   const who = readWho(b.who);
   check(who, "invalid_who");
@@ -484,7 +508,7 @@ Deno.serve(async (req) => {
       if (m === "DELETE") return await revokeGrant(profile);
     }
     if (route === "links" && arg && m === "GET") return await peekLink(arg);
-    if (m === "POST" && ["links", "whois", "trades", "positions", "takes"].includes(route ?? "")) {
+    if (m === "POST" && ["links", "whois", "trades", "positions", "takes", "score"].includes(route ?? "")) {
       await requireBot(req);
       const b = await body();
       if (route === "links") return await makeLink(b);
@@ -492,6 +516,7 @@ Deno.serve(async (req) => {
       if (route === "trades") return await trade(b);
       if (route === "positions") return await positions(b);
       if (route === "takes") return await takeInfo(b);
+      if (route === "score") return await score(b);
     }
     return json(404, { error: "not_found" });
   } catch (e) {
