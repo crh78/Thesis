@@ -12,6 +12,13 @@
 //                                      409 signer_missing when the signer isn't on the wallet yet,
 //                                      409 no_wallet, 410 link_expired
 //   DELETE /agent/grant              stops the agent (the web app removes the signer too) → { revoked }
+//   GET    /agent/copies             → { x, traders, jobs, linked } who the caller copies, each with
+//                                      its auto-copy settings, and their last 20 auto-copies
+//   PUT    /agent/copies/x/:handle   { auto?, usd?, daily? } settings for an X account the caller
+//                                      copies (added through functions/source PUT /source/x/:handle)
+//   PUT    /agent/copies/trader/:id  { auto?, usd?, daily? } copy a Thesis trader (auto-backs their
+//                                      new takes) or change the settings → { trader }
+//   DELETE /agent/copies/x/:handle | /agent/copies/trader/:id   stop copying
 //   GET    /agent/links/:token       → { handle, expired } an iMessage connect link: the handle,
 //                                      masked to its last 4, so the screen can say who it connects
 //
@@ -40,6 +47,11 @@
 //                                      display_name, made, return_pct, backers_made, backers_pct,
 //                                      takes }: the Thesis account that links this X account, and its
 //                                      two scores as its profile shows them (the X bot's "score")
+//   POST   /agent/copy               { who: { x }, handle } the X bot's "copy": adds that X account to
+//                                      the asker's copies with auto-copy on → { copying, handle, usd,
+//                                      daily }; 403 not_linked, 409 copy_limit (10 accounts)
+//   POST   /agent/copy-run           the copy runner (pg_cron, every minute): runs queued copy_jobs
+//                                      (migrations/*_copy_trading.sql) → { ran, done, skipped, failed }
 //   POST   /agent/takes              { take_id } → { claim, author, status } a live take (the
 //                                      bots' confirmation text names it); 404 no_such_take
 //   A trade with wait: false answers once the fork accepted it (status pending) and follows it
@@ -114,6 +126,18 @@ function dbCheck(error: { message?: string } | null) {
 // Secrets -----------------------------------------------------------------------------------------
 
 let botSecret: string | null = null;
+async function botSecretValue(): Promise<string> {
+  if (botSecret === null) {
+    let v = env("BOT_SECRET");
+    if (!v) {
+      const { data } = await db.rpc("source_secret", { p_name: "bot_secret" });
+      v = typeof data === "string" ? data : "";
+    }
+    if (!v) throw new HttpError(503, "bot_secret_missing");
+    botSecret = v;
+  }
+  return botSecret;
+}
 async function requireBot(req: Request) {
   if (botSecret === null) {
     let v = env("BOT_SECRET");
@@ -291,6 +315,8 @@ type Submission = { status?: string; signatures?: string[]; error?: { code?: str
 type TradeReq = {
   who: Who; surface: Surface; ref: string | null; action: Action; wait: boolean;
   takeId: string | null; draftId: string | null; usd: number | null; bps: number | null; side: "back" | "fade";
+  /** An auto-copy (functions/agent copy-run): the take it posts is marked auto_copy, out of the feeds. */
+  autoCopy?: boolean;
 };
 
 function readTrade(b: Record<string, unknown>): TradeReq {
@@ -319,7 +345,7 @@ async function finish(id: string, fields: Record<string, unknown>) {
 }
 
 /** Posts a bot's draft as the user's take (status posting until its buy-in lands): its take id. */
-async function createFromDraft(g: Grant, draftId: string): Promise<{ takeId: string; draft: Record<string, unknown> }> {
+async function createFromDraft(g: Grant, draftId: string, autoCopy = false): Promise<{ takeId: string; draft: Record<string, unknown> }> {
   const { data: d, error } = await db.from("take_drafts").select("*").eq("id", draftId).maybeSingle();
   dbCheck(error);
   if (!d) throw new HttpError(404, "no_such_draft");
@@ -334,6 +360,8 @@ async function createFromDraft(g: Grant, draftId: string): Promise<{ takeId: str
   });
   if (e2?.message?.includes("takes_one_posting_claim")) throw new HttpError(409, "already_posting");
   dbCheck(e2);
+  // Before it can go live, so an auto-copy never shows in the feeds.
+  if (autoCopy) dbCheck((await db.from("takes").update({ auto_copy: true }).eq("id", takeId)).error);
   if (d.source_url) {
     await db.from("takes").update({ source_url: d.source_url, source_label: d.source_label, source_kind: d.source_kind ?? "x" })
       .eq("id", takeId).is("source_url", null);
@@ -379,6 +407,11 @@ async function trade(b: Record<string, unknown>) {
   const t = readTrade(b);
   const g = await grantFor(t.who);
   if (!g || g.revoked_at) throw new HttpError(403, "not_linked");
+  return json(200, await executeTrade(t, g));
+}
+
+/** One trade for a grant: reserved against the limits, built, signed, sent. Refusals throw HttpError. */
+async function executeTrade(t: TradeReq, g: Grant): Promise<Record<string, unknown>> {
   const confirmUrl = t.action === "post" ? `${WEB_URL}/d/${t.draftId}` : `${WEB_URL}/t/${t.takeId}`;
 
   const { data: r, error } = await db.rpc("agent_reserve", {
@@ -394,17 +427,17 @@ async function trade(b: Record<string, unknown>) {
   const tradeId = res.id as string;
   if (res.existing) {
     const takeId = (res.take_id as string | null) ?? t.takeId;
-    return json(200, {
+    return {
       status: res.status, trade_id: tradeId, take_id: takeId, url: takeId ? `${WEB_URL}/t/${takeId}` : null,
       usd: t.usd, signatures: res.signatures ?? [], existing: true, ...(res.error ? { error: { code: res.error } } : {}),
-    });
+    };
   }
 
   let takeId = t.takeId;
   let created = false;
   try {
     if (t.action === "post") {
-      takeId = (await createFromDraft(g, t.draftId!)).takeId;
+      takeId = (await createFromDraft(g, t.draftId!, t.autoCopy)).takeId;
       created = true;
       await finish(tradeId, { take_id: takeId });
     }
@@ -419,19 +452,19 @@ async function trade(b: Record<string, unknown>) {
       const rt = (globalThis as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } }).EdgeRuntime;
       if (rt) rt.waitUntil(tail);
       await finish(tradeId, { build_id: built.buildId, signatures: sub.signatures ?? null });
-      return json(200, {
+      return {
         status: "pending", trade_id: tradeId, take_id: takeId, url: `${WEB_URL}/t/${takeId}`, usd: t.usd ?? built.expectedUsd ?? null,
         signatures: sub.signatures ?? [], closes_take: built.closesTake ?? false,
-      });
+      };
     }
     const done = await settle(built.buildId, sub);
     const status = done.status === "landed" ? "landed" : done.status === "pending" ? "pending" : "failed";
     await finish(tradeId, { status, build_id: built.buildId, signatures: done.signatures ?? null, error: done.error?.code?.slice(0, 200) ?? null });
     if (status === "failed" && created) await db.rpc("discard_posting_take", { p_author: g.profile_id, p_id: takeId });
-    return json(200, {
+    return {
       status, trade_id: tradeId, take_id: takeId, url: `${WEB_URL}/t/${takeId}`, usd: t.usd ?? built.expectedUsd ?? null,
       signatures: done.signatures ?? [], closes_take: built.closesTake ?? false, ...(done.error ? { error: done.error } : {}),
-    });
+    };
   } catch (e) {
     const code = e instanceof ForkRefusal || e instanceof HttpError ? e.code : e instanceof PrivyError ? "signing_failed" : "internal";
     await finish(tradeId, { status: "failed", error: code.slice(0, 200) });
@@ -477,6 +510,250 @@ async function score(b: Record<string, unknown>) {
   });
 }
 
+// Copy trading ------------------------------------------------------------------------------------
+
+const MAX_COPIED_X = 10;
+const COPY_MAX_AGE_MS = 45 * 60_000;
+const money = (n: number) => `$${Number.isInteger(n) ? n : Number(n).toFixed(2)}`;
+
+function readCopySettings(b: Record<string, unknown>, max: number): { auto?: boolean; auto_usd?: number; auto_daily?: number } {
+  const out: { auto?: boolean; auto_usd?: number; auto_daily?: number } = {};
+  if (typeof b.auto === "boolean") out.auto = b.auto;
+  if (b.usd != null) {
+    const usd = Math.round(Number(b.usd) * 100) / 100;
+    check(Number.isFinite(usd) && usd >= MIN_USD && usd <= max, "invalid_usd");
+    out.auto_usd = usd;
+  }
+  if (b.daily != null) {
+    const daily = Math.round(Number(b.daily));
+    check(Number.isInteger(daily) && daily >= 1 && daily <= 20, "invalid_daily");
+    out.auto_daily = daily;
+  }
+  return out;
+}
+
+async function listCopies(profile: string) {
+  const [x, traders, jobs, grant] = await Promise.all([
+    db.from("x_follows").select("handle, auto, auto_usd, auto_daily, created_at, x_accounts(username, name, avatar_url)").eq("profile_id", profile).order("created_at"),
+    db.from("trader_follows").select("trader_id, auto, auto_usd, auto_daily, created_at, profiles:trader_id(handle, display_name, avatar_url)").eq("profile_id", profile).order("created_at"),
+    db.from("copy_jobs").select("id, kind, handle, trader_id, usd, status, reason, result_take, created_at, x_calls(claim), takes:result_take(claim)").eq("profile_id", profile).order("created_at", { ascending: false }).limit(20),
+    db.from("agent_grants").select("revoked_at").eq("profile_id", profile).maybeSingle(),
+  ]);
+  for (const r of [x, traders, jobs, grant]) dbCheck(r.error);
+  const one = <T>(v: T | T[] | null) => (Array.isArray(v) ? v[0] : v) ?? null;
+  return json(200, {
+    linked: !!grant.data && !grant.data.revoked_at,
+    x: (x.data ?? []).map((r) => ({ handle: r.handle, auto: r.auto, usd: Number(r.auto_usd), daily: r.auto_daily, ...(one(r.x_accounts as never) ?? {}) })),
+    traders: (traders.data ?? []).map((r) => ({ trader_id: r.trader_id, auto: r.auto, usd: Number(r.auto_usd), daily: r.auto_daily, ...(one(r.profiles as never) ?? {}) })),
+    jobs: (jobs.data ?? []).map((j) => ({
+      id: j.id, kind: j.kind, handle: j.handle, trader_id: j.trader_id, usd: Number(j.usd), status: j.status, reason: j.reason,
+      take_id: j.result_take, claim: (one(j.takes as never) as { claim?: string } | null)?.claim ?? (one(j.x_calls as never) as { claim?: string } | null)?.claim ?? null, at: j.created_at,
+    })),
+  });
+}
+
+async function walletMax(profile: string) {
+  const { data } = await db.from("profiles").select("solana_address").eq("id", profile).maybeSingle();
+  return maxFor(data?.solana_address);
+}
+
+async function putXCopy(profile: string, handle: string, b: Record<string, unknown>) {
+  check(/^[a-z0-9_]{1,15}$/.test(handle), "invalid_handle");
+  const set = readCopySettings(b, await walletMax(profile));
+  const { data: cur, error } = await db.from("x_follows").select("auto").eq("profile_id", profile).eq("handle", handle).maybeSingle();
+  dbCheck(error);
+  if (!cur) throw new HttpError(404, "not_copying");
+  // Turning auto-copy on starts from now: earlier calls are never copied.
+  const row: Record<string, unknown> = { ...set, ...(set.auto && !cur.auto ? { auto_since: new Date().toISOString() } : {}) };
+  dbCheck((await db.from("x_follows").update(row).eq("profile_id", profile).eq("handle", handle)).error);
+  return listCopies(profile);
+}
+
+async function putTraderCopy(profile: string, traderId: string, b: Record<string, unknown>) {
+  check(UUID_RE.test(traderId), "invalid_trader");
+  if (traderId === profile) throw new HttpError(400, "cant_copy_self");
+  const set = readCopySettings(b, await walletMax(profile));
+  const { data: trader } = await db.from("profiles").select("id, handle").eq("id", traderId).maybeSingle();
+  if (!trader?.handle) throw new HttpError(404, "no_such_trader");
+  const { data: cur } = await db.from("trader_follows").select("auto").eq("profile_id", profile).eq("trader_id", traderId).maybeSingle();
+  const row: Record<string, unknown> = { profile_id: profile, trader_id: traderId, ...set };
+  if (!cur || (set.auto && !cur.auto)) row.auto_since = new Date().toISOString();
+  dbCheck((await db.from("trader_follows").upsert(row, { onConflict: "profile_id,trader_id" })).error);
+  return listCopies(profile);
+}
+
+async function deleteCopy(profile: string, kind: string, key: string) {
+  if (kind === "x") dbCheck((await db.from("x_follows").delete().eq("profile_id", profile).eq("handle", key)).error);
+  else dbCheck((await db.from("trader_follows").delete().eq("profile_id", profile).eq("trader_id", key)).error);
+  return listCopies(profile);
+}
+
+/** The X bot's "copy": the asker copies that X account, auto-copy on. */
+async function botCopy(b: Record<string, unknown>) {
+  const who = readWho(b.who);
+  check(who, "invalid_who");
+  const handle = typeof b.handle === "string" ? b.handle.trim().replace(/^@/, "").toLowerCase() : "";
+  check(/^[a-z0-9_]{1,15}$/.test(handle), "invalid_handle");
+  const g = await grantFor(who);
+  if (!g || g.revoked_at) throw new HttpError(403, "not_linked");
+  const { count } = await db.from("x_follows").select("handle", { count: "exact", head: true }).eq("profile_id", g.profile_id);
+  const { data: had } = await db.from("x_follows").select("auto").eq("profile_id", g.profile_id).eq("handle", handle).maybeSingle();
+  if (!had && (count ?? 0) >= MAX_COPIED_X) throw new HttpError(409, "copy_limit");
+  // The account row (its name and picture fill in on the next poll); posts before now are never copied.
+  dbCheck((await db.from("x_accounts").upsert({ handle, username: typeof b.username === "string" ? b.username.slice(0, 15) : handle }, { onConflict: "handle", ignoreDuplicates: true })).error);
+  const usd = Math.min(20, Number(g.per_trade_usd));
+  const row = { profile_id: g.profile_id, handle, auto: true, ...(had?.auto ? {} : { auto_since: new Date().toISOString(), auto_usd: usd }) };
+  dbCheck((await db.from("x_follows").upsert(row, { onConflict: "profile_id,handle" })).error);
+  const { data: now } = await db.from("x_follows").select("auto_usd, auto_daily").eq("profile_id", g.profile_id).eq("handle", handle).single();
+  return json(200, { copying: true, handle, usd: Number(now?.auto_usd ?? usd), daily: now?.auto_daily ?? 3, already: !!had?.auto });
+}
+
+type CopyJob = {
+  id: string; profile_id: string; kind: "x_call" | "take"; post_id: string | null; handle: string | null;
+  source_take: string | null; trader_id: string | null; usd: number; attempts: number;
+};
+
+/** Why a refused trade was skipped, as the copier reads it. */
+function skipReason(code: string, extra: Record<string, unknown>): string {
+  if (code === "not_linked") return "Trading by text is off. Turn it on in Limits.";
+  if (code === "over_trade_limit") return `Over your ${money(Number(extra.per_trade_usd ?? 0))} per-trade limit.`;
+  if (code === "over_daily_limit") return `Past your daily limit (${money(Number(extra.left_usd ?? 0))} left today).`;
+  if (code === "take_closed") return "The take had closed.";
+  if (code === "insufficient_funds" || code === "insufficient_usdc") return "Not enough cash.";
+  return "Couldn't place it.";
+}
+
+async function notifyCopy(j: CopyJob, ok: boolean, title: string, body: string, takeId: string | null) {
+  const { error } = await db.from("notifications").insert({
+    profile_id: j.profile_id, kind: ok ? "copy_done" : "copy_skipped", take_id: takeId, title, body: body.slice(0, 300),
+    data: { job: j.id, handle: j.handle, trader: j.trader_id }, dedupe_key: j.id,
+  });
+  if (error && error.code !== "23505") console.error("copy notify", error.message);
+}
+
+async function endJob(j: CopyJob, status: "done" | "skipped" | "failed" | "queued", reason: string | null, takeId: string | null = null) {
+  dbCheck((await db.from("copy_jobs").update({ status, reason: reason?.slice(0, 200) ?? null, result_take: takeId, updated_at: new Date().toISOString() }).eq("id", j.id)).error);
+}
+
+/** The basket for an X call, built once and shared by every copier (its draft id), or null. */
+async function callDraft(call: { post_id: string; handle: string; url: string; text: string; claim: string; draft_id: string | null; basket: string | null }): Promise<string | null> {
+  if (call.basket === "no_clean_exposure") return null;
+  if (call.draft_id) return call.draft_id;
+  const secret = await botSecretValue();
+  const r = await fetch(`${env("SUPABASE_URL")}/functions/v1/source/drafts`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-bot-secret": secret },
+    body: JSON.stringify({
+      claim: call.claim, risk: "high", origin: "x", origin_ref: `call:${call.post_id}`,
+      context: `Auto-copied from @${call.handle}`.slice(0, 80),
+      source: { text: call.text.slice(0, 2000), url: call.url, label: `@${call.handle} on X`.slice(0, 60), kind: "x" },
+    }),
+    signal: AbortSignal.timeout(40_000),
+  });
+  if (!r.ok) throw new Error(`drafts ${r.status}`);
+  const out = await r.json() as { verdict?: string; id?: string };
+  const basket = out.verdict === "basket" && out.id ? "basket" : "no_clean_exposure";
+  await db.from("x_calls").update({ basket, draft_id: basket === "basket" ? out.id : null }).eq("post_id", call.post_id);
+  return basket === "basket" ? out.id! : null;
+}
+
+/** The copier's own copy of a call's basket (the take they'll post). */
+async function copierDraft(sharedId: string, j: CopyJob): Promise<string> {
+  const { data: d, error } = await db.from("take_drafts").select("claim, risk, horizon, legs, summary, source_url, source_label, source_kind").eq("id", sharedId).single();
+  dbCheck(error);
+  const ref = `copy:${j.id}`;
+  const { data: had } = await db.from("take_drafts").select("id").eq("origin", "x").eq("origin_ref", ref).maybeSingle();
+  if (had) return had.id as string;
+  const abc = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  for (let i = 0; i < 3; i++) {
+    const id = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => abc[b % abc.length]).join("");
+    const { error: e } = await db.from("take_drafts").insert({ id, ...d, origin: "x", origin_ref: ref, context: `Auto-copied from @${j.handle}`.slice(0, 80) });
+    if (!e) return id;
+    if (e.code !== "23505") dbCheck(e);
+  }
+  throw new Error("draft id collisions");
+}
+
+async function runJob(j: CopyJob): Promise<"done" | "skipped" | "failed" | "queued"> {
+  const { data: g } = await db.from("agent_grants").select("*").eq("profile_id", j.profile_id).maybeSingle();
+  const grant = g as Grant | null;
+  const who: Who = grant?.x_user_id ? { x: grant.x_user_id } : { imessage: grant?.imessage ?? "" };
+  const label = j.kind === "x_call" ? `@${j.handle}` : "a trader you copy";
+
+  // Still copying, auto-copy still on, and under the daily cap for this account?
+  const settings = j.kind === "x_call"
+    ? (await db.from("x_follows").select("auto, auto_daily").eq("profile_id", j.profile_id).eq("handle", j.handle!).maybeSingle()).data
+    : (await db.from("trader_follows").select("auto, auto_daily").eq("profile_id", j.profile_id).eq("trader_id", j.trader_id!).maybeSingle()).data;
+  if (!settings?.auto) { await endJob(j, "skipped", "Auto-copy is off."); return "skipped"; }
+  const { data: today } = await db.rpc("copies_today", { p_profile: j.profile_id, p_handle: j.handle, p_trader: j.trader_id });
+  if (Number(today) >= settings.auto_daily) {
+    const why = `Daily cap of ${settings.auto_daily} reached.`;
+    await endJob(j, "skipped", why);
+    await notifyCopy(j, false, `Skipped a copy of ${label}`, why, null);
+    return "skipped";
+  }
+  if (!grant || grant.revoked_at) {
+    const why = skipReason("not_linked", {});
+    await endJob(j, "skipped", why);
+    await notifyCopy(j, false, `Skipped a copy of ${label}`, why, null);
+    return "skipped";
+  }
+
+  let t: TradeReq;
+  let claim: string | null = null;
+  if (j.kind === "x_call") {
+    const { data: call } = await db.from("x_calls").select("post_id, handle, url, text, claim, posted_at, draft_id, basket").eq("post_id", j.post_id!).maybeSingle();
+    if (!call?.claim) { await endJob(j, "skipped", "Not a call."); return "skipped"; }
+    if (Date.now() - new Date(call.posted_at).getTime() > COPY_MAX_AGE_MS) { await endJob(j, "skipped", "The call was too old to copy."); return "skipped"; }
+    const shared = await callDraft(call as never);
+    if (!shared) { await endJob(j, "skipped", "No clean way to trade that call."); return "skipped"; }
+    claim = call.claim;
+    t = { who, surface: "copy", ref: `copy:${j.id}`, action: "post", wait: false, takeId: null, draftId: await copierDraft(shared, j), usd: Number(j.usd), bps: null, side: "back", autoCopy: true };
+  } else {
+    const { data: take } = await db.from("takes").select("claim, status").eq("id", j.source_take!).maybeSingle();
+    if (take?.status !== "live") { await endJob(j, "skipped", "The take isn't live."); return "skipped"; }
+    claim = take.claim;
+    t = { who, surface: "copy", ref: `copy:${j.id}`, action: "back", wait: false, takeId: j.source_take, draftId: null, usd: Number(j.usd), bps: null, side: "back" };
+  }
+
+  try {
+    const r = await executeTrade(t, grant);
+    if (r.status === "failed") throw new Error("trade failed");
+    const takeId = (r.take_id as string | null) ?? null;
+    await endJob(j, "done", null, takeId);
+    await notifyCopy(j, true, `Auto-copied ${label}`, `${money(Number(j.usd))} on "${claim}"`, takeId);
+    return "done";
+  } catch (e) {
+    if (e instanceof HttpError && e.status < 500) {
+      const why = skipReason(e.code, e.extra);
+      await endJob(j, "skipped", why);
+      await notifyCopy(j, false, `Skipped a copy of ${label}`, why, null);
+      return "skipped";
+    }
+    console.error("copy job", j.id, e instanceof Error ? e.message : e);
+    if (j.attempts < 2) { await endJob(j, "queued", null); return "queued"; }
+    await endJob(j, "failed", "Couldn't place it.");
+    await notifyCopy(j, false, `Couldn't copy ${label}`, "Couldn't place it.", null);
+    return "failed";
+  }
+}
+
+async function copyRun() {
+  const { data, error } = await db.rpc("claim_copy_jobs", { p_limit: 10 });
+  dbCheck(error);
+  const jobs = (data ?? []) as CopyJob[];
+  const deadline = Date.now() + 100_000;
+  const tally = { ran: 0, done: 0, skipped: 0, failed: 0, requeued: 0 };
+  for (const j of jobs) {
+    // Out of time: back in the queue for the next minute.
+    if (Date.now() > deadline) { await endJob(j, "queued", null); tally.requeued++; continue; }
+    tally.ran++;
+    const r = await runJob(j).catch(async (e) => { console.error("copy job", e); await endJob(j, "queued", null).catch(() => {}); return "queued" as const; });
+    if (r === "queued") tally.requeued++; else tally[r]++;
+  }
+  return json(200, tally);
+}
+
 async function positions(b: Record<string, unknown>) {
   const who = readWho(b.who);
   check(who, "invalid_who");
@@ -515,7 +792,21 @@ Deno.serve(async (req) => {
       if (m === "DELETE") return await revokeGrant(profile);
     }
     if (route === "links" && arg && m === "GET") return await peekLink(arg);
-    if (m === "POST" && ["links", "whois", "trades", "positions", "takes", "score"].includes(route ?? "")) {
+    if (route === "copies") {
+      const { profile } = await requireUser(req);
+      const [, , , kind, key] = parts.slice(i >= 0 ? i : 0);
+      if (m === "GET" && !arg) return await listCopies(profile);
+      if (arg === "x" && kind) {
+        if (m === "PUT") return await putXCopy(profile, kind.toLowerCase(), await body());
+        if (m === "DELETE") return await deleteCopy(profile, "x", kind.toLowerCase());
+      }
+      if (arg === "trader" && kind) {
+        if (m === "PUT") return await putTraderCopy(profile, kind, await body());
+        if (m === "DELETE") return await deleteCopy(profile, "trader", kind);
+      }
+      void key;
+    }
+    if (m === "POST" && ["links", "whois", "trades", "positions", "takes", "score", "copy", "copy-run"].includes(route ?? "")) {
       await requireBot(req);
       const b = await body();
       if (route === "links") return await makeLink(b);
@@ -524,6 +815,8 @@ Deno.serve(async (req) => {
       if (route === "positions") return await positions(b);
       if (route === "takes") return await takeInfo(b);
       if (route === "score") return await score(b);
+      if (route === "copy") return await botCopy(b);
+      if (route === "copy-run") return await copyRun();
     }
     return json(404, { error: "not_found" });
   } catch (e) {

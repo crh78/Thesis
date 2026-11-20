@@ -1,6 +1,6 @@
 # Takes from what you read, and copying X accounts
 
-Share articles and X posts into Thesis, and copy X accounts. Built: the share sheet and **one-tap copy** (an account's calls become takes you approve). Not built: auto-copy. X posts come through **Apify** for now.
+Share articles and X posts into Thesis, and copy X accounts. Built: the share sheet, **one-tap copy** (an account's calls become takes you approve) and **auto-copy** (below). X posts come through **Apify** for now.
 
 ## Share sheet → a take
 
@@ -20,6 +20,16 @@ The native extension needs the App Store (phase 3); until then the public share 
 
 Tables (`migrations/0032_sources_and_x_copy.sql`): `x_accounts`, `x_follows`, `x_calls`, service role only. Cron and secrets: `migrations/0033_x_poll_cron.sql`.
 
+## Auto-copy
+
+Copy trading (`migrations/0061_copy_trading.sql`, `functions/agent`): Thesis trades for you when someone you copy makes a call, within your trading-by-text limits.
+
+- **Settings:** per X account you copy, an Auto-copy switch, $ per call (default $20) and a daily cap (default 3). Copying a **Thesis trader** (`trader_follows`) auto-backs each new take of theirs. Managed through `GET/PUT/DELETE /agent/copies…` (the web app's Copy trading tab) and the X bot's "copy".
+- **Queue:** a new call (`x_calls` with a claim) from an auto-copied account queues a `copy_jobs` row per auto-copier who turned it on before the post; a copied trader's take going live queues a back. Only calls posted after auto-copy was turned on.
+- **Runner:** pg_cron calls `POST /agent/copy-run` every minute (with the Vault's `bot_secret`), only when something is queued. Each call's basket is built once (`x_calls.draft_id`, risk high) and copied for each copier; each copy posts as the copier's own take (`takes.auto_copy`: out of the feeds, on profiles and positions) through the agent's trade path (surface `copy`, keyed on the job). Skipped: auto-copy off, daily cap reached, trading by text off, over a limit, no clean basket, a call over 45 minutes old. Each result notifies the copier (`copy_done` / `copy_skipped`).
+- **Polling:** every 15 minutes for accounts someone auto-copies, hourly for the rest (each Apify run has a minimum charge).
+- **No exits:** X posts don't say when someone sells, so a copied position runs until you sell it (or 365 days).
+
 ## Setup
 
 - **Apify token** in the Vault as `apify_token` (or `APIFY_TOKEN` as a function secret). To replace it: `select vault.update_secret((select id from vault.secrets where name = 'apify_token'), '<token>');`. Without one, copying a new account answers "isn't switched on yet".
@@ -29,5 +39,5 @@ Tables (`migrations/0032_sources_and_x_copy.sql`): `x_accounts`, `x_follows`, `x
 
 ## Not built
 
-- **Auto-copy** (buying for you when a call lands, within your limits): would trade through the `agent` function and its session signer (built, used by the X and iMessage bots, surface `copy`).
+
 - **Track records of X accounts' own posts**: dropped (owner's decision 2026-11-19, too costly). "@yourthesisxyz score @handle" shows the in-app record of the Thesis account that links that X account instead (`apps/x`).
