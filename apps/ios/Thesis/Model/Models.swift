@@ -192,6 +192,9 @@ struct Take: Identifiable, Hashable {
     var closedAt: Date? = nil
     /// When its result became final.
     var settledAt: Date? = nil
+    /// Bets against its basket ("crypto sucks" over BTC/ETH/SOL): agreeing (Trade) is short every
+    /// pick, fading is long. `backs`/`fades`/`ret` are already from the agreeing side's view.
+    var inverted = false
 
     var tag: String { "\(risk.short) · \(isOpen ? "OPEN" : "CLOSED")" }
     var backingShare: Double { Double(backs) / Double(max(1, backs + fades)) }
@@ -219,8 +222,11 @@ struct Take: Identifiable, Hashable {
     /// The take with its status from the on-chain receipt (fork mode), which is fresher than the
     /// feed's copy. Older receipts say only "open" or "settled", and have no `closedAt`.
     func updated(with receipt: ForkReceipt?) -> Take {
-        guard let receipt, receipt.onChain, let status = receipt.status.flatMap(TakeStatus.init(rawValue:)) else { return self }
+        guard let receipt, receipt.onChain else { return self }
         var t = self
+        // The chain's word on which side agrees, once a fork API sends it.
+        if let inverted = receipt.inverted { t.inverted = inverted }
+        guard let status = receipt.status.flatMap(TakeStatus.init(rawValue:)) else { return t }
         t.status = status
         if let at = receipt.closedAt { t.closedAt = Date(timeIntervalSince1970: at) }
         // Settled with no sale: it ran its year, and settled at the end of it.
@@ -516,4 +522,6 @@ struct BuiltBasket {
     var noExposureReason: String?
     /// Why an edit didn't do what was asked ("NVIDIA isn't available in the US yet.").
     var note: String? = nil
+    /// The take bets against these picks: agreeing with it is short every one.
+    var inverted = false
 }

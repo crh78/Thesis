@@ -103,6 +103,11 @@ private struct BuyPanel: View {
 
     private var take: Take { intent.take }
     private var side: Side { intent.side }
+    /// The take bets against its basket: a trade (agreeing) is short every pick, a fade long.
+    /// Sides stay the button's meaning; the fork API turns them into on-chain ones.
+    private var inverted: Bool { current.inverted }
+    /// This trade is short the picks: a fade, or agreeing with a take against them.
+    private var shortsPicks: Bool { (side == .fade) != inverted }
     private var tooSmall: Bool { amount < app.minTrade }
     /// Fork mode: the program's fee (the config account's rate, from the fork API) comes out of
     /// the wallet on top of the trade.
@@ -140,7 +145,8 @@ private struct BuyPanel: View {
     private var current: Take { take.updated(with: app.isOnFork ? receipt : nil) }
     private var legs: [Leg] {
         // On the fork the receipt says what can be faded; off it, the take's own fade notes do.
-        let base = side == .back || app.isOnFork ? take.legs : take.legs.filter(\.canFade)
+        // A take against its basket only holds picks that can be shorted, so either side gets all of them.
+        let base = side == .back || inverted || app.isOnFork ? take.legs : take.legs.filter(\.canFade)
         return base.filter { forkLeftOut[$0.name] == nil }
     }
     private var excluded: [Leg] { take.legs.filter { !legs.contains($0) } }
@@ -171,7 +177,11 @@ private struct BuyPanel: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("\(side.title) \(take.author.name)'s take")
                             .font(.geist(26, .bold))
-                        Text(side == .back
+                        Text(inverted
+                             ? (side == .back
+                                ? "You're short this basket at today's prices. You win if these fall."
+                                : "You're long this basket. You win if \(take.author.name) is wrong and these rise. Fades are public, so the group will see it.")
+                             : side == .back
                              ? "You get the same basket at today's prices."
                              : "You win if \(take.author.name) is wrong. Fades are public, so the group will see it.")
                             .font(.geist(14))
@@ -217,7 +227,8 @@ private struct BuyPanel: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(side == .back ? "What you're buying" : "What you're betting")
+                    Text(inverted ? (side == .back ? "What you're shorting" : "What you're buying")
+                         : side == .back ? "What you're buying" : "What you're betting")
                         .font(.geist(13, .medium))
                         .foregroundStyle(Palette.muted)
                     AllocationBar(legs: legs, height: 6, excludedWeight: excluded.reduce(0) { $0 + $1.weight })
@@ -238,14 +249,14 @@ private struct BuyPanel: View {
                                         Text(predictionLine(p))
                                             .font(.geist(12)).foregroundStyle(Palette.muted)
                                             .accessibilityIdentifier("prediction-\(leg.name)")
-                                    } else if side == .fade, let how = leg.fadeHow {
+                                    } else if shortsPicks, let how = leg.fadeHow {
                                         Text(how).font(.geist(12)).foregroundStyle(Palette.muted)
                                     }
                                 }
                                 Spacer()
                                 Text(Fmt.usd(amount * leg.weight / total, cents: true)).font(.mono(13, .semibold))
                             }
-                            .frame(minHeight: side == .fade ? 46 : 38)
+                            .frame(minHeight: shortsPicks ? 46 : 38)
                         }
                         ForEach(excluded) { leg in
                             Hairline()

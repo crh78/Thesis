@@ -83,8 +83,9 @@ struct SocialAPI: Sendable {
     }
 
     /// Changes a basket the way `ask` says ("add AMD", "less crypto"), ~2 s.
-    func editBasket(claim: String, risk: Risk, legs: [Leg], ask: String) async throws -> BuiltBasket {
+    func editBasket(claim: String, risk: Risk, legs: [Leg], ask: String, inverted: Bool = false) async throws -> BuiltBasket {
         var body = Self.builderBody(claim, risk)
+        body["inverted"] = inverted
         body["mode"] = "edit"
         body["ask"] = ask
         body["legs"] = Self.builderLegs(legs)
@@ -92,8 +93,10 @@ struct SocialAPI: Sendable {
     }
 
     /// Same picks at a new risk: only the cash (low) or leveraged (high) pick changes. Instant.
-    func adjustBasketRisk(claim: String, risk: Risk, legs: [Leg]) async throws -> BuiltBasket {
+    /// `inverted`: the basket bets against its picks; sent back so the builder keeps that framing.
+    func adjustBasketRisk(claim: String, risk: Risk, legs: [Leg], inverted: Bool = false) async throws -> BuiltBasket {
         var body = Self.builderBody(claim, risk)
+        body["inverted"] = inverted
         body["mode"] = "risk"
         body["legs"] = Self.builderLegs(legs)
         return try await takeBuilder(body)
@@ -322,6 +325,8 @@ struct NewTake: Encodable {
     let horizon = "12mo"
     let tags: [String]
     let legs: [NewLeg]
+    /// Bets against its basket: the author's buy-in (and every agree) is short each pick.
+    let inverted: Bool
     /// Keep the take hidden from everyone else until its on-chain buy-in confirms. Always true:
     /// the app only runs on the fork (the server makes every take `posting` anyway).
     let awaitChain = true
@@ -333,6 +338,7 @@ struct NewTake: Encodable {
         self.topic = guess.topic
         self.tags = guess.tags
         self.risk = draft.risk.serverValue
+        self.inverted = draft.inverted
         self.legs = legs.map {
             NewLeg(name: $0.name, kind: $0.kind, weight: $0.weight, why: $0.why, slot: $0.slot, fadeHow: $0.fadeHow,
                    assetId: $0.assetID)
@@ -387,12 +393,15 @@ struct BuiltBasketDTO: Decodable {
     let reason: String?
     let legs: [BuiltLegDTO]
     let note: String?
+    /// The take bets against these picks (missing on older builders: false).
+    let inverted: Bool?
 
     var basket: BuiltBasket {
         BuiltBasket(legs: legs.enumerated().map { $1.leg(slot: $0) },
                     summary: summary,
                     noExposureReason: verdict == "no_clean_exposure" ? (reason ?? "Nothing you can buy tracks this closely enough yet.") : nil,
-                    note: note)
+                    note: note,
+                    inverted: inverted ?? false)
     }
 }
 
@@ -591,6 +600,9 @@ struct TakeDTO: Decodable {
     /// Its result is final (on-chain), and when. Missing on older backends.
     let settled: Bool?
     let settledAt: Date?
+    /// Bets against its basket; `backs`/`fades`/`ret` are from the agreeing side. Missing on
+    /// older backends (false).
+    let inverted: Bool?
 
     var take: Take {
         Take(id: id, author: author.person, claim: claim, topic: topic,
@@ -601,7 +613,7 @@ struct TakeDTO: Decodable {
              moneyIn: moneyIn, history: history.count > 1 ? history : [0, 0], tags: tags,
              posting: status == "posting", source: source,
              status: settled == true || settledAt != nil ? .settled : closedAt != nil ? .closed : .open,
-             closedAt: closedAt, settledAt: settledAt)
+             closedAt: closedAt, settledAt: settledAt, inverted: inverted ?? false)
     }
 }
 

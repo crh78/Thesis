@@ -245,7 +245,15 @@ struct TakeRow: View {
                                 .frame(width: 130, height: 36)
                         }
 
-                        AllocationBar(legs: take.legs)
+                        if take.inverted {
+                            // Betting against this basket: agreeing is short every pick.
+                            HStack(spacing: 8) {
+                                AgainstBadge()
+                                AllocationBar(legs: take.legs)
+                            }
+                        } else {
+                            AllocationBar(legs: take.legs)
+                        }
                     }
                     .contentShape(Rectangle())
                 }

@@ -24,6 +24,15 @@ struct TakeDraft: Identifiable, Codable {
     /// Saved as a draft: when, and whose (the handle), so each account sees its own.
     var savedAt: Date? = nil
     var owner: String? = nil
+    /// Backs `inverted`; optional so drafts saved before it still decode. Use `inverted`.
+    var bettingAgainst: Bool? = nil
+
+    /// The builder framed the take against its basket ("crypto sucks" over BTC/ETH/SOL): posting
+    /// buys in short every pick.
+    var inverted: Bool {
+        get { bettingAgainst ?? false }
+        set { bettingAgainst = newValue }
+    }
 
     var buildKey: String {
         [claim.trimmingCharacters(in: .whitespacesAndNewlines), risk.rawValue, seed?.id ?? ""]
@@ -483,6 +492,7 @@ struct BuildingView: View {
             draft.legs = basket.legs
             draft.summary = basket.summary
             draft.noExposureReason = basket.noExposureReason
+            draft.inverted = basket.inverted
             draft.builtFor = draftNow.buildKey
             withAnimation(.smooth) {
                 built = true
@@ -576,6 +586,21 @@ struct BasketView: View {
                 }
                 .padding(.top, 18)
 
+                if draft.inverted {
+                    // The take is against these picks: posting shorts every one.
+                    VStack(spacing: 6) {
+                        AgainstBadge(title: "Betting against")
+                        Text("You're short these. Your take gains when they fall.")
+                            .font(.geist(13))
+                            .foregroundStyle(Palette.text)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 14)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("basket-against")
+                }
+
                 Picker("Risk", selection: $draft.risk) {
                     ForEach(Risk.allCases) { Text("\($0.rawValue) risk").tag($0) }
                 }
@@ -604,7 +629,7 @@ struct BasketView: View {
                             Button {
                                 withAnimation(.snappy) { selected = selected == leg.id ? nil : leg.id }
                             } label: {
-                                LegExplainRow(leg: leg)
+                                LegExplainRow(leg: leg, short: draft.inverted)
                                     .contentShape(.rect(cornerRadius: 20))
                             }
                             .buttonStyle(.plain)
@@ -652,7 +677,7 @@ struct BasketView: View {
             Task { await riskChanged() }
         }
         .sheet(isPresented: $adding) {
-            AssetPickerView(legs: legs) { asset in change(BasketMath.adding(asset, to: legs)) }
+            AssetPickerView(legs: legs, shortOnly: draft.inverted) { asset in change(BasketMath.adding(asset, to: legs)) }
         }
         .alert(
             leftOutAsk.map { $0.legs.count == 1 ? "1 pick can't be bought right now" : "\($0.legs.count) picks can't be bought right now" } ?? "",
@@ -687,7 +712,9 @@ struct BasketView: View {
                 } else {
                     // In the bar, not at the end of the list: there it showed through the glass
                     // buttons whenever the basket was long.
-                    Text("You buy in to post. Once it's live, the take is locked for good.")
+                    Text(draft.inverted
+                         ? "You buy in betting these fall. Once it's live, the take is locked for good."
+                         : "You buy in to post. Once it's live, the take is locked for good.")
                         .font(.geist(12))
                         .foregroundStyle(Palette.muted)
                         .frame(maxWidth: .infinity)
@@ -792,6 +819,7 @@ extension BasketView {
                     draft.edited = true
                     selected = nil
                 }
+                draft.inverted = basket.inverted
                 if let summary = basket.summary { draft.summary = summary }
             }
             rebuildNote = basket.note
@@ -819,6 +847,7 @@ extension BasketView {
             } else if !basket.legs.isEmpty {
                 withAnimation(.snappy) {
                     draft.legs = basket.legs
+                    draft.inverted = basket.inverted
                     if let summary = basket.summary { draft.summary = summary }
                 }
                 draft.builtFor = draft.buildKey
@@ -887,6 +916,8 @@ private struct WeightSheet: View {
 
 private struct LegExplainRow: View {
     let leg: Leg
+    /// The take bets against its picks: this one is held short (a prediction: its other side).
+    var short = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -896,6 +927,12 @@ private struct LegExplainRow: View {
                     Text("\(Int(leg.weight))%").font(.mono(14, .semibold)).frame(width: 40, alignment: .leading)
                     Text(leg.name).font(.geist(15, .semibold))
                     Spacer(minLength: 4)
+                    if short {
+                        Text(leg.predictionSide != nil ? leg.fadeHow ?? "Short" : "Short")
+                            .font(.geist(12, .semibold))
+                            .foregroundStyle(Palette.down)
+                            .accessibilityIdentifier("leg-short")
+                    }
                     Text(leg.kind).font(.geist(12)).foregroundStyle(Palette.muted)
                 }
                 Text(leg.why)

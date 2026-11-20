@@ -269,6 +269,9 @@ struct AssetRow: View {
 /// "+ Add a pick": search everything you can buy and add one to the basket.
 struct AssetPickerView: View {
     let legs: [Leg]
+    /// The take bets against its basket: only picks that can be shorted (or a prediction's
+    /// other side bought) fit.
+    var shortOnly = false
     let onPick: (Asset) -> Void
 
     @Environment(AppState.self) private var app
@@ -284,14 +287,16 @@ struct AssetPickerView: View {
                 Section {
                     ForEach(results) { asset in
                         let inBasket = BasketMath.contains(asset, in: legs)
+                        let cantShort = shortOnly && !asset.canShort
                         Button {
                             onPick(asset)
                             dismiss()
                         } label: {
-                            AssetRow(asset: asset, trailingNote: inBasket ? "In your basket" : nil)
+                            AssetRow(asset: asset, trailingNote: inBasket ? "In your basket" : cantShort ? "Can't short" : nil)
+                                .opacity(cantShort ? 0.55 : 1)
                         }
                         .buttonStyle(.plain)
-                        .disabled(inBasket || !asset.available)
+                        .disabled(inBasket || !asset.available || cantShort)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing) {
@@ -299,7 +304,13 @@ struct AssetPickerView: View {
                         }
                     }
                 } header: {
-                    Text(query.isEmpty ? "Most traded" : "Results").font(.geist(13, .semibold))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(query.isEmpty ? "Most traded" : "Results").font(.geist(13, .semibold))
+                        if shortOnly {
+                            Text("Your take is betting against its picks, so only ones you can short fit.")
+                                .font(.geist(12)).foregroundStyle(Palette.muted)
+                        }
+                    }
                 }
                 if results.isEmpty && !searching && !query.isEmpty {
                     ContentUnavailableView.search(text: query).listRowBackground(Color.clear)

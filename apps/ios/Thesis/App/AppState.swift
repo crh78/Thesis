@@ -1054,15 +1054,22 @@ final class AppState {
 
     /// Changes the draft's basket the way `ask` says ("add AMD", "less crypto"). Offline: "add X" /
     /// "remove X" against the mock assets.
+    /// Sends back whether the basket bets against its picks, so the builder keeps that framing.
     func editBasket(_ draft: TakeDraft, legs: [Leg], ask: String) async throws -> BuiltBasket {
-        guard let api else { return MockData.edit(legs, ask: ask) }
-        return try await api.editBasket(claim: draft.claim, risk: draft.risk, legs: legs, ask: ask)
+        guard let api else {
+            var basket = MockData.edit(legs, ask: ask)
+            basket.inverted = draft.inverted
+            return basket
+        }
+        return try await api.editBasket(claim: draft.claim, risk: draft.risk, legs: legs, ask: ask, inverted: draft.inverted)
     }
 
     /// The same picks at the draft's (new) risk: only the cash or leveraged pick changes.
     func adjustRisk(_ draft: TakeDraft, legs: [Leg]) async throws -> BuiltBasket {
-        guard let api else { return BuiltBasket(legs: MockData.adjust(legs, risk: draft.risk), summary: nil, noExposureReason: nil) }
-        return try await api.adjustBasketRisk(claim: draft.claim, risk: draft.risk, legs: legs)
+        guard let api else {
+            return BuiltBasket(legs: MockData.adjust(legs, risk: draft.risk), summary: nil, noExposureReason: nil, inverted: draft.inverted)
+        }
+        return try await api.adjustBasketRisk(claim: draft.claim, risk: draft.risk, legs: legs, inverted: draft.inverted)
     }
 
     // MARK: Assets
@@ -1180,6 +1187,8 @@ final class AppState {
         var take: Take
         if let api {
             take = try await api.post(NewTake(draft: draft, legs: legs))
+            // A `social` function from before inverted takes doesn't echo it back.
+            if draft.inverted { take.inverted = true }
             // Credit where it came from. Not worth failing the post over: it just shows without it.
             if let source = draft.source {
                 do {
@@ -1193,7 +1202,7 @@ final class AppState {
             take = Take(id: UUID().uuidString, author: me, claim: draft.claim.trimmingCharacters(in: .whitespacesAndNewlines),
                         topic: TopicGuess(claim: draft.claim, legs: legs).topic, risk: draft.risk,
                         age: "now", since: Date.now.formatted(.dateTime.month(.abbreviated).day()), ret: 0, legs: legs, backs: 0, fades: 0, comments: 0, moneyIn: 0,
-                        history: [0, 0], tags: [])
+                        history: [0, 0], tags: [], inverted: draft.inverted)
         }
         forYou.insert(take, at: 0)
         myTakes.insert(take, at: 0)
